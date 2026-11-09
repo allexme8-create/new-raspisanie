@@ -13,7 +13,7 @@ const state={
   classes:[], teacherNames:[], rooms:[],
   curClass:null, curTeacher:null, teacherQuery:"",
   classSel:DEF_DAY, teacherSel:DEF_DAY, favDay:DEF_DAY,
-  classPickerOpen:true, teacherPickerOpen:true,
+  classPickerOpen:true, teacherPickerOpen:true, roomOnlyFree:false,
   bellSchedule:null, secondShiftClasses:[],
   updatedAt:null
 };
@@ -440,59 +440,73 @@ function renderTeacherSchedule(){
   out.innerHTML=html||`<div class="nodata">${sel==="all"?"Уроков не найдено.":"В этот день уроков нет 🎉"}</div>`;
 }
 
-function slotInfo(day,lesson){
+// Занятость определяется по реальному времени, а не по номеру урока:
+// одинаковые номера в разных сменах обычно не совпадают по времени.
+function roomOccupancyAt(now){
+  const day=DAYS[now.getDay()-1];
+  const minute=now.getHours()*60+now.getMinutes()+now.getSeconds()/60;
   const byRoom=Object.create(null);
+  if(!day)return {day,byRoom};
   for(const cls of state.classes){
-    for(const entry of classLessonEntries(cls,day).filter(item=>item.lesson===Number(lesson))){
+    for(const entry of classLessonEntries(cls,day)){
       const t=state.teachers?.grid[day]?.[entry.raw]?.[cls];
       const s=state.subjects?.grid[day]?.[entry.raw]?.[cls];
       const rooms=uniqueRooms(t?.rooms||[],s?.rooms||[]);
-      if(!rooms.length) continue;
+      if(!rooms.length)continue;
+      const period=bellPeriod(entry.timeShift,day,entry.lesson);
+      const start=clockMinutes(period?.start),end=clockMinutes(period?.end);
+      const valid=start!==null&&end!==null&&start<end;
       const subj=s&&!SERVICE.has(s.raw)?cellLabel(s):"";
       const teach=t&&!SERVICE.has(t.raw)?cellLabel(t):"";
       const who=[subj,teach].filter(Boolean).join(" · ");
       for(const room of rooms){
-        const key=roomKey(room),occupants=byRoom[key]??(byRoom[key]=[]);
-        const existing=occupants.find(item=>item.cls===cls);
-        if(existing){ if(who&&!existing.who.includes(who))existing.who.push(who); }
-        else occupants.push({cls,who:who?[who]:[]});
+        const info=byRoom[roomKey(room)]??(byRoom[roomKey(room)]={active:[],next:null,unknown:false});
+        if(!valid){info.unknown=true;continue;}
+        if(start<=minute&&minute<end){
+          const existing=info.active.find(item=>item.cls===cls);
+          if(existing){if(who&&!existing.who.includes(who))existing.who.push(who);}
+          else info.active.push({cls,who:who?[who]:[]});
+        }else if(start>minute&&(info.next===null||start<info.next.minutes)){
+          info.next={minutes:start,label:period.start};
+        }
       }
     }
   }
-  return byRoom;
+  return {day,byRoom};
 }
 function renderRoomsArea(){
   const box=$("roomsArea");
   if(!hasData()){ box.innerHTML=noData(); return; }
-  const defDay=TODAY>=0?DAYS[TODAY]:"Пн";
   box.innerHTML=`
     <div class="rooms-controls">
-      <label>День <select id="roomDay">${DAYS.map(d=>`<option ${d===defDay?'selected':''}>${d}</option>`).join("")}</select></label>
-      <label>Урок <select id="roomLesson">${Array.from({length:13},(_,i)=>`<option value="${i+1}">${i+1}-й урок</option>`).join("")}</select></label>
-      <label class="chk"><input type="checkbox" id="onlyFree"> только свободные</label>
+      <label class="chk"><input type="checkbox" id="onlyFree" ${state.roomOnlyFree?'checked':''}> только свободные</label>
     </div>
-    <div class="rooms-summary" id="roomsSummary"></div>
+    <div class="rooms-summary" id="roomsSummary" aria-live="polite"></div>
     <div class="rooms-grid" id="roomsGrid"></div>`;
-  ["roomDay","roomLesson","onlyFree"].forEach(id=>$(id).onchange=renderRooms);
+  $("onlyFree").onchange=()=>{state.roomOnlyFree=$("onlyFree").checked;renderRooms();};
   renderRooms();
 }
 function renderRooms(){
-  const day=$("roomDay").value, lesson=+$("roomLesson").value, onlyFree=$("onlyFree").checked;
-  const busy=slotInfo(day,lesson);
-  const free=state.rooms.filter(r=>!busy[roomKey(r)]);
-  const shiftTimes=["1","2"].filter(shiftHasClasses).map(shift=>{
-    const period=bellPeriod(shift,day,lesson);
-    return period?`${shift}-я смена: ${period.start}–${period.end}`:"";
-  }).filter(Boolean);
-  const timeLabel=shiftTimes.length?` · ${shiftTimes.join(" · ")}`:"";
-  $("roomsSummary").innerHTML=`${DAY_FULL[day]}, ${lesson}-й урок${timeLabel}: <b>свободно ${free.length}</b> из ${state.rooms.length} кабинетов`;
-  const list=onlyFree?free:state.rooms;
-  $("roomsGrid").innerHTML=list.map(r=>{
-    const occupants=busy[roomKey(r)]||[];
-    if(!occupants.length) return `<div class="room free"><div class="rnum">${esc(r)}</div><div class="rstatus">Свободен</div></div>`;
-    const occ=occupants.map(o=>`${esc(o.cls)}${o.who.length?": "+esc(o.who.join(" · ")):""}`).join("<br>");
-    return `<div class="room busy"><div class="rnum">${esc(r)}</div><div class="rstatus">Занят</div><div class="rocc">${occ}</div></div>`;
-  }).join("")||`<div class="nodata">Нет данных по кабинетам.</div>`;
+  const summary=$("roomsSummary"),grid=$("roomsGrid");
+  if(!summary||!grid)return;
+  const now=new Date(),{day,byRoom}=roomOccupancyAt(now);
+  const status=room=>{
+    const info=byRoom[roomKey(room)];
+    return info?.active.length?"busy":info?.unknown?"unknown":"free";
+  };
+  const free=state.rooms.filter(r=>status(r)==="free");
+  const unknown=state.rooms.filter(r=>status(r)==="unknown").length;
+  const dayLabel=day?DAY_FULL[day]:"Воскресенье";
+  const clock=now.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"});
+  summary.innerHTML=`${esc(dayLabel)}, ${esc(clock)}: <b>свободно ${free.length}</b> из ${state.rooms.length} кабинетов${unknown?` · неизвестно: ${unknown}`:""}`;
+  const list=state.roomOnlyFree?free:state.rooms;
+  grid.innerHTML=list.map(r=>{
+    const info=byRoom[roomKey(r)],roomStatus=status(r);
+    if(roomStatus==="unknown")return `<div class="room unknown"><div class="rnum">${esc(r)}</div><div class="rstatus">Нет данных о времени</div></div>`;
+    if(roomStatus==="free")return `<div class="room free"><div class="rnum">${esc(r)}</div><div class="rstatus">Свободен${info?.next?` до ${esc(info.next.label)}`:""}</div></div>`;
+    const occ=info.active.map(o=>`${esc(o.cls)}${o.who.length?": "+esc(o.who.join(" · ")):""}`).join("<br>");
+    return `<div class="room busy"><div class="rnum">${esc(r)}</div><div class="rstatus">Занят</div><div class="rocc">${occ}</div>${info.unknown?'<div class="rocc">Для других занятий время не указано</div>':""}</div>`;
+  }).join("")||`<div class="nodata">${state.roomOnlyFree&&state.rooms.length?"Нет свободных кабинетов.":"Нет данных по кабинетам."}</div>`;
 }
 
 function renderFavArea(){
@@ -557,8 +571,8 @@ $("reloadBtn").onclick=()=>loadSchedule();
 
 /* Обновляем сетку каждые 5 минут, а таймер урока — каждые 30 секунд. */
 setInterval(()=>{ if(!document.hidden) loadSchedule(); }, 5*60*1000);
-setInterval(()=>{ if(!document.hidden) renderCurrentLesson(); }, 30*1000);
-document.addEventListener("visibilitychange",()=>{ if(!document.hidden){loadSchedule();renderCurrentLesson();} });
+setInterval(()=>{ if(!document.hidden){renderCurrentLesson();renderRooms();} }, 30*1000);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden){loadSchedule();renderCurrentLesson();renderRooms();} });
 
 /* Запуск */
 setupMobileNav();

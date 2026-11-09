@@ -105,6 +105,8 @@ select{padding:9px 12px;border:1px solid var(--line);border-radius:10px;font-siz
 .room .rstatus{font-size:12px;margin-top:2px}
 .room.free{background:var(--ok-soft);border-color:var(--ok-line)}
 .room.free .rstatus{color:var(--ok);font-weight:700}
+.room.unknown{background:var(--warn-soft);border-color:#f6dbb7}
+.room.unknown .rstatus{color:var(--warn);font-weight:700}
 .room.busy{background:var(--busy-soft);border-color:#f2cccc}
 .room.busy .rstatus{color:var(--busy);font-weight:700}
 .room .rocc{font-size:11px;color:#5a4040;margin-top:4px;line-height:1.35}
