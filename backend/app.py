@@ -15,6 +15,8 @@ Backend «Расписание лицея».
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import re
@@ -47,6 +49,7 @@ DATA_DIR.mkdir(exist_ok=True)
 UPLOAD_DIR.mkdir(exist_ok=True)
 
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+ADMIN_TOKEN_SECRET = (os.environ.get("ADMIN_TOKEN_SECRET") or ADMIN_PASSWORD).encode("utf-8")
 TOKEN_TTL = 12 * 60 * 60  # 12 часов
 
 app = FastAPI(title="Расписание лицея", docs_url="/api/docs")
@@ -61,7 +64,7 @@ state: dict = {
     "updated_at": None,
 }
 
-_tokens: dict[str, float] = {}  # token -> expiry ts
+_revoked_tokens: set[str] = set()
 
 
 def _save_state() -> None:
@@ -102,22 +105,41 @@ _restore_state_if_needed()
 
 
 # ------------------------------------------------------------------ авторизация
+def _create_token() -> str:
+    """Подписанный токен не зависит от памяти отдельного worker-процесса."""
+    expiry = str(int(time.time() + TOKEN_TTL))
+    payload = f"{expiry}.{secrets.token_hex(16)}"
+    signature = hmac.new(ADMIN_TOKEN_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
+
+
 def _check_token(token: str) -> bool:
-    expiry = _tokens.get(token, 0)
-    if time.time() < expiry:
-        return True
-    _tokens.pop(token, None)
-    return False
+    if not token or token in _revoked_tokens:
+        return False
+    try:
+        expiry, nonce, signature = token.split(".", 2)
+        if not expiry.isdecimal() or not nonce or len(signature) != 64:
+            return False
+        payload = f"{expiry}.{nonce}"
+        expected = hmac.new(ADMIN_TOKEN_SECRET, payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        return time.time() < int(expiry) and hmac.compare_digest(signature, expected)
+    except (ValueError, OverflowError):
+        return False
 
 
 def require_admin(
     authorization: str = Header(default=""),
+    x_admin_token: str = Header(default="", alias="X-Admin-Token"),
     schedule_admin_token: str = Cookie(default=""),
 ) -> None:
     # Веб-клиент использует Bearer-заголовок; cookie — запасной вариант для
     # reverse proxy, которые могут удалять Authorization из браузерных запросов.
-    token = authorization.removeprefix("Bearer ").strip() or schedule_admin_token
-    if not token or not _check_token(token):
+    tokens = (
+        authorization.removeprefix("Bearer ").strip(),
+        x_admin_token.strip(),
+        schedule_admin_token,
+    )
+    if not any(_check_token(token) for token in tokens if token):
         raise HTTPException(status_code=401, detail="Требуется вход администратора")
 
 
@@ -237,8 +259,7 @@ def get_status() -> dict:
 def login(body: LoginBody, response: Response, request: Request) -> dict:
     if body.password != ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="Неверный пароль")
-    token = secrets.token_hex(24)
-    _tokens[token] = time.time() + TOKEN_TTL
+    token = _create_token()
     forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
     response.set_cookie(
         key="schedule_admin_token",
@@ -256,10 +277,16 @@ def login(body: LoginBody, response: Response, request: Request) -> dict:
 def admin_logout(
     response: Response,
     authorization: str = Header(default=""),
+    x_admin_token: str = Header(default="", alias="X-Admin-Token"),
     schedule_admin_token: str = Cookie(default=""),
 ) -> dict:
-    token = authorization.removeprefix("Bearer ").strip() or schedule_admin_token
-    _tokens.pop(token, None)
+    token = (
+        authorization.removeprefix("Bearer ").strip()
+        or x_admin_token.strip()
+        or schedule_admin_token
+    )
+    if token:
+        _revoked_tokens.add(token)
     response.delete_cookie(key="schedule_admin_token", path="/")
     return {"ok": True}
 

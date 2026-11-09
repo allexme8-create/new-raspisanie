@@ -11,7 +11,10 @@ const KIND_LABEL={teachers:"Учителя",subjects:"Предметы"};
 async function api(path,{method="GET",body,form}={}){
   const requestToken=token;
   const opts={method,headers:{},credentials:"same-origin"};
-  if(requestToken) opts.headers.Authorization=`Bearer ${requestToken}`;
+  if(requestToken){
+    opts.headers.Authorization=`Bearer ${requestToken}`;
+    opts.headers["X-Admin-Token"]=requestToken;
+  }
   if(form){ opts.body=form; }
   else if(body!==undefined){ opts.headers["Content-Type"]="application/json"; opts.body=JSON.stringify(body); }
   const resp=await fetch(path,opts);
@@ -34,7 +37,7 @@ function logout(callApi=true){
   token=""; localStorage.removeItem(TOKEN_KEY);
   showPanel(false);
   if(callApi===true){
-    if(oldToken)fetch("/api/admin/logout",{method:"POST",credentials:"same-origin",headers:{Authorization:`Bearer ${oldToken}`}}).catch(()=>{});
+    if(oldToken)fetch("/api/admin/logout",{method:"POST",credentials:"same-origin",headers:{Authorization:`Bearer ${oldToken}`,"X-Admin-Token":oldToken}}).catch(()=>{});
     toast("Вы вышли из админ-панели");
   }
 }
