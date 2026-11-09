@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from fastapi import Cookie, Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
+from fastapi import Cookie, Depends, FastAPI, File, Header, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -256,17 +256,16 @@ def get_status() -> dict:
 
 # --------------------------------------------------------------------- админ API
 @app.post("/api/admin/login")
-def login(body: LoginBody, response: Response, request: Request) -> dict:
+def login(body: LoginBody, response: Response) -> dict:
     if body.password != ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="Неверный пароль")
     token = _create_token()
-    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
     response.set_cookie(
         key="schedule_admin_token",
         value=token,
         httponly=True,
-        secure=request.url.scheme == "https" or forwarded_proto == "https",
-        samesite="lax",
+        secure=True,
+        samesite="none",
         max_age=TOKEN_TTL,
         path="/",
     )
@@ -429,12 +428,18 @@ def admin_delete(kind: str, _: None = Depends(require_admin)) -> dict:
 # ----------------------------------------------------------------- статика/страницы
 @app.get("/", include_in_schema=False)
 def index() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html")
+    return FileResponse(
+        FRONTEND_DIR / "index.html",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/admin", include_in_schema=False)
 def admin_page() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "admin.html")
+    return FileResponse(
+        FRONTEND_DIR / "admin.html",
+        headers={"Cache-Control": "no-store, max-age=0"},
+    )
 
 
 @app.get("/healthz", include_in_schema=False)
