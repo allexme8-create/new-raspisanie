@@ -184,3 +184,22 @@ footer a{color:var(--muted)}
   .search{font-size:16px} /* против авто-зума iOS */
   select{font-size:16px}
 }
+
+/* Конструктор расписания */
+.planner-toggle{width:auto;margin-left:auto}
+.planner-actions{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.planner-actions .btn{width:auto}
+#plannerRoot details{border-top:1px solid var(--line);padding:12px 0}
+#plannerRoot summary{font-weight:700;cursor:pointer}
+.planner-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr));gap:12px}
+.planner-form{display:flex;gap:8px;flex-wrap:wrap;align-items:end;margin:10px 0}
+.planner-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:600;color:var(--muted);flex:1 1 115px;min-width:0}
+.planner-form input,.planner-form select{width:100%;min-width:0;border:1px solid var(--line);border-radius:10px;background:#fff;padding:9px;font:inherit;color:var(--ink);font-size:14px}
+.planner-form .btn{width:auto;min-height:38px}
+.planner-list{list-style:none;margin:8px 0;padding:0}
+.planner-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;overflow-wrap:anywhere}
+.planner-remove{flex:none;border:0;background:var(--busy-soft);color:var(--busy);border-radius:8px;padding:7px 10px;cursor:pointer}
+.planner-placements{max-height:320px;overflow:auto}
+.planner-check{padding:12px;border-radius:10px;background:#f4f5fa;font-size:13px;overflow-wrap:anywhere}
+.planner-check ul{padding-left:20px}
+@media(max-width:640px){.planner-actions .btn{flex:1 1 120px}.planner-form input,.planner-form select{font-size:16px}.planner-toggle{margin-left:0}}

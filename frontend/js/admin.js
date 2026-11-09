@@ -24,7 +24,7 @@ async function api(path,{method="GET",body,form}={}){
   }
   let data=null;
   try{ data=await resp.json(); }catch(e){}
-  if(!resp.ok) throw new Error(data?.detail||`Ошибка ${resp.status}`);
+  if(!resp.ok) throw new Error(typeof data?.detail==="string"?data.detail:Array.isArray(data?.detail)?data.detail.map(x=>x.msg).join("; "):`Ошибка ${resp.status}`);
   return data;
 }
 

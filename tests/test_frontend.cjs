@@ -169,6 +169,18 @@ vm.runInContext(`
 assert.match(element("currentLesson").innerHTML, /№ 7 \(1-я смена\)/);
 assert.match(element("currentLesson").innerHTML, /№ 1 \(2-я смена\)/);
 
+// Конструктор явно помечает локальные номера, даже в разреженной сетке.
+vm.runInContext(`
+  state.teachers.numbering="local";
+  state.subjects.numbering="local";
+  state.teachers.grid.Пн["1"]["5а"].names=["Мария Ивановна"];
+  collectTeachers();
+  globalThis.localNumberingResult={global:classUsesGlobalShiftGrid("6а"),teachers:state.teacherNames};
+  delete state.teachers.numbering; delete state.subjects.numbering;
+`, context);
+assert.equal(context.localNumberingResult.global, false);
+assert.ok(context.localNumberingResult.teachers.includes("Мария Ивановна"));
+
 // Выбор сворачивает список, а кнопка «Сменить» открывает его снова.
 const classButton = {dataset: {cls: "6а"}};
 const teacherButton = {dataset: {t: "Иванова ИИ"}};

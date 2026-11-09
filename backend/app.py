@@ -22,6 +22,7 @@ import os
 import re
 import secrets
 import time
+import threading
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
@@ -33,6 +34,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import github_backup
+import planner
 from schedule_parser import (
     ParseError,
     parse_bell_schedule_file,
@@ -62,6 +64,7 @@ state: dict = {
     "bell_schedule": None,
     "second_shift_classes": [],
     "updated_at": None,
+    "planner": None,
 }
 
 _revoked_tokens: set[str] = set()
@@ -79,7 +82,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -252,6 +255,72 @@ def get_status() -> dict:
         "ready": bool(state["teachers"] or state["subjects"]),
         "updated_at": state["updated_at"],
     }
+
+
+# Черновик хранится отдельно от опубликованного расписания.
+_planner_lock = threading.Lock()
+
+
+def _planner_project() -> planner.Project:
+    return planner.Project.model_validate(state.get("planner") or {})
+
+
+@app.get("/api/admin/planner")
+def planner_get(_: None = Depends(require_admin)) -> dict:
+    project = _planner_project()
+    return {"project": project.model_dump(), "issues": planner.issues(project, state.get("bell_schedule"), complete=True)}
+
+
+@app.put("/api/admin/planner")
+def planner_save(project: planner.Project, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        if project.revision != _planner_project().revision:
+            raise HTTPException(status_code=409, detail="Черновик изменён в другом окне. Обновите конструктор перед сохранением.")
+        errors = planner.references(project)
+        if errors:
+            raise HTTPException(status_code=422, detail=" ".join(errors[:5]))
+        project.revision += 1
+        state["planner"] = project.model_dump()
+        _save_state()
+        return {"project": project.model_dump(), "issues": planner.issues(project, state.get("bell_schedule"), complete=True)}
+
+
+class PlannerAction(BaseModel):
+    revision: int = Field(ge=0)
+
+
+@app.post("/api/admin/planner/generate")
+def planner_generate(body: PlannerAction, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        project = _planner_project()
+        if body.revision != project.revision:
+            raise HTTPException(status_code=409, detail="Черновик изменён в другом окне. Обновите конструктор.")
+        generated, error = planner.generate(project, state.get("bell_schedule"))
+        if generated is None:
+            raise HTTPException(status_code=422, detail=error)
+        generated.revision += 1
+        state["planner"] = generated.model_dump()
+        _save_state()
+        return {"project": generated.model_dump(), "issues": planner.issues(generated, state.get("bell_schedule"), complete=True)}
+
+
+@app.post("/api/admin/planner/publish")
+def planner_publish(body: PlannerAction, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        project = _planner_project()
+        if body.revision != project.revision:
+            raise HTTPException(status_code=409, detail="Черновик изменён в другом окне. Обновите конструктор.")
+        errors = planner.issues(project, state.get("bell_schedule"), complete=True)
+        if not project.loads:
+            errors.append("Добавьте учебную нагрузку.")
+        if errors:
+            raise HTTPException(status_code=422, detail=" ".join(errors[:5]))
+        state["teachers"], state["subjects"] = planner.public_grids(project)
+        state["second_shift_classes"] = [c.name for c in project.classes if c.shift == 2]
+        state["files"]["teachers"] = state["files"]["subjects"] = "Конструктор расписания"
+        _touch_updated_at()
+        _save_state()
+        return {"updated_at": state["updated_at"]}
 
 
 # --------------------------------------------------------------------- админ API

@@ -157,7 +157,7 @@ function collectTeachers(){
       for(const cls in slot){ const cell=slot[cls];
         for(const n of cell.names){
           if(SERVICE.has(n)) continue;
-          if(!/^[А-ЯЁ][а-яё-]+(\s+[А-ЯЁ]{1,3}\.?)?$/.test(n)) continue;
+          if(state.teachers.numbering!=="local"&&!/^[А-ЯЁ][а-яё-]+(\s+[А-ЯЁ]{1,3}\.?)?$/.test(n)) continue;
           set.add(n);
         }
       }
@@ -222,6 +222,7 @@ function secondShiftGridOffset(day){
   return Math.max(0,...Object.keys(first).map(Number).filter(Number.isFinite));
 }
 function classUsesGlobalShiftGrid(cls){
+  if(state.teachers?.numbering==="local"||state.subjects?.numbering==="local")return false;
   if(!state.bellSchedule?.shifts?.["2"])return false;
   let hasGlobalRows=false,hasLocalRows=false;
   for(const day of DAYS){
