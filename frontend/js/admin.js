@@ -9,12 +9,16 @@ let token=localStorage.getItem(TOKEN_KEY)||"";
 const KIND_LABEL={teachers:"Учителя",subjects:"Предметы"};
 
 async function api(path,{method="GET",body,form}={}){
-  const opts={method,headers:{}};
-  if(token) opts.headers.Authorization=`Bearer ${token}`;
+  const requestToken=token;
+  const opts={method,headers:{},credentials:"same-origin"};
+  if(requestToken) opts.headers.Authorization=`Bearer ${requestToken}`;
   if(form){ opts.body=form; }
   else if(body!==undefined){ opts.headers["Content-Type"]="application/json"; opts.body=JSON.stringify(body); }
   const resp=await fetch(path,opts);
-  if(resp.status===401){ logout(false); throw new Error("Сессия истекла — войдите заново"); }
+  if(resp.status===401){
+    if(requestToken&&requestToken===token) logout(false);
+    throw new Error("Сессия истекла — войдите заново");
+  }
   let data=null;
   try{ data=await resp.json(); }catch(e){}
   if(!resp.ok) throw new Error(data?.detail||`Ошибка ${resp.status}`);
@@ -26,9 +30,13 @@ function showPanel(on){
   $("adminPanel").classList.toggle("hidden",!on);
 }
 function logout(callApi=true){
+  const oldToken=token;
   token=""; localStorage.removeItem(TOKEN_KEY);
   showPanel(false);
-  if(callApi===true) toast("Вы вышли из админ-панели");
+  if(callApi===true){
+    if(oldToken)fetch("/api/admin/logout",{method:"POST",credentials:"same-origin",headers:{Authorization:`Bearer ${oldToken}`}}).catch(()=>{});
+    toast("Вы вышли из админ-панели");
+  }
 }
 function fmtDate(iso){
   try{ return new Date(iso).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"}); }

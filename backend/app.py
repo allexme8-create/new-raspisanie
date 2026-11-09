@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
+from fastapi import Cookie, Depends, FastAPI, File, Header, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -110,8 +110,13 @@ def _check_token(token: str) -> bool:
     return False
 
 
-def require_admin(authorization: str = Header(default="")) -> None:
-    token = authorization.removeprefix("Bearer ").strip()
+def require_admin(
+    authorization: str = Header(default=""),
+    schedule_admin_token: str = Cookie(default=""),
+) -> None:
+    # Веб-клиент использует Bearer-заголовок; cookie — запасной вариант для
+    # reverse proxy, которые могут удалять Authorization из браузерных запросов.
+    token = authorization.removeprefix("Bearer ").strip() or schedule_admin_token
     if not token or not _check_token(token):
         raise HTTPException(status_code=401, detail="Требуется вход администратора")
 
@@ -229,12 +234,34 @@ def get_status() -> dict:
 
 # --------------------------------------------------------------------- админ API
 @app.post("/api/admin/login")
-def login(body: LoginBody) -> dict:
+def login(body: LoginBody, response: Response, request: Request) -> dict:
     if body.password != ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="Неверный пароль")
     token = secrets.token_hex(24)
     _tokens[token] = time.time() + TOKEN_TTL
+    forwarded_proto = request.headers.get("x-forwarded-proto", "").split(",", 1)[0].strip()
+    response.set_cookie(
+        key="schedule_admin_token",
+        value=token,
+        httponly=True,
+        secure=request.url.scheme == "https" or forwarded_proto == "https",
+        samesite="lax",
+        max_age=TOKEN_TTL,
+        path="/",
+    )
     return {"token": token}
+
+
+@app.post("/api/admin/logout")
+def admin_logout(
+    response: Response,
+    authorization: str = Header(default=""),
+    schedule_admin_token: str = Cookie(default=""),
+) -> dict:
+    token = authorization.removeprefix("Bearer ").strip() or schedule_admin_token
+    _tokens.pop(token, None)
+    response.delete_cookie(key="schedule_admin_token", path="/")
+    return {"ok": True}
 
 
 @app.get("/api/admin/status")
