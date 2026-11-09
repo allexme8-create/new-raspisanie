@@ -59,31 +59,62 @@ const app = fs.readFileSync("frontend/js/app.js", "utf8");
 vm.runInContext(app, context, { filename: "frontend/js/app.js" });
 
 vm.runInContext(`
-  state.classes = ["5а","6а"];
-  state.teachers = {grid:{Пн:{"1":{"5а":{
-    raw:"Иванова ИИ, Петрова ПП (101, 102, 101)",
-    names:["Иванова ИИ","Петрова ПП"], rooms:["101","102","101"]
-  }}}}};
-  state.subjects = {grid:{Пн:{"1":{"5а":{
-    raw:"Алгебра, Геометрия (101, 102)",
-    names:["Алгебра","Геометрия"], rooms:["101","102"]
-  }}}}};
-  state.secondShiftClasses = ["5а"];
+  state.classes = ["5а","6а","7а"];
+  state.teachers = {grid:{Пн:{
+    "1":{"5а":{
+      raw:"Иванова ИИ, Петрова ПП (101, 102, 101)",
+      names:["Иванова ИИ","Петрова ПП"], rooms:["101","102","101"]
+    },"7а":{raw:"Иванова ИИ",names:["Иванова ИИ"],rooms:[]}},
+    "6":{"6а":{raw:"Классный час",names:["Классный час"],rooms:[]}},
+    "7":{"6а":{raw:"Иванова ИИ (301)",names:["Иванова ИИ"],rooms:["301"]}},
+    "8":{"6а":{raw:"Иванова ИИ",names:["Иванова ИИ"],rooms:[]}},
+    "9":{"6а":{raw:"Иванова ИИ",names:["Иванова ИИ"],rooms:[]}},
+    "10":{"6а":{raw:"Иванова ИИ",names:["Иванова ИИ"],rooms:[]}},
+    "11":{"6а":{raw:"Иванова ИИ",names:["Иванова ИИ"],rooms:[]}},
+    "12":{"6а":{raw:"Иванова ИИ",names:["Иванова ИИ"],rooms:[]}}
+  }}};
+  state.subjects = {grid:{Пн:{
+    "1":{"5а":{
+      raw:"Алгебра, Геометрия (101, 102)",
+      names:["Алгебра","Геометрия"], rooms:["101","102"]
+    },"7а":{raw:"Биология",names:["Биология"],rooms:[]}},
+    "6":{"6а":{raw:"Классный час",names:["Классный час"],rooms:[]}},
+    "7":{"6а":{raw:"История (301)",names:["История"],rooms:["301"]}},
+    "8":{"6а":{raw:"География",names:["География"],rooms:[]}},
+    "9":{"6а":{raw:"Физика",names:["Физика"],rooms:[]}},
+    "10":{"6а":{raw:"Русский",names:["Русский"],rooms:[]}},
+    "11":{"6а":{raw:"Литература",names:["Литература"],rooms:[]}},
+    "12":{"6а":{raw:"Биология",names:["Биология"],rooms:[]}}
+  }}};
+  state.secondShiftClasses = ["5а","6а"];
   state.bellSchedule = {shifts:{
-    "1":{"Пн":{"1":{"start":"08:25","end":"09:05"},"7":{"start":"13:45","end":"14:25"}}},
-    "2":{"Пн":{"1":{"start":"13:45","end":"14:25"}}}
+    "1":{"Пн":{"1":{"start":"08:25","end":"09:05"},"6":{"start":"13:00","end":"13:40"},"7":{"start":"13:45","end":"14:25"}}},
+    "2":{"Пн":{"1":{"start":"13:45","end":"14:25"},"2":{"start":"14:35","end":"15:15"},"3":{"start":"15:35","end":"16:15"},"4":{"start":"16:25","end":"17:05"},"5":{"start":"17:15","end":"17:55"},"6":{"start":"18:05","end":"18:45"}}}
   }};
 
-  const ivan = teacherDayRows("Иванова ИИ","Пн")[0];
-  const petrova = teacherDayRows("Петрова ПП","Пн")[0];
+  const ivan = teacherDayRows("Иванова ИИ","Пн").find(row=>row.cls==="5а");
+  const petrova = teacherDayRows("Петрова ПП","Пн").find(row=>row.cls==="5а");
+  const mappedRows = teacherDayRows("Иванова ИИ","Пн").filter(row=>row.cls==="6а");
+  const allIvanRows = teacherDayRows("Иванова ИИ","Пн");
+  const shiftEntries = classLessonEntries("6а","Пн");
+  const week={innerHTML:""};
+  renderWeekInto(week,"6а");
+  state.curClass="6а"; state.classSel=0; renderClassBody();
+  const classSchedule=$("classBody").innerHTML;
   collectRooms();
   const roomSlots = slotInfo("Пн", "1");
   globalThis.testResult = {
-    ivan:{subj:ivan.subj,rooms:ivan.rooms},
+    ivan:{subj:ivan.subj,rooms:ivan.rooms,l:ivan.l,time:ivan.time},
     petrova:{subj:petrova.subj,rooms:petrova.rooms},
+    mapped:mappedRows.map(row=>({l:row.l,subj:row.subj,time:row.time,shift:row.shift})),
+    pre:shiftEntries[0],
+    split:teacherShiftGroupHTML(allIvanRows,"Понедельник"),
+    week:week.innerHTML,
+    classSchedule,
     classCell:cellFor("5а","Пн","1"),
     rooms:state.rooms,
     occupancy:Object.values(roomSlots).map(items=>items.length),
+    roomText:Object.values(roomSlots).flat().flatMap(item=>item.who),
     secondShiftTime:lessonTime("5а","Пн",1)
   };
   renderCurrentLesson();
@@ -92,11 +123,36 @@ vm.runInContext(`
 const result = context.testResult;
 assert.equal(result.ivan.subj, "Алгебра");
 assert.deepEqual(Array.from(result.ivan.rooms), ["101"]);
+assert.equal(result.ivan.l, 1);
+assert.equal(result.ivan.time, "13:45–14:25");
 assert.equal(result.petrova.subj, "Геометрия");
 assert.deepEqual(Array.from(result.petrova.rooms), ["102"]);
+assert.deepEqual(Array.from(result.mapped.map(row=>row.l)), [1,2,3,4,5,6]);
+assert.deepEqual(Array.from(result.mapped.map(row=>row.time)), ["13:45–14:25","14:35–15:15","15:35–16:15","16:25–17:05","17:15–17:55","18:05–18:45"]);
+assert.equal(result.pre.lesson, 6);
+assert.equal(result.pre.displayLesson, "КЧ");
+assert.equal(result.pre.time, "13:00–13:40");
+assert.match(result.classSchedule, /уроков: 7/);
+assert.match(result.classSchedule, /13:45–14:25/);
+assert.match(result.classSchedule, /18:05–18:45/);
+assert.match(result.split, /Понедельник · 1-я смена/);
+assert.match(result.split, /Понедельник · 2-я смена/);
+assert.match(result.week, /<td>до смены<\/td>/);
+assert.match(result.week, /18:05–18:45/);
 assert.equal((result.classCell.match(/class="room-badge"/g) || []).length, 2);
-assert.deepEqual(Array.from(result.rooms), ["101", "102"]);
-assert.deepEqual(Array.from(result.occupancy), [1, 1]);
+assert.doesNotMatch(result.classCell, /\(101|\(102/);
+assert.deepEqual(Array.from(result.rooms), ["101", "102", "301"]);
+assert.deepEqual(Array.from(result.occupancy), [1, 1, 1]);
+assert.ok(Array.from(result.roomText).every(text=>!/\(101|\(102|\(301/.test(text)));
+// Две строки с локальным номером 6 не должны теряться при поиске кабинетов.
+vm.runInContext(`
+  state.teachers.grid.Пн["6"]["6а"].rooms = ["401"];
+  state.teachers.grid.Пн["12"]["6а"].rooms = ["402"];
+  globalThis.sixthRooms = Object.keys(slotInfo("Пн", 6)).sort();
+  state.teachers.grid.Пн["6"]["6а"].rooms = [];
+  state.teachers.grid.Пн["12"]["6а"].rooms = [];
+`, context);
+assert.deepEqual(Array.from(context.sixthRooms), ["401", "402"]);
 assert.equal(result.secondShiftTime, "13:45–14:25");
 assert.match(element("currentLesson").innerHTML, /урок № 1/);
 assert.match(element("currentLesson").innerHTML, /осталось 35 мин/);

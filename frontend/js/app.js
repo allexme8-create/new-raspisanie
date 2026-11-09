@@ -188,14 +188,19 @@ function favBtn(kind,name){
   const on=favs[kind].includes(name);
   return `<button class="fav-btn ${on?'on':''}" data-kind="${kind}" data-name="${esc(name)}">${on?"★ В избранном":"☆ В избранное"}</button>`;
 }
+function cellLabel(cell){
+  if(!cell)return "";
+  const names=Array.isArray(cell.names)?cell.names.filter(Boolean):[];
+  return names.length?names.join(", "):(cell.raw||"");
+}
 function cellFor(cls,day,lesson){
   const t=state.teachers?.grid[day]?.[lesson]?.[cls];
   const s=state.subjects?.grid[day]?.[lesson]?.[cls];
-  const tRaw=t?.raw||"", sRaw=s?.raw||"";
-  if(!tRaw && !sRaw) return "";
+  const tText=cellLabel(t),sText=cellLabel(s);
+  if(!tText && !sText) return "";
   let title,sub="";
-  if(sRaw){ title=sRaw; if(tRaw && !SERVICE.has(sRaw) && !SERVICE.has(tRaw)) sub=tRaw; }
-  else title=tRaw;
+  if(sText){ title=sText; if(tText && !SERVICE.has(sText) && !SERVICE.has(tText)) sub=tText; }
+  else title=tText;
   const rooms=uniqueRooms(t?.rooms||[],s?.rooms||[]);
   return `<div class="lc ${SERVICE.has(title)?'svc':''}">
     <div class="subj">${esc(title)}</div>
@@ -203,39 +208,109 @@ function cellFor(cls,day,lesson){
     ${rooms.length?`<div class="rb">${rooms.map(r=>`<span class="room-badge">${esc(r)}</span>`).join("")}</div>`:""}
   </div>`;
 }
+function secondShiftGridOffset(day){
+  const first=state.bellSchedule?.shifts?.["1"]?.[day]||{};
+  const secondFirst=bellPeriod("2",day,1);
+  const secondStart=clockMinutes(secondFirst?.start);
+  if(secondStart!==null){
+    for(const [number,period] of Object.entries(first)){
+      const start=clockMinutes(period.start),end=clockMinutes(period.end);
+      if(start!==null&&end!==null&&secondStart>=start&&secondStart<end)return Math.max(0,Number(number)-1);
+    }
+  }
+  return Math.max(0,...Object.keys(first).map(Number).filter(Number.isFinite));
+}
+function classUsesGlobalShiftGrid(cls){
+  if(!state.bellSchedule?.shifts?.["2"])return false;
+  let hasGlobalRows=false,hasLocalRows=false;
+  for(const day of DAYS){
+    const offset=secondShiftGridOffset(day),teacherSlots=state.teachers?.grid[day]||{},subjectSlots=state.subjects?.grid[day]||{};
+    const rawLessons=new Set([...Object.keys(teacherSlots),...Object.keys(subjectSlots)]);
+    for(const raw of rawLessons){
+      const teacher=teacherSlots[raw]?.[cls],subject=subjectSlots[raw]?.[cls];
+      if(!cellLabel(teacher)&&!cellLabel(subject))continue;
+      const number=Number(raw);
+      if(!Number.isFinite(number))continue;
+      if(number>offset)hasGlobalRows=true;
+      // The final row before shift two can contain a class hour; rows before it
+      // indicate that the source already numbers this class from lesson one.
+      if(number<offset-1)hasLocalRows=true;
+    }
+  }
+  return hasGlobalRows&&!hasLocalRows;
+}
+function classLessonEntries(cls,day){
+  const teacherSlots=state.teachers?.grid[day]||{},subjectSlots=state.subjects?.grid[day]||{};
+  const rawLessons=new Set([...Object.keys(teacherSlots),...Object.keys(subjectSlots)]);
+  const isSecondShift=state.secondShiftClasses.includes(cls);
+  const usesGlobalGrid=isSecondShift&&classUsesGlobalShiftGrid(cls);
+  const offset=usesGlobalGrid?secondShiftGridOffset(day):0;
+  const entries=[];
+  for(const raw of rawLessons){
+    const teacher=teacherSlots[raw]?.[cls],subject=subjectSlots[raw]?.[cls];
+    if(!cellLabel(teacher)&&!cellLabel(subject))continue;
+    const rawNumber=Number(raw);
+    if(!Number.isFinite(rawNumber))continue;
+    const beforeSecondShift=usesGlobalGrid&&rawNumber<=offset;
+    const shift=isSecondShift?"2":"1";
+    const timeShift=beforeSecondShift?"1":shift;
+    const lesson=usesGlobalGrid&&!beforeSecondShift?rawNumber-offset:rawNumber;
+    const timePeriod=bellPeriod(timeShift,day,lesson);
+    const special=cellLabel(subject)||cellLabel(teacher);
+    const isClassHour=SERVICE.has(special)&&special==="Классный час";
+    entries.push({
+      raw,lesson,shift,timeShift,
+      time:timePeriod?`${timePeriod.start}–${timePeriod.end}`:"",
+      beforeSecondShift,
+      displayLesson:beforeSecondShift?(isClassHour?"КЧ":"до"):lesson,
+      weekKey:beforeSecondShift?`before:${raw}`:`lesson:${lesson}`,
+      weekLabel:beforeSecondShift?"до смены":String(lesson),
+      order:rawNumber
+    });
+  }
+  return entries.sort((a,b)=>a.order-b.order);
+}
 function pairValueForTeacher(values,index,teacherCount){
   const rooms=uniqueRooms(values||[]);
   return teacherCount>1&&rooms.length===teacherCount?(rooms[index]?[rooms[index]]:[]):rooms;
 }
 function teacherDayRows(name,dayName){
   const rows=[];
-  for(let l=1;l<=13;l++){
-    const slot=state.teachers?.grid[dayName]?.[l]; if(!slot) continue;
-    for(const cls of state.classes){
-      const c=slot[cls];
+  for(const cls of state.classes){
+    const shift=state.secondShiftClasses.includes(cls)?"2":"1";
+    for(const entry of classLessonEntries(cls,dayName)){
+      const c=state.teachers?.grid[dayName]?.[entry.raw]?.[cls];
       if(!c||!c.names.includes(name)) continue;
-      const s=state.subjects?.grid[dayName]?.[l]?.[cls];
+      const s=state.subjects?.grid[dayName]?.[entry.raw]?.[cls];
       const teacherIndex=c.names.indexOf(name), teacherCount=c.names.length;
       const subjectNames=s&&!SERVICE.has(s.raw)?(s.names||[]):[];
       let subj="";
       if(subjectNames.length){
         subj=teacherCount>1&&subjectNames.length===teacherCount
           ?(subjectNames[teacherIndex]||"")
-          :(subjectNames.length===1?subjectNames[0]:(s.raw||subjectNames[0]));
+          :subjectNames.join(", ");
       }
       const teacherRooms=pairValueForTeacher(c.rooms||[],teacherIndex,teacherCount);
       const subjectRooms=pairValueForTeacher(s?.rooms||[],teacherIndex,teacherCount);
-      rows.push({l,cls,subj,rooms:uniqueRooms(teacherRooms,subjectRooms),time:lessonTime(cls,dayName,l)});
+      rows.push({l:entry.lesson,displayLesson:entry.displayLesson,order:entry.order,beforeSecondShift:entry.beforeSecondShift,cls,shift,subj,rooms:uniqueRooms(teacherRooms,subjectRooms),time:entry.time});
     }
   }
-  return rows;
+  return rows.sort((a,b)=>a.shift.localeCompare(b.shift)||a.order-b.order||a.cls.localeCompare(b.cls,"ru"));
 }
 const trowHTML=r=>`<div class="trow">
-  ${lessonMarker(r.l,r.time)}
+  ${lessonMarker(r.displayLesson??r.l,r.time)}
   <span class="tcls">${esc(r.cls)}</span>
   <span class="tsubj">${r.subj?esc(r.subj):'<span class="muted">—</span>'}</span>
   <span class="trooms">${r.rooms.map(x=>`<span class="room-badge">${esc(x)}</span>`).join(" ")||'<span class="muted">без каб.</span>'}</span>
 </div>`;
+function teacherShiftGroupHTML(rows,dayLabel=""){
+  return ["1","2"].map(shift=>{
+    const group=rows.filter(row=>row.shift===shift);
+    if(!group.length)return "";
+    const label=[dayLabel,`${shift}-я смена`].filter(Boolean).join(" · ");
+    return `<h3>${esc(label)}</h3>${group.map(trowHTML).join("")}`;
+  }).join("");
+}
 const dateLabel=di=> di===TODAY
   ? `Сегодня · ${new Date().toLocaleDateString("ru-RU",{weekday:"long",day:"numeric",month:"long"})}`
   : DAY_FULL[DAYS[di]];
@@ -271,24 +346,29 @@ function renderClassBody(){
   if(sel==="week"){ renderWeekInto(out,cls); return; }
   const d=DAYS[sel];
   let rows="",count=0;
-  for(let l=1;l<=13;l++){
-    const c=cellFor(cls,d,l);
+  for(const entry of classLessonEntries(cls,d)){
+    const c=cellFor(cls,d,entry.raw);
     if(!c) continue; count++;
-    rows+=`<div class="lrow">${lessonMarker(l,lessonTime(cls,d,l))}<div class="lcell">${c}</div></div>`;
+    rows+=`<div class="lrow">${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`;
   }
   out.innerHTML=`<p class="date-label"><b>${esc(cls)}</b> · ${dateLabel(sel)} · уроков: ${count}</p>`
     +(rows||`<div class="nodata">В этот день уроков нет 🎉</div>`);
 }
 function renderWeekInto(out,cls){
-  let maxL=0;
-  outer: for(let l=13;l>=1;l--) for(const d of DAYS) if(cellFor(cls,d,l)){ maxL=l; break outer; }
-  if(!maxL){ out.innerHTML=`<div class="nodata">У этого класса нет уроков.</div>`; return; }
+  const entriesByDay=Object.fromEntries(DAYS.map(d=>[d,classLessonEntries(cls,d)]));
+  const rowMap=new Map();
+  for(const entries of Object.values(entriesByDay))for(const entry of entries){
+    if(!rowMap.has(entry.weekKey))rowMap.set(entry.weekKey,{key:entry.weekKey,label:entry.weekLabel,order:entry.order});
+  }
+  const weekRows=[...rowMap.values()].sort((a,b)=>a.order-b.order);
+  if(!weekRows.length){ out.innerHTML=`<div class="nodata">У этого класса нет уроков.</div>`; return; }
   let html=`<div class="week-scroll"><table class="week"><thead><tr><th>Урок</th>`+
     DAYS.map((d,i)=>`<th class="${i===TODAY?'today':''}">${DAY_FULL[d]}</th>`).join("")+`</tr></thead><tbody>`;
-  for(let l=1;l<=maxL;l++){
-    html+=`<tr><td>${l}</td>`+DAYS.map((d,i)=>{
-      const c=cellFor(cls,d,l),time=lessonTime(cls,d,l);
-      return `<td class="${i===TODAY?'today':''}">${c?`${c}${time?`<div class="week-time">${esc(time)}</div>`:""}`:'<span class="dash">—</span>'}</td>`;
+  for(const row of weekRows){
+    html+=`<tr><td>${esc(row.label)}</td>`+DAYS.map((d,i)=>{
+      const entry=entriesByDay[d].find(item=>item.weekKey===row.key);
+      const c=entry?cellFor(cls,d,entry.raw):"";
+      return `<td class="${i===TODAY?'today':''}">${c?`${c}${entry.time?`<div class="week-time">${esc(entry.time)}</div>`:""}`:'<span class="dash">—</span>'}</td>`;
     }).join("")+`</tr>`;
   }
   out.innerHTML=html+`</tbody></table></div>`;
@@ -340,26 +420,29 @@ function renderTeacherSchedule(){
   for(const di of dayIdxs){
     const rows=teacherDayRows(name,DAYS[di]);
     if(!rows.length) continue;
-    html+=`<h3>${DAY_FULL[DAYS[di]]}${di===TODAY?' · <span class="today-mark">сегодня</span>':''}</h3>`+rows.map(trowHTML).join("");
+    const dayLabel=`${DAY_FULL[DAYS[di]]}${di===TODAY?" · сегодня":""}`;
+    html+=teacherShiftGroupHTML(rows,dayLabel);
   }
   out.innerHTML=html||`<div class="nodata">${sel==="all"?"Уроков не найдено.":"В этот день уроков нет 🎉"}</div>`;
 }
 
 function slotInfo(day,lesson){
-  const byRoom={};
+  const byRoom=Object.create(null);
   for(const cls of state.classes){
-    const t=state.teachers?.grid[day]?.[lesson]?.[cls];
-    const s=state.subjects?.grid[day]?.[lesson]?.[cls];
-    const rooms=uniqueRooms(t?.rooms||[],s?.rooms||[]);
-    if(!rooms.length) continue;
-    const subj=s&&!SERVICE.has(s.raw)?s.raw:"";
-    const teach=t&&!SERVICE.has(t.raw)?t.raw:"";
-    const who=[subj,teach].filter(Boolean).join(" · ");
-    for(const room of rooms){
-      const key=roomKey(room),occupants=byRoom[key]??(byRoom[key]=[]);
-      const existing=occupants.find(item=>item.cls===cls);
-      if(existing){ if(who&&!existing.who.includes(who))existing.who.push(who); }
-      else occupants.push({cls,who:who?[who]:[]});
+    for(const entry of classLessonEntries(cls,day).filter(item=>item.lesson===Number(lesson))){
+      const t=state.teachers?.grid[day]?.[entry.raw]?.[cls];
+      const s=state.subjects?.grid[day]?.[entry.raw]?.[cls];
+      const rooms=uniqueRooms(t?.rooms||[],s?.rooms||[]);
+      if(!rooms.length) continue;
+      const subj=s&&!SERVICE.has(s.raw)?cellLabel(s):"";
+      const teach=t&&!SERVICE.has(t.raw)?cellLabel(t):"";
+      const who=[subj,teach].filter(Boolean).join(" · ");
+      for(const room of rooms){
+        const key=roomKey(room),occupants=byRoom[key]??(byRoom[key]=[]);
+        const existing=occupants.find(item=>item.cls===cls);
+        if(existing){ if(who&&!existing.who.includes(who))existing.who.push(who); }
+        else occupants.push({cls,who:who?[who]:[]});
+      }
     }
   }
   return byRoom;
@@ -417,8 +500,8 @@ function renderFavArea(){
     html+=`<h3>🎓 Мои классы</h3>`;
     for(const cls of favs.classes){
       let rows="",count=0;
-      for(let l=1;l<=13;l++){ const c=cellFor(cls,d,l); if(!c)continue; count++;
-        rows+=`<div class="lrow">${lessonMarker(l,lessonTime(cls,d,l))}<div class="lcell">${c}</div></div>`; }
+      for(const entry of classLessonEntries(cls,d)){ const c=cellFor(cls,d,entry.raw); if(!c)continue; count++;
+        rows+=`<div class="lrow">${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`; }
       html+=`<div class="fav-card"><div class="fav-head"><b>${esc(cls)}</b><span class="muted">класс · уроков: ${count}</span>
         <button class="rm-fav" data-kind="classes" data-name="${esc(cls)}">убрать ✕</button></div>
         ${rows||'<div class="muted">В этот день уроков нет 🎉</div>'}</div>`;
@@ -430,7 +513,7 @@ function renderFavArea(){
       const rows=teacherDayRows(name,d);
       html+=`<div class="fav-card"><div class="fav-head"><b>${esc(name)}</b><span class="muted">учитель · уроков: ${rows.length}</span>
         <button class="rm-fav" data-kind="teachers" data-name="${esc(name)}">убрать ✕</button></div>
-        ${rows.map(trowHTML).join("")||'<div class="muted">В этот день уроков нет 🎉</div>'}</div>`;
+        ${teacherShiftGroupHTML(rows)||'<div class="muted">В этот день уроков нет 🎉</div>'}</div>`;
     }
   }
   box.innerHTML=html;
