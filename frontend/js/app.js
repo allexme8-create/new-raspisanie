@@ -13,6 +13,7 @@ const state={
   classes:[], teacherNames:[], rooms:[],
   curClass:null, curTeacher:null, teacherQuery:"",
   classSel:DEF_DAY, teacherSel:DEF_DAY, favDay:DEF_DAY,
+  classPickerOpen:true, teacherPickerOpen:true,
   bellSchedule:null, secondShiftClasses:[],
   updatedAt:null
 };
@@ -325,10 +326,13 @@ function rebuildAll(){
 function renderClassArea(){
   const box=$("classArea");
   if(!hasData()){ box.innerHTML=noData(); return; }
-  box.innerHTML=`<div class="chips">${state.classes.map(c=>
-    `<button class="chip ${c===state.curClass?'active':''}" data-cls="${esc(c)}">${esc(c)}</button>`).join("")}</div>
-    <div id="classPanel"></div>`;
-  box.querySelectorAll("[data-cls]").forEach(b=>b.onclick=()=>{ state.curClass=b.dataset.cls; renderClassArea(); });
+  box.innerHTML=`<div class="mobile-selection ${state.classPickerOpen?"picker-open":""}">
+    <div class="selection-summary"><strong>Класс ${esc(state.curClass||"")}</strong><button class="change-selection" id="changeClass" type="button" aria-expanded="${state.classPickerOpen}">Сменить</button></div>
+    <div class="selection-picker"><div class="chips">${state.classes.map(c=>
+    `<button class="chip ${c===state.curClass?'active':''}" data-cls="${esc(c)}">${esc(c)}</button>`).join("")}</div></div>
+    <div id="classPanel"></div></div>`;
+  $("changeClass").onclick=()=>{ state.classPickerOpen=!state.classPickerOpen; renderClassArea(); };
+  box.querySelectorAll("[data-cls]").forEach(b=>b.onclick=()=>{ state.curClass=b.dataset.cls; state.classPickerOpen=false; renderClassArea(); });
   renderClassPanel();
 }
 function renderClassPanel(){
@@ -371,7 +375,14 @@ function renderWeekInto(out,cls){
       return `<td class="${i===TODAY?'today':''}">${c?`${c}${entry.time?`<div class="week-time">${esc(entry.time)}</div>`:""}`:'<span class="dash">—</span>'}</td>`;
     }).join("")+`</tr>`;
   }
-  out.innerHTML=html+`</tbody></table></div>`;
+  const mobileWeek=DAYS.map((d,i)=>{
+    const rows=entriesByDay[d].map(entry=>{
+      const cell=cellFor(cls,d,entry.raw);
+      return cell?`<div class="lrow">${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${cell}</div></div>`:"";
+    }).join("");
+    return `<section class="mobile-week-day"><h3>${esc(DAY_FULL[d])}${i===TODAY?" · сегодня":""}</h3>${rows||'<p class="muted">Уроков нет</p>'}</section>`;
+  }).join("");
+  out.innerHTML=html+`</tbody></table></div><div class="mobile-week">${mobileWeek}</div>`;
 }
 
 function renderTeacherArea(){
@@ -380,10 +391,12 @@ function renderTeacherArea(){
     box.innerHTML=hasData()?`<div class="nodata">👩‍🏫 Данные расписания учителей пока недоступны.</div>`:noData();
     return;
   }
-  box.innerHTML=`
-    <input class="search" id="teacherSearch" placeholder="🔍 Поиск учителя…" value="${esc(state.teacherQuery)}">
-    <div class="chips wrap" id="teacherChips"></div>
-    <div id="teacherPanel"></div>`;
+  box.innerHTML=`<div class="mobile-selection ${state.teacherPickerOpen?"picker-open":""}">
+    <div class="selection-summary"><strong>${esc(state.curTeacher||"Учитель")}</strong><button class="change-selection" id="changeTeacher" type="button" aria-expanded="${state.teacherPickerOpen}">Сменить</button></div>
+    <div class="selection-picker"><input class="search" id="teacherSearch" placeholder="🔍 Поиск учителя…" value="${esc(state.teacherQuery)}">
+    <div class="chips wrap" id="teacherChips"></div></div>
+    <div id="teacherPanel"></div></div>`;
+  $("changeTeacher").onclick=()=>{ state.teacherPickerOpen=!state.teacherPickerOpen; renderTeacherArea(); if(state.teacherPickerOpen) $("teacherSearch").focus(); };
   const inp=$("teacherSearch");
   const drawChips=()=>{
     const q=inp.value.trim().toLowerCase();
@@ -391,7 +404,7 @@ function renderTeacherArea(){
       .filter(n=>!q||n.toLowerCase().includes(q))
       .map(n=>`<button class="chip ${n===state.curTeacher?'active':''}" data-t="${esc(n)}">${favs.teachers.includes(n)?"★ ":""}${esc(n)}</button>`)
       .join("")||`<span class="muted">Никого не найдено</span>`;
-    $("teacherChips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{ state.curTeacher=b.dataset.t; renderTeacherArea(); });
+    $("teacherChips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{ state.curTeacher=b.dataset.t; state.teacherPickerOpen=false; renderTeacherArea(); });
   };
   inp.oninput=()=>{ state.teacherQuery=inp.value; drawChips(); };
   drawChips();

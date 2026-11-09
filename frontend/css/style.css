@@ -63,6 +63,7 @@ main{max-width:1100px;margin:0 auto;padding:14px 16px 40px}
 .fav-head .rm-fav{margin-left:auto;border:0;background:none;color:var(--muted);cursor:pointer;font-size:12.5px;text-decoration:underline;padding:4px}
 .search{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px;margin-bottom:10px;background:#fff}
 
+.selection-summary,.mobile-week{display:none}
 .week-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin-top:10px}
 table.week{border-collapse:separate;border-spacing:0;width:100%;min-width:820px;font-size:12.5px}
 .week th,.week td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:7px 8px;vertical-align:top;text-align:left}
@@ -154,7 +155,21 @@ footer a{color:var(--muted)}
   main{padding:10px 12px calc(86px + env(safe-area-inset-bottom))}
   .card{padding:12px}
   .stats{width:100%}
-  .week{font-size:11.5px;min-width:640px}
+  .selection-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px}
+  .selection-summary strong{min-width:0;overflow-wrap:anywhere;font-size:16px}
+  .change-selection{flex:none;min-height:40px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--acc);font-weight:700;padding:8px 12px;cursor:pointer}
+  .mobile-selection:not(.picker-open) .selection-picker{display:none}
+  #classArea .selection-picker .chips{flex-wrap:wrap;max-height:190px;overflow-y:auto}
+  .mobile-selection .toolbar{align-items:stretch}
+  .mobile-selection .toolbar .pills{min-width:0;flex-basis:100%}
+  .mobile-selection .pill,.mobile-selection .chip{min-height:40px}
+  .mobile-selection .fav-btn{min-height:40px}
+  #classBody .week-scroll{display:none}
+  .mobile-week{display:block}
+  .mobile-week-day h3{margin:16px 0 8px}
+  .mobile-week-day p{font-size:13px;margin:0}
+  .trow{min-width:0}
+  .tsubj,.trooms{min-width:0;overflow-wrap:anywhere}
   .rooms-grid{grid-template-columns:repeat(auto-fill,minmax(110px,1fr))}
   .trow{grid-template-columns:52px 46px 1fr;font-size:13px}
   .trow .trooms{grid-column:3}

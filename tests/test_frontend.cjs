@@ -24,6 +24,8 @@ function element(id) {
       },
       onclick: null,
       onchange: null,
+      querySelectorAll: () => [],
+      focus: () => {},
     });
   }
   return elements.get(id);
@@ -139,6 +141,8 @@ assert.match(result.split, /Понедельник · 1-я смена/);
 assert.match(result.split, /Понедельник · 2-я смена/);
 assert.match(result.week, /<td>до смены<\/td>/);
 assert.match(result.week, /18:05–18:45/);
+assert.match(result.week, /class="mobile-week"/);
+assert.match(result.week, /class="mobile-week-day"/);
 assert.equal((result.classCell.match(/class="room-badge"/g) || []).length, 2);
 assert.doesNotMatch(result.classCell, /\(101|\(102/);
 assert.deepEqual(Array.from(result.rooms), ["101", "102", "301"]);
@@ -164,5 +168,23 @@ vm.runInContext(`
 `, context);
 assert.match(element("currentLesson").innerHTML, /№ 7 \(1-я смена\)/);
 assert.match(element("currentLesson").innerHTML, /№ 1 \(2-я смена\)/);
+
+// Выбор сворачивает список, а кнопка «Сменить» открывает его снова.
+const classButton = {dataset: {cls: "6а"}};
+const teacherButton = {dataset: {t: "Иванова ИИ"}};
+element("classArea").querySelectorAll = selector => selector === "[data-cls]" ? [classButton] : [];
+element("teacherChips").querySelectorAll = selector => selector === ".chip" ? [teacherButton] : [];
+vm.runInContext(`state.teacherNames=["Иванова ИИ"]; renderClassArea(); renderTeacherArea();`, context);
+classButton.onclick();
+teacherButton.onclick();
+assert.match(element("classArea").innerHTML, /mobile-selection "/);
+assert.match(element("teacherArea").innerHTML, /mobile-selection "/);
+assert.match(element("teacherArea").innerHTML, /Иванова ИИ/);
+assert.match(element("classArea").innerHTML, /aria-expanded="false"/);
+element("changeClass").onclick();
+element("changeTeacher").onclick();
+assert.match(element("classArea").innerHTML, /mobile-selection picker-open/);
+assert.match(element("teacherArea").innerHTML, /mobile-selection picker-open/);
+assert.match(element("teacherArea").innerHTML, /aria-expanded="true"/);
 
 console.log("Frontend behavior OK: paired teachers, unique rooms, shift-specific times, live lesson countdown.");
