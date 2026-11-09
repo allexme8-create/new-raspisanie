@@ -1,0 +1,106 @@
+# 🚀 Публикация расписания на бесплатном хостинге
+
+## Рекомендуемый вариант: PythonAnywhere (бесплатный тариф)
+
+Для этого проекта подготовлен WSGI-адаптер `backend/wsgi.py`. Размещение требует один раз выполнить команды в консоли и указать путь к приложению в настройках сайта. Учетную запись хостинга и действия в её панели должен выполнить владелец.
+
+### 1. Создайте бесплатный сайт
+
+1. Зарегистрируйтесь на [PythonAnywhere](https://www.pythonanywhere.com/).
+2. Откройте вкладку **Web** → **Add a new web app**.
+3. Выберите **Manual configuration** и версию Python **3.11**.
+4. Запишите имя пользователя PythonAnywhere: оно будет частью адреса `https://ИМЯ.pythonanywhere.com`.
+
+### 2. Скачайте проект и установите зависимости
+
+Во вкладке **Consoles** откройте **Bash** и выполните:
+
+```bash
+git clone https://github.com/allexme8-create/new-raspisanie.git
+cd new-raspisanie
+python3.11 -m venv .venv
+. .venv/bin/activate
+pip install -r backend/requirements.txt
+```
+
+Если `git clone` не проходит из-за ограничений доступа, скачайте ZIP репозитория с GitHub, загрузите его через вкладку **Files**, распакуйте в домашнюю папку, затем продолжите с `cd new-raspisanie`.
+
+### 3. Подключите WSGI-приложение
+
+Во вкладке **Web**:
+
+1. В поле **Source code** укажите `/home/ИМЯ/new-raspisanie`.
+2. В поле **Virtualenv** укажите `/home/ИМЯ/new-raspisanie/.venv`.
+3. Откройте ссылку на WSGI configuration file и замените его содержимое следующим кодом. Замените `ИМЯ` на имя пользователя, а пароль — на свой длинный секретный пароль (не используйте пример):
+
+```python
+import os
+import sys
+
+project = "/home/ИМЯ/new-raspisanie"
+if project not in sys.path:
+    sys.path.insert(0, project)
+
+os.environ["ADMIN_PASSWORD"] = "ЗАМЕНИТЕ_НА_СЕКРЕТНЫЙ_ПАРОЛЬ"
+# На PythonAnywhere файлы хранятся на постоянном диске,
+# поэтому BACKUP_GH_TOKEN для резервной копии не требуется.
+
+from backend.wsgi import application
+```
+
+В приложении выберите Python 3.11 и для Web app, и при создании `.venv` — версии должны совпадать.
+
+### 4. Перезапустите и проверьте сайт
+
+Нажмите **Reload** на вкладке **Web**. Откройте `https://ИМЯ.pythonanywhere.com`, затем `https://ИМЯ.pythonanywhere.com/admin`. Войдите с паролем, заданным в WSGI-файле, и загрузите оба файла расписания.
+
+Проверки: `/healthz` должен отвечать `{"ok":true}`, а `/api/status` покажет, загружено ли расписание. Используйте загрузку файлов с устройства: на бесплатном аккаунте исходящие запросы к внешним сайтам могут быть ограничены, поэтому загрузка с Яндекс.Диска может не сработать.
+
+> **Важно:** не публикуйте пароль администратора. Если сайт показывает ошибку, откройте вкладку **Web** → **Log files** и проверьте error log. После изменения кода или WSGI-настроек нажимайте **Reload**.
+
+---
+
+## Альтернатива: Hugging Face Spaces
+
+Hugging Face Spaces тоже поддержан (инструкция ниже), но у бесплатных аккаунтов может сработать ограничение CPU-квоты. В таком случае Space не запускается даже при корректной сборке.
+
+Полностью без командной строки, через GitHub Actions (`.github/workflows/deploy-hf.yml`):
+
+1. Создайте Space: https://huggingface.co/new-space → имя `raspisanie` (маленькими!), SDK **Docker** → Blank, Public.
+2. Создайте HF-токен: https://huggingface.co/settings/tokens → Create new token → **Write**.
+3. Добавьте секреты в GitHub (https://github.com/allexme8-create/new-raspisanie/settings/secrets/actions): `HF_USERNAME` = ваш логин HF, `HF_TOKEN` = токен. Если имя Space отличается от `raspisanie`, добавьте `HF_SPACE_NAME` с точным именем.
+4. GitHub → **Actions** → **🚀 Deploy to Hugging Face Spaces** → **Run workflow**.
+5. В Space откройте **Settings** → **Variables and secrets** и задайте `ADMIN_PASSWORD`, `BACKUP_GH_TOKEN`, `BACKUP_GH_REPO=allexme8-create/new-raspisanie`.
+6. Адрес: `https://ЛОГИН-raspisanie.hf.space`.
+
+Если видите `You've reached your base CPU quota`, повторные перезапуски могут не помочь: это ограничение аккаунта/квоты HF, а не ошибка приложения.
+
+## Альтернатива: Render
+
+Проект содержит `render.yaml`, однако Render может быть недоступен из вашей сети. Если он открывается:
+
+1. Откройте https://render.com и войдите через GitHub.
+2. Нажмите [Deploy to Render](https://render.com/deploy?repo=https://github.com/allexme8-create/new-raspisanie) и примените Blueprint из `render.yaml`.
+3. В **Environment** задайте `ADMIN_PASSWORD` и, если хотите резервную копию в GitHub, `BACKUP_GH_TOKEN`.
+4. После статуса **Live** используйте адрес сервиса Render и страницу `/admin`.
+
+Бесплатный Render может усыплять сервис после периода простоя; первый запрос после сна занимает дольше.
+
+## Запуск на собственном сервере
+
+```bash
+git clone https://github.com/allexme8-create/new-raspisanie.git
+cd new-raspisanie
+docker build -t raspisanie .
+docker run -d -p 8000:8000 \
+  -e PORT=8000 -e ADMIN_PASSWORD="секрет" \
+  -e BACKUP_GH_TOKEN=... -e BACKUP_GH_REPO=allexme8-create/new-raspisanie \
+  -v raspisanie_data:/app/backend/data \
+  --restart unless-stopped raspisanie
+```
+
+## Проверка после деплоя
+
+1. Откройте `/api/status` — пока расписание не загружено администратором: `{"ready":false,...}`.
+2. Откройте `/admin`, войдите и загрузите оба файла расписания. Для проверки можно взять файлы из `samples/`.
+3. Главная страница должна показать расписание; в админке отображается статус резервной копии, если она настроена.

@@ -1,0 +1,23 @@
+# Render Blueprint — деплой «Расписание лицея» в один клик.
+# Render сам соберёт Dockerfile и поднимет сервис.
+services:
+  - type: web
+    name: raspisanie
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /healthz
+    autoDeploy: true          # каждый push в main → сайт сам обновляется
+    envVars:
+      - key: PORT
+        value: "10000"        # Render проксирует именно этот порт
+      # ↓ эти два задаются ВРУЧНУЮ в Dashboard (Environment → Add Environment Variable),
+      #   чтобы секреты не хранились в репозитории:
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: BACKUP_GH_TOKEN
+        sync: false
+      - key: BACKUP_GH_REPO
+        value: allexme8-create/new-raspisanie
+      - key: BACKUP_GH_BRANCH
+        value: schedule-data

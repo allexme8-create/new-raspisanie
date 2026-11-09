@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Администратор · Расписание лицея</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header class="app">
+  <div class="app-inner">
+    <div class="brand">
+      <div class="logo">🛠️</div>
+      <div><h1>Администрирование</h1><p class="sub">загрузка файлов расписания</p></div>
+    </div>
+    <div class="stats">
+      <a class="stat" href="/" style="text-decoration:none">← К расписанию</a>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- Вход -->
+  <section class="card auth-box" id="loginCard">
+    <h2>Вход для администратора</h2>
+    <div id="loginAlert"></div>
+    <form id="loginForm">
+      <div class="field">
+        <label for="password">Пароль</label>
+        <input type="password" id="password" autocomplete="current-password" required placeholder="Пароль администратора">
+      </div>
+      <button class="btn" id="loginBtn" type="submit">Войти</button>
+    </form>
+  </section>
+
+  <!-- Панель -->
+  <div id="adminPanel" class="hidden">
+    <section class="card">
+      <div class="admin-head">
+        <h2 style="margin:0">Загруженные файлы</h2>
+        <div class="spacer"></div>
+        <button class="btn secondary" id="refreshBtn" style="width:auto">🔄 Обновить статус</button>
+        <button class="btn danger" id="logoutBtn">Выйти</button>
+      </div>
+      <p class="hint">Нужны два файла расписания: <b>«Учителя»</b> (в ячейках фамилии учителей с кабинетами)
+      и <b>«Предметы»</b> (в ячейках названия предметов). Тип файла определяется автоматически при загрузке.</p>
+      <div class="files-list" id="filesList"></div>
+      <p class="hint" id="updatedLabel"></p>
+    </section>
+
+    <section class="card">
+      <h2>Загрузить файлы с устройства</h2>
+      <div class="dropzone" id="dropzone">
+        <b>📂 Перетащите файлы сюда</b> или нажмите, чтобы выбрать
+        <p class="muted" style="margin:6px 0 0;font-size:12.5px">Форматы: .xls, .xlsx, .xlsm, .xml, .csv. Можно сразу оба файла — тип определится автоматически.</p>
+        <input type="file" id="fileInput" accept=".xls,.xlsx,.xlsm,.xml,.csv" multiple hidden>
+      </div>
+      <div id="uploadResult" style="margin-top:10px"></div>
+    </section>
+
+    <section class="card">
+      <h2>Расписание звонков</h2>
+      <p class="hint">Загрузите отдельную таблицу со временем начала и окончания уроков. Поддерживаются CSV, XLS, XLSX, XLSM и XML. Для смен используйте два блока по четыре столбца: «День недели», «Урок», «Начало», «Окончание».</p>
+      <div class="field">
+        <label for="bellFileInput">Файл расписания звонков</label>
+        <input type="file" id="bellFileInput" accept=".xls,.xlsx,.xlsm,.xml,.csv">
+      </div>
+      <button class="btn" id="bellUploadBtn" type="button">🔔 Загрузить расписание звонков</button>
+      <div id="bellUploadResult" style="margin-top:10px"></div>
+    </section>
+
+    <section class="card">
+      <h2>Классы второй смены</h2>
+      <p class="hint">Отметьте классы, которые учатся во вторую смену. Для них номера уроков начинаются заново с первого и берётся время из блока «2 смена».</p>
+      <div class="shift-class-list" id="shiftClassList"><p class="muted">Сначала загрузите расписание уроков.</p></div>
+      <button class="btn" id="saveShiftBtn" type="button" disabled>Сохранить классы второй смены</button>
+      <div id="shiftSettingsResult" style="margin-top:10px"></div>
+    </section>
+
+    <section class="card">
+      <h2>Загрузить по ссылке Яндекс.Диска</h2>
+      <p class="hint">Вставьте публичную ссылку на файл (например <span class="mono">https://disk.yandex.ru/i/…</span>) —
+      сервер скачает файл и применит его. Требуется доступ сервера к интернету.</p>
+      <div class="field">
+        <label for="yandexUrl">Публичная ссылка</label>
+        <input type="url" id="yandexUrl" placeholder="https://disk.yandex.ru/i/...">
+      </div>
+      <button class="btn" id="yandexBtn">⬇️ Скачать и применить</button>
+      <div id="yandexResult" style="margin-top:10px"></div>
+    </section>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+<script src="/js/admin.js"></script>
+</body>
+</html>

@@ -1,0 +1,45 @@
+name: 🚀 Deploy to Hugging Face Spaces
+
+# Заливает main в HF Space. Запускается:
+#   - кнопкой "Run workflow" во вкладке Actions (workflow_dispatch)
+#   - автоматически при каждом push в main (обновления сайта)
+# Требуются secrets репозитория:
+#   HF_USERNAME   — ваш логин на huggingface.co
+#   HF_TOKEN      — Access Token с типом Write (huggingface.co/settings/tokens)
+#   HF_SPACE_NAME — (необязательно) имя Space, по умолчанию "raspisanie"
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Проверка секретов
+        env:
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -z "$HF_USERNAME" ] || [ -z "$HF_TOKEN" ]; then
+            echo "::error::Не заданы secrets HF_USERNAME и/или HF_TOKEN."
+            echo "::error::Откройте: Settings → Secrets and variables → Actions → New repository secret"
+            exit 1
+          fi
+
+      - name: Push в Hugging Face Space
+        env:
+          HF_USERNAME: ${{ secrets.HF_USERNAME }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_SPACE_NAME: ${{ secrets.HF_SPACE_NAME || 'raspisanie' }}
+        run: |
+          git remote add hf "https://${HF_USERNAME}:${HF_TOKEN}@huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE_NAME}"
+          git push hf main --force
+          echo "✅ Код отправлен в Space. Сборка займёт 2–4 минуты:"
+          echo "   https://huggingface.co/spaces/${HF_USERNAME}/${HF_SPACE_NAME}"
+          echo "   Сайт: https://${HF_USERNAME}-${HF_SPACE_NAME}.hf.space"

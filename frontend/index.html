@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Расписание уроков</title>
+<link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+
+<header class="app">
+  <div class="app-inner">
+    <div class="brand">
+      <div class="logo">🗓️</div>
+      <div><h1>Расписание уроков</h1><p class="sub">классы · учителя · кабинеты · избранное</p></div>
+    </div>
+  </div>
+  <div class="app-inner tabs-wrap">
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-view="view-classes">📚 Классы</button>
+      <button class="tab" data-view="view-teachers">👩‍🏫 Учителя</button>
+      <button class="tab" data-view="view-rooms">🚪 Кабинеты</button>
+      <button class="tab" data-view="view-fav">⭐ Избранное</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <div class="load-status" id="loadStatus">
+      <div class="spinner"></div>
+      <span class="msg">Загрузка расписания с сервера…</span>
+    </div>
+    <button class="reload-btn hidden" id="reloadBtn">🔄 Обновить</button>
+    <div class="lesson-live hidden" id="currentLesson" aria-live="polite"></div>
+  </section>
+
+  <section id="view-classes" class="view">
+    <div class="card"><h2>Расписание по классам</h2><div id="classArea"></div></div>
+  </section>
+
+  <section id="view-teachers" class="view hidden">
+    <div class="card"><h2>Расписание по учителям</h2><div id="teacherArea"></div></div>
+  </section>
+
+  <section id="view-rooms" class="view hidden">
+    <div class="card"><h2>Свободные кабинеты</h2><div id="roomsArea"></div></div>
+  </section>
+
+  <section id="view-fav" class="view hidden">
+    <div class="card"><h2>⭐ Избранное</h2><div id="favArea"></div></div>
+  </section>
+</main>
+
+<footer>
+  <div>Приложение работает онлайн — расписание загружает администратор лицея. Избранное хранится только на этом устройстве. <a href="/admin">Вход для администратора</a></div>
+</footer>
+<div class="toast" id="toast"></div>
+
+<script src="/js/app.js"></script>
+</body>
+</html>
