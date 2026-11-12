@@ -4,30 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Расписание уроков</title>
-<link rel="stylesheet" href="/css/style.css?v=schedule-selection-1">
+<link rel="stylesheet" href="/css/style.css?v=home-sections-1">
 </head>
 <body>
 
-<header class="app">
-  <div class="app-inner">
-    <div class="brand">
-      <div class="logo">🗓️</div>
-      <div><h1>Расписание уроков</h1><p class="sub">классы · учителя · кабинеты · избранное</p></div>
-    </div>
-  </div>
-  <div class="app-inner tabs-wrap">
-    <nav class="tabs" id="tabs">
-      <button class="tab active" data-view="view-home">🏠 Главная</button>
-      <button class="tab" data-view="view-classes">📚 Классы</button>
-      <button class="tab" data-view="view-teachers">👩‍🏫 Учителя</button>
-      <button class="tab" data-view="view-rooms">🚪 Кабинеты</button>
-      <button class="tab" data-view="view-fav">⭐ Избранное</button>
-    </nav>
-  </div>
-</header>
-
 <main>
-  <section class="card">
+  <section class="card hidden" aria-hidden="true">
     <div class="load-status" id="loadStatus">
       <div class="spinner"></div>
       <span class="msg">Загрузка расписания с сервера…</span>
@@ -37,38 +19,36 @@
   </section>
 
   <section id="view-home" class="view">
-    <div class="card home-card">
-      <h2>Чьё расписание посмотреть?</h2>
-      <p class="home-intro">Выберите класс или учителя, чтобы открыть расписание.</p>
-      <div class="home-choices">
-        <button class="home-choice" type="button" data-open-view="view-classes"><span class="home-choice-icon">📚</span><span><strong>Классы</strong><small>Расписание класса по дням и на неделю</small></span><span aria-hidden="true">→</span></button>
-        <button class="home-choice" type="button" data-open-view="view-teachers"><span class="home-choice-icon">👩‍🏫</span><span><strong>Учителя</strong><small>Расписание выбранного учителя</small></span><span aria-hidden="true">→</span></button>
-      </div>
-    </div>
+    <nav class="home-choices" aria-label="Разделы">
+      <button class="home-choice home-current" type="button" data-open-view="view-home" aria-current="page"><span class="home-choice-icon" aria-hidden="true">🏠</span><strong>Главная</strong></button>
+      <button class="home-choice" type="button" data-open-view="view-classes"><span class="home-choice-icon" aria-hidden="true">📚</span><strong>Классы</strong><span aria-hidden="true">→</span></button>
+      <button class="home-choice" type="button" data-open-view="view-teachers"><span class="home-choice-icon" aria-hidden="true">👩‍🏫</span><strong>Учителя</strong><span aria-hidden="true">→</span></button>
+      <button class="home-choice" type="button" data-open-view="view-rooms"><span class="home-choice-icon" aria-hidden="true">🚪</span><strong>Кабинеты</strong><span aria-hidden="true">→</span></button>
+      <button class="home-choice" type="button" data-open-view="view-fav"><span class="home-choice-icon" aria-hidden="true">⭐</span><strong>Избранное</strong><span aria-hidden="true">→</span></button>
+    </nav>
   </section>
 
+  <button class="change-selection home-back hidden" id="homeBack" type="button">← На главную</button>
+
   <section id="view-classes" class="view hidden">
-    <div class="card"><h2>Расписание по классам</h2><div id="classArea"></div></div>
+    <div class="card"><h2>Расписание по классам</h2><div id="classArea"><p class="muted">Загрузка расписания…</p></div></div>
   </section>
 
   <section id="view-teachers" class="view hidden">
-    <div class="card"><h2>Расписание по учителям</h2><div id="teacherArea"></div></div>
+    <div class="card"><h2>Расписание по учителям</h2><div id="teacherArea"><p class="muted">Загрузка расписания…</p></div></div>
   </section>
 
   <section id="view-rooms" class="view hidden">
-    <div class="card"><h2>Свободные кабинеты</h2><div id="roomsArea"></div></div>
+    <div class="card"><h2>Свободные кабинеты</h2><div id="roomsArea"><p class="muted">Загрузка расписания…</p></div></div>
   </section>
 
   <section id="view-fav" class="view hidden">
-    <div class="card"><h2>⭐ Избранное</h2><div id="favArea"></div></div>
+    <div class="card"><h2>⭐ Избранное</h2><div id="favArea"><p class="muted">Загрузка расписания…</p></div></div>
   </section>
 </main>
 
-<footer>
-  <div>Приложение работает онлайн — расписание загружает администратор лицея. Избранное хранится только на этом устройстве. <a href="/admin">Вход для администратора</a></div>
-</footer>
 <div class="toast" id="toast"></div>
 
-<script src="/js/app.js?v=schedule-selection-1"></script>
+<script src="/js/app.js?v=home-sections-1"></script>
 </body>
 </html>

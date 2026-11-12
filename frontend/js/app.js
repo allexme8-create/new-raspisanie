@@ -41,6 +41,11 @@ function showLoading(){
 function showError(msg){
   $("loadStatus").innerHTML=`<span style="font-size:20px">⚠️</span><span class="msg" style="color:var(--busy)">${esc(msg)}</span>`;
   $("reloadBtn").classList.remove("hidden");
+  if(!hasData())for(const id of ["classArea","teacherArea","roomsArea","favArea"]){
+    const box=$(id);
+    box.innerHTML=`<div class="nodata">${esc(msg)}<br><button class="change-selection" type="button" data-retry>Попробовать снова</button></div>`;
+    box.querySelectorAll("[data-retry]").forEach(button=>button.onclick=()=>loadSchedule());
+  }
 }
 function showSuccess(){
   const label=state.updatedAt?`Последнее обновление: ${state.updatedAt}`:"Расписание загружено";
@@ -557,24 +562,16 @@ document.addEventListener("click",e=>{
   if(b) toggleFav(b.dataset.kind, b.dataset.name);
 });
 
-/* Нижняя навигация на мобильных */
-function setupMobileNav(){
-  const mq=matchMedia("(max-width:640px)");
-  const apply=()=>document.body.classList.toggle("mobile-nav",mq.matches);
-  mq.addEventListener?mq.addEventListener("change",apply):mq.addListener(apply);
-  apply();
-}
-
 function showView(viewId){
-  document.querySelectorAll(".tab").forEach(tab=>tab.classList.toggle("active",tab.dataset.view===viewId));
   document.querySelectorAll(".view").forEach(view=>view.classList.toggle("hidden",view.id!==viewId));
+  $("homeBack").classList.toggle("hidden",viewId==="view-home");
 }
 function openPicker(viewId){
   if(viewId==="view-classes"){state.curClass=null;renderClassArea();}
   if(viewId==="view-teachers"){state.curTeacher=null;state.teacherQuery="";renderTeacherArea();}
   showView(viewId);
 }
-document.querySelectorAll(".tab").forEach(tab=>tab.onclick=()=>showView(tab.dataset.view));
+$("homeBack").onclick=()=>showView("view-home");
 document.querySelectorAll("[data-open-view]").forEach(button=>button.onclick=()=>openPicker(button.dataset.openView));
 
 $("reloadBtn").onclick=()=>loadSchedule();
@@ -585,5 +582,4 @@ setInterval(()=>{ if(!document.hidden){renderCurrentLesson();renderRooms();} }, 
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden){loadSchedule();renderCurrentLesson();renderRooms();} });
 
 /* Запуск */
-setupMobileNav();
 loadSchedule();

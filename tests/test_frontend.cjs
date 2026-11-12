@@ -214,19 +214,22 @@ element("changeTeacher").onclick();
 assert.match(element("classArea").innerHTML, /Выберите класс/);
 assert.match(element("teacherArea").innerHTML, /teacherSearch/);
 
-// Главный экран и кнопки навигации переключают вид без смешивания разделов.
-const home = element("view-home"), classesView = element("view-classes"), teachersView = element("view-teachers");
-const homeTab = {...element("tab-home"), dataset: {view:"view-home"}};
-const classesTab = {...element("tab-classes"), dataset: {view:"view-classes"}};
-context.document.querySelectorAll = selector => selector === ".view" ? [home,classesView,teachersView] : selector === ".tab" ? [homeTab,classesTab] : [];
-vm.runInContext(`showView("view-classes")`, context);
-assert.equal(home.classList.contains("hidden"), true);
-assert.equal(classesView.classList.contains("hidden"), false);
-assert.equal(teachersView.classList.contains("hidden"), true);
-assert.equal(classesTab.classList.contains("active"), true);
-vm.runInContext(`showView("view-home")`, context);
+// На главной доступны все пять разделов; внутри виден только выбранный раздел и возврат.
+assert.match(page, /data-open-view="view-home"/);
+assert.match(page, /data-open-view="view-rooms"/);
+assert.match(page, /data-open-view="view-fav"/);
+const home = element("view-home"), classesView = element("view-classes"), teachersView = element("view-teachers"), roomsView=element("view-rooms"), favView=element("view-fav");
+context.document.querySelectorAll = selector => selector === ".view" ? [home,classesView,teachersView,roomsView,favView] : [];
+for (const view of [classesView,teachersView,roomsView,favView]) {
+  vm.runInContext(`showView("${view.id}")`, context);
+  for (const other of [home,classesView,teachersView,roomsView,favView])
+    assert.equal(other.classList.contains("hidden"), other !== view);
+  assert.equal(element("homeBack").classList.contains("hidden"), false);
+}
+element("homeBack").onclick();
 assert.equal(home.classList.contains("hidden"), false);
-assert.equal(classesView.classList.contains("hidden"), true);
+assert.equal(element("homeBack").classList.contains("hidden"), true);
+for (const other of [classesView,teachersView,roomsView,favView]) assert.equal(other.classList.contains("hidden"), true);
 
 // Занятость кабинета зависит от фактического времени обеих смен.
 vm.runInContext(`
