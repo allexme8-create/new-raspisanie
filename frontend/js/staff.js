@@ -3,10 +3,21 @@ const byId=id=>document.getElementById(id);
 const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const role=location.pathname==="/Director"?"director":location.pathname==="/teacher"?"teacher":"associate";
 const manager=role!=="teacher", key=`schedule_staff_${role}`;
-let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false, unreadNotifications=[], showHidden=false, deadlineStatsUsers=[];
+let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false, unreadNotifications=[], showHidden=false, deadlineStatsUsers=[], profileRefreshVersion=0;
 byId("pageTitle").textContent=role==="director"?"Кабинет директора":role==="associate"?"Кабинет заместителя директора":"Кабинет учителя";
 const roleNames={director:"Директор",associate:"Заместитель директора",teacher:"Учитель"};
-function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;}
+function showIdentity(user){
+  byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;
+  byId("profileHomeroom").classList.toggle("hidden",user.role!=="teacher");
+  byId("profileHomeroomStatus").textContent=user.role==="teacher"?(user.homeroom_class?`Назначено · ${user.homeroom_class}`:"Не назначено") : "";
+}
+async function refreshProfileHomeroom(){
+  if(role!=="teacher"||!staffToken||!staffUser)return;
+  const session=staffToken,version=++profileRefreshVersion;
+  try{const data=await request("/api/staff/me");if(staffToken!==session||version!==profileRefreshVersion||!staffUser||data.user?.role!==role)return;
+    staffUser={...staffUser,homeroom_class:data.user.homeroom_class||""};showIdentity(staffUser);
+  }catch(error){if(staffToken===session&&version===profileRefreshVersion)byId("profileHomeroomStatus").textContent="Не удалось обновить данные о классном руководстве";}
+}
 const statuses={pending:"В работе",overdue:"Просрочено",completed_on_time:"Выполнено в срок",completed_late:"Выполнено с просрочкой"};
 function screen(id){["staffLoginCard","changePasswordCard","staffPanel"].forEach(x=>byId(x).classList.toggle("hidden",x!==id));}
 const staffViews=["staffProfileView","staffDutyView","staffCreateView","staffStatsView","staffTasksView","staffProjectsView"];
@@ -17,6 +28,7 @@ function openStaffView(id){
   byId("staffHome").classList.toggle("hidden",id!=="staffHome");
   byId("staffBack").classList.toggle("hidden",id==="staffHome");
   staffViews.forEach(view=>byId(view).classList.toggle("hidden",view!==id));
+  if(id==="staffProfileView")refreshProfileHomeroom();
   if(id==="staffStatsView")loadDeadlineStats();
   if(id==="staffDutyView"&&typeof loadDutyCalendar==="function")loadDutyCalendar();
 }
@@ -281,7 +293,7 @@ byId("staffPasswordForm").onsubmit=async e=>{
   catch(error){errorAt("passwordError",error);}finally{button.disabled=false;}
 };
 byId("staffProfileForm").onsubmit=async e=>{
-  e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("profileResult").innerHTML="";
+  e.preventDefault();profileRefreshVersion++;const button=e.currentTarget.querySelector("button");button.disabled=true;byId("profileResult").innerHTML="";
   try{const data=await request("/api/staff/profile",{method:"PUT",body:{full_name:byId("staffFullName").value,position:byId("staffPosition").value}});staffUser=data.user;byId("staffFullName").value=staffUser.full_name;byId("staffPosition").value=staffUser.position||"";showIdentity(staffUser);byId("profileResult").innerHTML='<div class="alert ok">Профиль сохранён.</div>';}
   catch(error){errorAt("profileResult",error);}finally{button.disabled=false;}
 };
