@@ -252,6 +252,51 @@ class StaffTests(unittest.TestCase):
         with self.store.connect() as db:
             self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
 
+    def test_task_progress_and_comment_permissions(self):
+        director = self.create("dir@example.com", "director")
+        deputy = self.create("dep@example.com", "associate")
+        teacher = self.create("teacher@example.com", "teacher")
+        other = self.create("other@example.com", "teacher")
+        dh, _ = self.ready("dir@example.com", "director", director["password"])
+        ah, _ = self.ready("dep@example.com", "associate", deputy["password"])
+        th, _ = self.ready("teacher@example.com", "teacher", teacher["password"])
+        oh, _ = self.ready("other@example.com", "teacher", other["password"])
+        self.client.put("/api/staff/profile", headers=th, json={"full_name":"Учитель", "position":"Учитель музыки"})
+        project = self.client.post("/api/staff/projects", headers=ah, json={"title":"Проект"}).json()["id"]
+        body = {"assignee_id":teacher["user"]["id"], "description":"Тест", "deadline":(staff.now()+timedelta(days=1)).isoformat(), "project_id":project}
+        task = self.client.post("/api/staff/tasks", headers=ah, json=body).json()["task"]
+        base = f"/api/staff/tasks/{task['id']}"
+        self.assertFalse(task["partial"])
+        self.assertEqual(task["failure_reason"], "")
+        self.assertEqual(self.client.put(base+"/progress", headers=ah, json={"partial":True,"reason":"Причина"}).status_code, 404)
+        self.assertEqual(self.client.put(base+"/progress", headers=oh, json={"partial":True,"reason":"Причина"}).status_code, 404)
+        self.assertEqual(self.client.put(base+"/progress", headers=th, json={"partial":True,"reason":"x"*2001}).status_code, 422)
+        result=self.client.put(base+"/progress", headers=th, json={"partial":True,"reason":"  Ждём данные  "})
+        self.assertTrue(result.json()["task"]["partial"])
+        self.assertEqual(result.json()["task"]["failure_reason"],"Ждём данные")
+        self.assertTrue(self.client.get("/api/staff/tasks", headers=dh).json()["tasks"][0]["partial"])
+        self.assertEqual(self.client.get(base+"/comments",headers=oh).status_code, 404)
+        self.assertEqual(self.client.post(base+"/comments",headers=oh,json={"text":"чужой"}).status_code, 404)
+        self.assertEqual(self.client.get(base+"/comments").status_code, 401)
+        self.assertEqual(self.client.post(base+"/comments",headers=th,json={"text":"  "}).status_code, 422)
+        self.assertEqual(self.client.post(base+"/comments",headers=th,json={"text":"x"*2001}).status_code, 422)
+        self.assertEqual(self.client.post(base+"/comments",headers=th,json={"text":"  Начала работу  "}).status_code, 201)
+        self.assertEqual(self.client.post(base+"/comments",headers=dh,json={"text":"Спасибо"}).status_code, 201)
+        comments=self.client.get(base+"/comments",headers=ah).json()["comments"]
+        self.assertEqual([c["text"] for c in comments], ["Начала работу", "Спасибо"])
+        self.assertEqual(comments[0]["author_position"], "Учитель музыки")
+        completed=self.client.put(base+"/completion",headers=th,json={"completed":True}).json()["task"]
+        self.assertFalse(completed["partial"])
+        self.assertEqual(completed["failure_reason"], "Ждём данные")
+        self.assertEqual(self.client.put(base+"/progress",headers=th,json={"partial":True,"reason":""}).status_code, 409)
+        self.assertEqual(self.client.post(base+"/comments",headers=th,json={"text":"Выполнено"}).status_code, 201)
+        self.client.delete("/api/admin/users/"+teacher["user"]["id"],headers=self.admin)
+        comments=self.client.get(base+"/comments",headers=dh).json()["comments"]
+        self.assertEqual(comments[0]["author_name"],"Удалённый пользователь")
+        self.assertEqual(comments[0]["author_position"],"")
+        self.store.init()
+        self.assertEqual(len(self.client.get(base+"/comments",headers=dh).json()["comments"]),3)
+
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")
         for _ in range(5):

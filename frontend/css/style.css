@@ -248,3 +248,13 @@ footer a{color:var(--muted)}
 .project-card{border:1px solid var(--line);border-radius:12px;padding:14px;margin:10px 0}
 .project-card h3{margin:0 0 6px;overflow-wrap:anywhere}
 .project-card .hint{margin:5px 0}
+
+.task-discussion{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+.task-discussion summary{cursor:pointer;color:var(--acc);font-weight:700}
+.task-discussion form{margin-top:12px}
+.task-discussion textarea{display:block;width:100%;margin:6px 0 8px;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit;resize:vertical}
+.task-discussion .btn{width:auto;padding:8px 12px}
+.task-comment{border-left:3px solid var(--line);padding-left:10px;margin:12px 0;font-size:14px;overflow-wrap:anywhere}
+.task-comment p,.task-reason{white-space:pre-wrap;overflow-wrap:anywhere;margin:5px 0}
+.task-progress-summary{color:#a15b00;font-weight:700;margin:6px 0}
+.task-reason{font-size:14px;color:var(--muted)}

@@ -119,6 +119,28 @@ class Complete(BaseModel):
     completed: bool
 
 
+class TaskProgress(BaseModel):
+    partial: bool
+    reason: str = Field(default="", max_length=2000)
+
+    @field_validator("reason")
+    @classmethod
+    def clean_reason(cls, value: str) -> str:
+        return value.strip()
+
+
+class TaskComment(BaseModel):
+    text: str = Field(max_length=2000)
+
+    @field_validator("text")
+    @classmethod
+    def clean_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Комментарий не может быть пустым")
+        return value
+
+
 class Store:
     def __init__(self, path: Path):
         self.path = path
@@ -181,6 +203,12 @@ class Store:
             task_columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
             if "project_id" not in task_columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN project_id TEXT REFERENCES projects(id)")
+            if "partial" not in task_columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN partial INTEGER NOT NULL DEFAULT 0")
+            if "failure_reason" not in task_columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN failure_reason TEXT NOT NULL DEFAULT ''")
+            db.execute("CREATE TABLE IF NOT EXISTS task_comments (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, created_at TEXT NOT NULL)")
+            db.execute("CREATE INDEX IF NOT EXISTS task_comments_task ON task_comments(task_id, created_at, id)")
             # Почтовые настройки и коды больше не используются.
             for name in ("mail_oauth", "mail_oauth_pending", "password_resets", "reset_throttle", "reset_ip_throttle"):
                 db.execute(f"DROP TABLE IF EXISTS {name}")
@@ -242,7 +270,7 @@ def task_json(row, current: datetime | None = None) -> dict:
     completed = datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
     current = current or now()
     status = ("completed_on_time" if completed <= due else "completed_late") if completed else ("overdue" if current > due else "pending")
-    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name", "project_id", "director_id", "assignee_position", "director_position")} | {"status": status}
+    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name", "project_id", "director_id", "assignee_position", "director_position", "failure_reason")} | {"status": status, "partial": bool(row["partial"])}
 
 
 TASK_SELECT = '''SELECT tasks.*, CASE WHEN assignee.active=1 THEN assignee.email ELSE 'Удалённый пользователь' END AS assignee_email,
@@ -464,14 +492,18 @@ def make_router(store: Store, require_admin) -> APIRouter:
             row = db.execute(TASK_SELECT + " WHERE tasks.id=?", (tid,)).fetchone()
         return {"task": task_json(row)}
 
-    @router.get("/api/staff/tasks")
-    def tasks(user: dict = Depends(ready_user)):
+    def task_access(user: dict):
         if user["role"] == "director":
             condition, params = "(tasks.director_id=? OR tasks.assignee_id=? OR tasks.project_id IS NOT NULL)", (user["id"], user["id"])
         elif user["role"] == "associate":
             condition, params = "(tasks.assignee_id=? OR tasks.director_id=? OR EXISTS (SELECT 1 FROM projects WHERE projects.id=tasks.project_id AND projects.owner_id=?))", (user["id"], user["id"], user["id"])
         else:
             condition, params = "tasks.assignee_id=?", (user["id"],)
+        return condition, params
+
+    @router.get("/api/staff/tasks")
+    def tasks(user: dict = Depends(ready_user)):
+        condition, params = task_access(user)
         with store.connect() as db:
             rows = db.execute(TASK_SELECT + f" WHERE {condition} ORDER BY tasks.deadline ASC, tasks.created_at DESC", params).fetchall()
         return {"tasks": [task_json(row) for row in rows]}
@@ -481,10 +513,46 @@ def make_router(store: Store, require_admin) -> APIRouter:
         if not body.completed:
             raise HTTPException(400, "Отметку выполнения нельзя отменить")
         with store.connect() as db:
-            updated = db.execute("UPDATE tasks SET completed_at=COALESCE(completed_at, ?) WHERE id=? AND assignee_id=?", (iso(now()), task_id, user["id"]))
+            updated = db.execute("UPDATE tasks SET completed_at=COALESCE(completed_at, ?), partial=0 WHERE id=? AND assignee_id=?", (iso(now()), task_id, user["id"]))
             if not updated.rowcount:
                 raise HTTPException(404, "Задача не найдена")
             task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
         return {"task": task_json(task)}
+
+    @router.put("/api/staff/tasks/{task_id}/progress")
+    def update_progress(task_id: str, body: TaskProgress, user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT completed_at FROM tasks WHERE id=? AND assignee_id=?", (task_id, user["id"])).fetchone()
+            if not row:
+                raise HTTPException(404, "Задача не найдена")
+            if row["completed_at"]:
+                raise HTTPException(409, "Задача уже выполнена")
+            db.execute("UPDATE tasks SET partial=?,failure_reason=? WHERE id=?", (int(body.partial), body.reason, task_id))
+            task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
+        return {"task": task_json(task)}
+
+    def check_task_access(db, task_id: str, user: dict):
+        condition, params = task_access(user)
+        if not db.execute(f"SELECT 1 FROM tasks WHERE tasks.id=? AND {condition}", (task_id, *params)).fetchone():
+            raise HTTPException(404, "Задача не найдена")
+
+    @router.get("/api/staff/tasks/{task_id}/comments")
+    def comments(task_id: str, user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            check_task_access(db, task_id, user)
+            rows = db.execute("""SELECT task_comments.id, task_comments.text, task_comments.created_at,
+                CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS author_name,
+                CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS author_position
+                FROM task_comments JOIN users ON users.id=task_comments.author_id WHERE task_comments.task_id=? ORDER BY task_comments.created_at,task_comments.id""", (task_id,)).fetchall()
+        return {"comments": [dict(row) for row in rows]}
+
+    @router.post("/api/staff/tasks/{task_id}/comments", status_code=201)
+    def add_comment(task_id: str, body: TaskComment, user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            check_task_access(db, task_id, user)
+            db.execute("INSERT INTO task_comments VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], body.text, iso(now())))
+        return {"ok": True}
 
     return router

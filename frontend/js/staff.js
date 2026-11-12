@@ -57,16 +57,66 @@ function fmtDate(iso){return new Date(iso).toLocaleString("ru-RU",{day:"2-digit"
 function personName(name,position){return (name||"ФИО не указано")+(position?` · ${position}`:"");}
 function taskMarkup(t){
   const mine=t.assignee_id===staffUser.id;
-  return `<article class="task-card status-${escapeHTML(t.status)}"><div class="task-top"><span class="task-status">${escapeHTML(statuses[t.status]||t.status)}</span><span class="task-deadline">Срок: ${escapeHTML(fmtDate(t.deadline))}</span></div>
+  return `<article class="task-card status-${escapeHTML(t.status)}" data-task-card="${escapeHTML(t.id)}"><div class="task-top"><span class="task-status">${escapeHTML(statuses[t.status]||t.status)}</span><span class="task-deadline">Срок: ${escapeHTML(fmtDate(t.deadline))}</span></div>
     <p class="task-description">${escapeHTML(t.description)}</p>
     <p class="task-meta">Исполнитель: ${escapeHTML(personName(t.assignee_name,t.assignee_position))} · Автор: ${escapeHTML(personName(t.director_name,t.director_position))}</p>
+    <p class="task-progress-summary">${t.partial?'Частично выполнено':""}</p>
+    <p class="task-reason">${t.failure_reason?`${t.completed_at?'Ранее указанная причина':'Причина невыполнения'}: ${escapeHTML(t.failure_reason)}`:""}</p>
     ${t.completed_at?`<p class="task-meta">Отмечено: ${escapeHTML(fmtDate(t.completed_at))}</p>`:""}
-    ${mine?`<label class="task-complete"><input type="checkbox" data-complete="${escapeHTML(t.id)}" ${t.completed_at?"checked disabled":""}> Выполнено</label>`:""}</article>`;
+    ${mine?`<label class="task-complete"><input type="checkbox" data-complete="${escapeHTML(t.id)}" ${t.completed_at?"checked disabled":""}> Выполнено</label>`:""}
+    <details class="task-discussion" data-discussion="${escapeHTML(t.id)}"><summary>Ход работы и комментарии</summary>
+      ${mine&&!t.completed_at?`<form data-progress><label class="task-complete"><input type="checkbox" name="partial" ${t.partial?"checked":""}> Частично выполнено</label><div class="field"><label>Причина невыполнения (необязательно)<textarea name="reason" maxlength="2000" rows="2">${escapeHTML(t.failure_reason||"")}</textarea></label></div><button class="btn secondary" type="submit">Сохранить состояние</button></form>`:""}
+      <div class="task-comments" aria-live="polite">Загрузка комментариев…</div>
+      <form data-comment><label>Комментарий<textarea name="text" maxlength="2000" rows="2" required></textarea></label><button class="btn secondary" type="submit">Отправить комментарий</button></form>
+      <div class="task-action-error" aria-live="polite"></div>
+    </details></article>`;
 }
+function taskDraftsOpen(){
+  return ["taskList","projectList"].some(id=>Array.from(byId(id).querySelectorAll("[data-discussion]")).some(detail=>{
+    if(detail.open)return true;
+    return Array.from(detail.querySelectorAll("textarea,input[type=checkbox]")).some(input=>input.type==="checkbox"?input.checked!==input.defaultChecked:input.value!==input.defaultValue);
+  }));
+}
+async function refreshComments(detail){
+  const out=detail.querySelector(".task-comments");
+  const data=await request(`/api/staff/tasks/${encodeURIComponent(detail.dataset.discussion)}/comments`);
+  out.innerHTML=data.comments.length?data.comments.map(c=>`<div class="task-comment"><b>${escapeHTML(personName(c.author_name,c.author_position))}</b> <span class="task-meta">${escapeHTML(fmtDate(c.created_at))}</span><p>${escapeHTML(c.text)}</p></div>`).join(""):'<p class="hint">Комментариев пока нет.</p>';
+}
+function bindTaskCards(id){
+  byId(id).querySelectorAll("[data-task-card]").forEach(card=>{
+    const detail=card.querySelector("[data-discussion]"),error=detail.querySelector(".task-action-error"),tid=detail.dataset.discussion;
+    detail.ontoggle=()=>{if(detail.open)refreshComments(detail).catch(e=>errorAtElement(error,e));};
+    const comment=detail.querySelector("[data-comment]");
+    comment.onsubmit=async e=>{e.preventDefault();const button=comment.querySelector("button"),text=comment.elements.text;button.disabled=true;error.innerHTML="";
+      try{await request(`/api/staff/tasks/${encodeURIComponent(tid)}/comments`,{method:"POST",body:{text:text.value}});text.value="";text.defaultValue="";await refreshComments(detail);}
+      catch(e){errorAtElement(error,e);}finally{button.disabled=false;}
+    };
+    const progress=detail.querySelector("[data-progress]");
+    if(progress)progress.onsubmit=async e=>{e.preventDefault();const button=progress.querySelector("button"),partial=progress.elements.partial,reason=progress.elements.reason;button.disabled=true;error.innerHTML="";
+      try{const result=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/progress`,{method:"PUT",body:{partial:partial.checked,reason:reason.value}});
+        partial.checked=result.task.partial;partial.defaultChecked=partial.checked;reason.value=result.task.failure_reason;reason.defaultValue=reason.value;
+        card.querySelector(".task-progress-summary").textContent=partial.checked?"Частично выполнено":"";
+        card.querySelector(".task-reason").textContent=reason.value?`Причина невыполнения: ${reason.value}`:"";
+      }catch(e){errorAtElement(error,e);}finally{button.disabled=false;}
+    };
+    const box=card.querySelector("[data-complete]");
+    if(box)box.onchange=async()=>{if(!box.checked)return;if(!confirm(progress&&(progress.elements.partial.checked!==progress.elements.partial.defaultChecked||progress.elements.reason.value!==progress.elements.reason.defaultValue)?"Подтвердить выполнение? Несохранённое состояние будет потеряно, отменить выполнение нельзя.":"Подтвердить выполнение? Отменить отметку будет нельзя.")){box.checked=false;return;}
+      box.disabled=true;error.innerHTML="";
+      try{const result=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/completion`,{method:"PUT",body:{completed:true}});
+        card.className=`task-card status-${result.task.status}`;card.querySelector(".task-status").textContent=statuses[result.task.status]||result.task.status;
+        card.querySelector(".task-progress-summary").textContent="";
+        card.querySelector(".task-reason").textContent=result.task.failure_reason?`Ранее указанная причина: ${result.task.failure_reason}`:"";
+        if(progress)progress.remove();if(!taskDraftsOpen())await loadTasks();
+      }catch(e){box.checked=false;box.disabled=false;errorAtElement(error,e);detail.open=true;}
+    };
+  });
+}
+function errorAtElement(element,error){element.innerHTML=`<div class="alert err">${escapeHTML(error.message)}</div>`;}
 async function loadTasks(){
-  if(!staffToken||refreshing)return;refreshing=true;
+  if(!staffToken||refreshing||taskDraftsOpen())return;refreshing=true;
   try{
     const [data,projectData]=await Promise.all([request("/api/staff/tasks"),request("/api/staff/projects")]);
+    if(taskDraftsOpen())return;
     byId("taskListError").innerHTML="";
     const ordinary=data.tasks.filter(t=>!t.project_id);
     byId("taskList").innerHTML=ordinary.length?ordinary.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>';
@@ -83,11 +133,7 @@ async function loadTasks(){
       select.innerHTML='<option value="">Текущие задачи</option>'+editable.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.title)}</option>`).join("");
       if(editable.some(p=>p.id===previous))select.value=previous;
     }
-    for(const id of ["taskList","projectList"])byId(id).querySelectorAll("[data-complete]").forEach(box=>box.onchange=async()=>{
-      if(!box.checked)return;if(!confirm("Подтвердить выполнение? Отменить отметку будет нельзя.")){box.checked=false;return;}
-      box.disabled=true;try{await request(`/api/staff/tasks/${encodeURIComponent(box.dataset.complete)}/completion`,{method:"PUT",body:{completed:true}});}
-      catch(e){box.checked=false;box.disabled=false;errorAt("taskListError",e);return;}await loadTasks();
-    });
+    bindTaskCards("taskList");bindTaskCards("projectList");
   }catch(e){errorAt("taskListError",e);}finally{refreshing=false;}
 }
 byId("staffLoginForm").onsubmit=async e=>{
@@ -120,6 +166,6 @@ byId("taskForm").onsubmit=async e=>{
 document.querySelectorAll("[data-logout]").forEach(button=>button.onclick=async()=>{
   try{await request("/api/staff/logout",{method:"POST"});}catch(e){}staffToken="";staffUser=null;sessionStorage.removeItem(key);screen("staffLoginCard");
 });
-byId("taskRefresh").onclick=byId("projectRefresh").onclick=()=>{if(manager)loadAssignees();loadTasks();};
+byId("taskRefresh").onclick=byId("projectRefresh").onclick=()=>{if(taskDraftsOpen()){errorAt("taskListError",new Error("Закройте обсуждения и сохраните или очистите черновики перед обновлением."));return;}if(manager)loadAssignees();loadTasks();};
 setInterval(()=>{if(!document.hidden&&staffToken&&staffUser&&!byId("staffPanel").classList.contains("hidden"))loadTasks();},30000);
 if(staffToken)request("/api/staff/me").then(showSession).catch(e=>{if(staffToken)errorAt("staffLoginError",e);screen("staffLoginCard");});
