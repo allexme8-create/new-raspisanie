@@ -6,6 +6,10 @@ function resetDuty(){
 }
 const dutySlotLabel=slot=>slot===0?"Дежурный администратор":`${slot}-я смена · учитель`;
 function dutyDateText(value){const date=new Date(value+"T00:00:00Z");return `${date.toLocaleDateString("ru-RU",{timeZone:"UTC",day:"numeric",month:"long"})} ${date.getUTCFullYear()} года`;}
+function dutyShortDate(value){
+  const date=new Date(value+"T00:00:00Z"),weekday=["вс","пн","вт","ср","чт","пт","сб"][date.getUTCDay()];
+  return `${String(date.getUTCDate()).padStart(2,"0")}.${String(date.getUTCMonth()+1).padStart(2,"0")} · ${weekday}`;
+}
 function dutyDays(start,end){
   const result=[];for(let d=new Date(start+"T00:00:00Z"),last=new Date(end+"T00:00:00Z");d<=last;d.setUTCDate(d.getUTCDate()+1))if(d.getUTCDay()!==0)result.push(d.toISOString().slice(0,10));return result;
 }
@@ -32,7 +36,7 @@ function renderDuty(){
       const selected=dutySelected?.day===day&&dutySelected?.slot===slot;
       return `<div class="duty-slot"><span class="duty-mobile-label">${escapeHTML(dutySlotLabel(slot))}: </span>${allowed&&canAct?`<button type="button" class="duty-action ${selected?'selected':''}" data-duty-select="${escapeHTML(day)}" data-slot="${slot}">${selected?'Выбрано':'Свободно · выбрать'}</button>`:'<span class="muted">Свободно</span>'}${editAdmin}</div>`;
     }).join("");
-    return `<div class="duty-row ${day===data.today?'duty-today':''}"><strong>${escapeHTML(dutyDateText(day))}${day===data.today?' · сегодня':''}</strong>${slots}</div>`;
+    return `<div class="duty-row ${day===data.today?'duty-today':''}"><strong>${escapeHTML(dutyShortDate(day))}${day===data.today?' · сегодня':''}</strong>${slots}</div>`;
   }).join("")}</div>`;
   byId("dutyMap").querySelectorAll("[data-duty-select]").forEach(button=>button.onclick=()=>{dutySelected={day:button.dataset.dutySelect,slot:Number(button.dataset.slot)};renderDuty();byId("dutyForm").scrollIntoView({behavior:"smooth",block:"center"});});
   byId("dutyMap").querySelectorAll("[data-duty-admin]").forEach(button=>button.onclick=()=>{
