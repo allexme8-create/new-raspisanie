@@ -17,6 +17,6 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js'
  assert.doesNotMatch(vm.runInContext(`taskMarkup({...${task},director_id:"someone"})`,context),/data-invite/);
  cards=[card];vm.runInContext('bindTaskCards("taskList")',context);detail.open=true;detail.ontoggle();await new Promise(r=>setImmediate(r));
  assert.match(select.innerHTML,/&lt;Иван&gt; · Учитель/);assert.match(output.innerHTML,/&lt;история&gt;/);assert.ok(output.innerHTML.indexOf('история')<output.innerHTML.indexOf('Комментарий'));
- await invite.onsubmit({preventDefault(){}});assert.equal(names.textContent,'Соисполнители: <Иван> · Учитель');assert.ok(calls.some(c=>c.path.endsWith('/collaborators')&&JSON.parse(c.opts.body).user_id==='u2'));
+ await invite.onsubmit({preventDefault(){}});assert.equal(names.innerHTML,'Соисполнители: <span class="person-teacher">&lt;Иван&gt;</span> · Учитель');assert.ok(calls.some(c=>c.path.endsWith('/collaborators')&&JSON.parse(c.opts.body).user_id==='u2'));
  console.log('Staff collaborators UI OK');
 })().catch(e=>{console.error(e);process.exitCode=1});

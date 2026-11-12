@@ -281,3 +281,6 @@ footer a{color:var(--muted)}
 
 .duty-inline-location,.duty-inline-feedback{margin:8px 10px}.duty-inline-form{margin:0}.duty-inline-form .btn.secondary{margin-left:6px}
 @media(max-width:700px){.duty-inline-form .btn.secondary{margin:8px 0 0}}
+
+/* Цвета показывают роль, а не должность сотрудника. */
+.person-teacher{color:#176b38}.person-associate{color:#1d54a3}.person-director{color:#b42318}

@@ -9,19 +9,21 @@ const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false}
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js','utf8'),context);
 (async()=>{
  await vm.runInContext('staffToken="token"; showSession({user:{role:"director",full_name:"Петров Пётр",email:"director@example.com"},must_change:false})',context);
- assert.equal(el('staffIdentity').textContent,'Петров Пётр · Директор');
+ assert.equal(el('staffIdentityName').textContent,'Петров Пётр');assert.equal(el('staffIdentityName').className,'person-director');assert.equal(el('staffIdentityPosition').textContent,' · Директор');
  vm.runInContext('showIdentity({full_name:"Иванов Иван",role:"associate"})',context);
- assert.equal(el('staffIdentity').textContent,'Иванов Иван · Заместитель директора');
+ assert.equal(el('staffIdentityName').textContent,'Иванов Иван');assert.equal(el('staffIdentityName').className,'person-associate');assert.equal(el('staffIdentityPosition').textContent,' · Заместитель директора');
  vm.runInContext('showIdentity({full_name:"Сидорова Анна",role:"teacher"})',context);
- assert.equal(el('staffIdentity').textContent,'Сидорова Анна · Учитель');
+ assert.equal(el('staffIdentityName').textContent,'Сидорова Анна');assert.equal(el('staffIdentityName').className,'person-teacher');
  vm.runInContext('showIdentity({full_name:"",role:"teacher"})',context);
- assert.equal(el('staffIdentity').textContent,'ФИО не указано — заполните профиль · Учитель');
+ assert.equal(el('staffIdentityName').textContent,'ФИО не указано — заполните профиль');assert.equal(el('staffIdentityName').className,'');
+ const colored=vm.runInContext('taskMarkup({id:"c",status:"pending",deadline:"2030-01-01T00:00:00Z",description:"Тест",assignee_name:"<Учитель>",assignee_position:"Математик",assignee_role:"teacher",director_name:"Директор",director_role:"director",director_position:"Руководитель",collaborators:[{full_name:"Заместитель",role:"associate"}]})',context);
+ assert.match(colored,/<span class="person-teacher">&lt;Учитель&gt;<\/span> · Математик/);assert.match(colored,/<span class="person-director">Директор<\/span> · Руководитель/);assert.match(colored,/<span class="person-associate">Заместитель<\/span>/);
  assert.match(el('taskAssignee').innerHTML,/Иванов Иван \(11111111\)/);
  assert.match(el('taskAssignee').innerHTML,/Учитель &lt;физики&gt;/);
  assert.match(el('taskList').innerHTML,/Иванов Иван · Учитель &lt;физики&gt;/);
  assert.match(el('taskList').innerHTML,/Петров · Директор школы/);
  vm.runInContext('showIdentity({full_name:"Иванов",role:"teacher",position:"Учитель физики"})',context);
- assert.equal(el('staffIdentity').textContent,'Иванов · Учитель физики');
+ assert.equal(el('staffIdentityName').textContent,'Иванов');assert.equal(el('staffIdentityPosition').textContent,' · Учитель физики');
  assert.match(el('taskAssignee').innerHTML,/Иванов Иван \(22222222\)/);
  assert.match(el('taskAssignee').innerHTML,/>ФИО не указано \(333\)/);
  assert.doesNotMatch(el('taskAssignee').innerHTML,/@example.com/);

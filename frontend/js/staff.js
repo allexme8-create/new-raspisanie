@@ -6,8 +6,15 @@ const manager=role!=="teacher", key=`schedule_staff_${role}`;
 let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false, unreadNotifications=[], showHidden=false, deadlineStatsUsers=[], profileRefreshVersion=0;
 byId("pageTitle").textContent=role==="director"?"Кабинет директора":role==="associate"?"Кабинет заместителя директора":"Кабинет учителя";
 const roleNames={director:"Директор",associate:"Заместитель директора",teacher:"Учитель"};
+function roleClass(role){return ["teacher","associate","director"].includes(role)?`person-${role}`:"";}
+function personHTML(name,position,role){
+  const title=escapeHTML(name||"ФИО не указано"),css=name?roleClass(role):"";
+  return (css?`<span class="${css}">${title}</span>`:title)+(position?` · ${escapeHTML(position)}`:"");
+}
 function showIdentity(user){
-  byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;
+  const name=byId("staffIdentityName");name.textContent=user.full_name||"ФИО не указано — заполните профиль";
+  name.className=user.full_name?roleClass(user.role):"";
+  byId("staffIdentityPosition").textContent=` · ${user.position||roleNames[user.role]||"Сотрудник"}`;
   byId("profileHomeroom").classList.toggle("hidden",user.role!=="teacher");
   byId("profileHomeroomStatus").textContent=user.role==="teacher"?(user.homeroom_class?`Назначено · ${user.homeroom_class}`:"Не назначено") : "";
 }
@@ -74,7 +81,7 @@ async function loadDeadlineStats(){
     deadlineStatsUsers.forEach(u=>{const name=u.full_name||"ФИО не указано";counts.set(name,(counts.get(name)||0)+1);});
     select.innerHTML='<option value="">Выберите исполнителя</option>'+deadlineStatsUsers.map(u=>{
       const name=u.full_name||"ФИО не указано", label=name+(counts.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"");
-      return `<option value="${escapeHTML(u.id)}">${escapeHTML(personName(label,u.position||roleNames[u.role]||""))}</option>`;
+      return `<option value="${escapeHTML(u.id)}" class="${roleClass(u.role)}">${escapeHTML(personName(label,u.position||roleNames[u.role]||""))}</option>`;
     }).join("");
     if(deadlineStatsUsers.some(u=>u.id===previous))select.value=previous;
     if(!deadlineStatsUsers.length){select.innerHTML='<option value="">Назначенных вами задач пока нет</option>';byId("deadlineStats").innerHTML='<p class="muted">Данных пока нет.</p>';}
@@ -91,7 +98,7 @@ async function loadAssignees(){
     select.innerHTML='<option value="">Выберите исполнителя</option>'+data.users.map(u=>{
       const label=u.full_name?u.full_name+(names.get(u.full_name)>1?` (${u.id.slice(0,8)})`:""):`ФИО не указано (${u.id.slice(0,8)})`;
       const roleName=u.position||roleNames[u.role]||"Сотрудник";
-      return `<option value="${escapeHTML(u.id)}">${escapeHTML(label)} · ${escapeHTML(roleName)}</option>`;
+      return `<option value="${escapeHTML(u.id)}" class="${roleClass(u.role)}">${escapeHTML(label)} · ${escapeHTML(roleName)}</option>`;
     }).join("");
     if(data.users.some(u=>u.id===previous))select.value=previous;
     if(!data.users.length)select.innerHTML='<option value="">Нет доступных исполнителей</option>';
@@ -104,8 +111,8 @@ function taskMarkup(t){
   return `<article class="task-card status-${escapeHTML(t.status)}" data-task-card="${escapeHTML(t.id)}"><div class="task-top"><span class="task-status">${t.approved_at?"Выполнено полностью":escapeHTML(statuses[t.status]||t.status)}</span><span class="task-deadline">Срок: ${escapeHTML(fmtDate(t.deadline))}</span></div>
     <p class="task-notice hidden"></p>
     <p class="task-description">${escapeHTML(t.description)}</p>
-    <p class="task-meta">Исполнитель: ${escapeHTML(personName(t.assignee_name,t.assignee_position))} · Автор: ${escapeHTML(personName(t.director_name,t.director_position))}</p>
-    <p class="task-meta task-collaborators">${(t.collaborators||[]).length?`Соисполнители: ${(t.collaborators||[]).map(u=>escapeHTML(personName(u.full_name,u.position))).join("; ")}`:""}</p>
+    <p class="task-meta">Исполнитель: ${personHTML(t.assignee_name,t.assignee_position,t.assignee_role)} · Автор: ${personHTML(t.director_name,t.director_position,t.director_role)}</p>
+    <p class="task-meta task-collaborators">${(t.collaborators||[]).length?`Соисполнители: ${(t.collaborators||[]).map(u=>personHTML(u.full_name,u.position,u.role)).join("; ")}`:""}</p>
     ${t.hidden?'<p class="task-meta">Удалена из вашего списка</p>':""}
     <div class="task-actions">
       ${author&&t.completed_at&&!t.approved_at?`<button class="btn secondary" type="button" data-approve data-completed-at="${escapeHTML(t.completed_at)}">Выполнено полностью</button>`:""}
@@ -135,7 +142,7 @@ async function refreshComments(detail){
   const out=detail.querySelector(".task-comments");
   const data=await request(`/api/staff/tasks/${encodeURIComponent(detail.dataset.discussion)}/comments`);
   const history=[...(data.comments||[]).map(c=>({...c,event:false})),...(data.events||[]).map(c=>({...c,event:true}))].sort((a,b)=>a.created_at.localeCompare(b.created_at)||a.id.localeCompare(b.id));
-  out.innerHTML=history.length?history.map(c=>`<div class="task-comment"><b>${escapeHTML(personName(c.author_name,c.author_position))}</b> <span class="task-meta">${escapeHTML(fmtDate(c.created_at))}${c.event?" · Событие":""}</span><p>${escapeHTML(c.text)}</p></div>`).join(""):'<p class="hint">Истории пока нет.</p>';
+  out.innerHTML=history.length?history.map(c=>`<div class="task-comment"><b>${personHTML(c.author_name,c.author_position,c.author_role)}</b> <span class="task-meta">${escapeHTML(fmtDate(c.created_at))}${c.event?" · Событие":""}</span><p>${escapeHTML(c.text)}</p></div>`).join(""):'<p class="hint">Истории пока нет.</p>';
   if(detail.open&&data.notification_through_id){
     await request(`/api/staff/tasks/${encodeURIComponent(detail.dataset.discussion)}/notifications/read`,{method:"POST",body:{through_id:data.notification_through_id}});
     await loadNotifications();
@@ -146,7 +153,7 @@ async function loadInviteOptions(form,tid){
   const names=new Map();data.users.forEach(u=>{const n=u.full_name||"ФИО не указано";names.set(n,(names.get(n)||0)+1)});
   select.innerHTML='<option value="">Выберите сотрудника</option>'+data.users.map(u=>{
     const name=u.full_name||"ФИО не указано",label=name+(names.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"");
-    return `<option value="${escapeHTML(u.id)}">${escapeHTML(personName(label,u.position||roleNames[u.role]))}</option>`;
+    return `<option value="${escapeHTML(u.id)}" class="${roleClass(u.role)}">${escapeHTML(personName(label,u.position||roleNames[u.role]))}</option>`;
   }).join("");
   if(data.users.some(u=>u.id===previous))select.value=previous;
 }
@@ -165,7 +172,7 @@ async function loadNotifications(){
     unreadNotifications=data.notifications||[];
     const box=byId("staffNotifications"),list=byId("staffNotificationList");
     box.classList.toggle("hidden",unreadNotifications.length===0);
-    list.innerHTML=unreadNotifications.map((n,i)=>`<button class="staff-notification" type="button" data-notification-index="${i}"><strong>${n.kind==="completed"?"✅ Задача выполнена":n.kind==="completion_undone"?"↩️ Отметка выполнения снята":n.kind==="approved"?"✅ Задача подтверждена полностью":n.kind==="rework"?"🔄 Задача возвращена на доработку":"💬 Новый комментарий"}</strong><span>${escapeHTML(n.description)}</span><small>${escapeHTML(personName(n.actor_name,n.actor_position))} · ${escapeHTML(fmtDate(n.created_at))}</small></button>`).join("");
+    list.innerHTML=unreadNotifications.map((n,i)=>`<button class="staff-notification" type="button" data-notification-index="${i}"><strong>${n.kind==="completed"?"✅ Задача выполнена":n.kind==="completion_undone"?"↩️ Отметка выполнения снята":n.kind==="approved"?"✅ Задача подтверждена полностью":n.kind==="rework"?"🔄 Задача возвращена на доработку":"💬 Новый комментарий"}</strong><span>${escapeHTML(n.description)}</span><small>${personHTML(n.actor_name,n.actor_position,n.actor_role)} · ${escapeHTML(fmtDate(n.created_at))}</small></button>`).join("");
     list.querySelectorAll("[data-notification-index]").forEach(button=>button.onclick=async()=>{
       const n=unreadNotifications[Number(button.dataset.notificationIndex)];if(!n)return;
       const view=n.project_id?"staffProjectsView":"staffTasksView",container=byId(n.project_id?"projectList":"taskList");
@@ -197,8 +204,8 @@ function bindTaskCards(id){
     detail.ontoggle=()=>{if(detail.open){refreshComments(detail).catch(e=>errorAtElement(error,e));if(invite)loadInviteOptions(invite,tid).catch(e=>errorAtElement(error,e));}};
     if(invite)invite.onsubmit=async e=>{e.preventDefault();const button=invite.querySelector("button"),select=invite.elements.user_id;button.disabled=true;error.innerHTML="";
       try{const data=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/collaborators`,{method:"POST",body:{user_id:select.value}});
-        const out=card.querySelector(".task-collaborators"),label=personName(data.user.full_name,data.user.position||roleNames[data.user.role]);
-        out.textContent=out.textContent?`${out.textContent}; ${label}`:`Соисполнители: ${label}`;await loadInviteOptions(invite,tid);
+        const out=card.querySelector(".task-collaborators"),label=personHTML(data.user.full_name,data.user.position||roleNames[data.user.role],data.user.role);
+        out.innerHTML=out.textContent?`${out.innerHTML}; ${label}`:`Соисполнители: ${label}`;await loadInviteOptions(invite,tid);
       }catch(e){errorAtElement(error,e);}finally{button.disabled=false;}
     };
     const rework=detail.querySelector("[data-rework]");
@@ -265,9 +272,9 @@ async function loadTasks(){
       const mine=tasks.filter(t=>t.assignee_id===staffUser.id||(t.collaborators||[]).some(u=>u.id===staffUser.id)),mineDone=mine.filter(t=>t.approved_at).length;
       const limited=role!=="director"&&p.owner_id!==staffUser.id;
       const participants=new Map();
-      tasks.forEach(t=>{const people=[{id:t.assignee_id,full_name:t.assignee_name,position:t.assignee_position},...(t.collaborators||[])];people.forEach(u=>{const item=participants.get(u.id)||{name:personName(u.full_name,u.position),total:0,done:0};item.total++;if(t.approved_at)item.done++;participants.set(u.id,item);});});
-      const involvement=!limited&&participants.size?`<p class="hint">Участники: ${Array.from(participants.values()).map(x=>`${escapeHTML(x.name)} — ${x.done}/${x.total}`).join(" · ")}</p>`:"";
-      return `<article class="project-card"><h3>${escapeHTML(p.title)}</h3><p class="hint">Автор: ${escapeHTML(personName(p.owner_name,p.owner_position))} · ${limited?"Ваши задачи подтверждены":"Подтверждено полностью"}: ${limited?done:(p.approved_tasks??done)} из ${limited?tasks.length:(p.total_tasks??tasks.length)}${mine.length?` · Ваше участие: ${mineDone} из ${mine.length}`:""}</p><p class="task-meta">Проект: ${p.finished_at?"выполнен полностью":"в работе"}</p>${p.owner_id===staffUser.id&&!p.finished_at?`<button class="btn secondary" type="button" data-finish-project="${escapeHTML(p.id)}">Проект выполнен полностью</button>`:""}${involvement}${tasks.length?tasks.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>'}</article>`;
+      tasks.forEach(t=>{const people=[{id:t.assignee_id,full_name:t.assignee_name,position:t.assignee_position,role:t.assignee_role},...(t.collaborators||[])];people.forEach(u=>{const item=participants.get(u.id)||{name:u.full_name,position:u.position,role:u.role,total:0,done:0};item.total++;if(t.approved_at)item.done++;participants.set(u.id,item);});});
+      const involvement=!limited&&participants.size?`<p class="hint">Участники: ${Array.from(participants.values()).map(x=>`${personHTML(x.name,x.position,x.role)} — ${x.done}/${x.total}`).join(" · ")}</p>`:"";
+      return `<article class="project-card"><h3>${escapeHTML(p.title)}</h3><p class="hint">Автор: ${personHTML(p.owner_name,p.owner_position,p.owner_role)} · ${limited?"Ваши задачи подтверждены":"Подтверждено полностью"}: ${limited?done:(p.approved_tasks??done)} из ${limited?tasks.length:(p.total_tasks??tasks.length)}${mine.length?` · Ваше участие: ${mineDone} из ${mine.length}`:""}</p><p class="task-meta">Проект: ${p.finished_at?"выполнен полностью":"в работе"}</p>${p.owner_id===staffUser.id&&!p.finished_at?`<button class="btn secondary" type="button" data-finish-project="${escapeHTML(p.id)}">Проект выполнен полностью</button>`:""}${involvement}${tasks.length?tasks.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>'}</article>`;
     }).join(""):'<p class="nodata">Проектов пока нет.</p>';
     if(manager){const select=byId("taskProject"),previous=select.value,editable=projectData.projects.filter(p=>!p.finished_at&&(role==="director"||p.owner_id===staffUser.id));
       select.innerHTML='<option value="">Текущие задачи</option>'+editable.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.title)}</option>`).join("");

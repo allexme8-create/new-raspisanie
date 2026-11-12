@@ -150,9 +150,11 @@ class PlannerTests(unittest.TestCase):
         try:
             backend.state["planner"] = None
             backend.state["bell_schedule"] = bells()
-            with patch.object(backend, "_save_state"):
-                p = project()
-                saved = backend.planner_save(p)
+            with tempfile.TemporaryDirectory() as folder, patch.object(backend, "_save_state"):
+                store=staff.Store(Path(folder)/"staff.sqlite3");store.init()
+                with patch.object(backend,"staff_store",store):
+                    p = project()
+                    saved = backend.planner_save(p)
                 with self.assertRaises(backend.HTTPException) as conflict:
                     backend.planner_save(project())
                 self.assertEqual(conflict.exception.status_code, 409)

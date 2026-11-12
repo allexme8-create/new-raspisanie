@@ -148,12 +148,16 @@ function renderDutyBanner(){
   if(!boxes.length)return;
   if(!publicDuty){for(const box of boxes)box.textContent=publicDutyError?"Не удалось загрузить данные о дежурстве.":"Загрузка дежурства…";return;}
   const active=activeDutyShifts(publicDuty.timezone),entries=publicDuty.entries||[];
-  const describe=entry=>entry?`${entry.full_name||"ФИО не указано"}${entry.position?` · ${entry.position}`:""}${entry.class_name?` · ${entry.class_name}`:""}`:"Не назначен";
+  const describe=entry=>{
+    if(!entry)return "Не назначен";
+    const name=esc(entry.full_name||"ФИО не указано"),role=["teacher","associate","director"].includes(entry.role)?entry.role:"";
+    return `${entry.full_name&&role?`<span class="person-${role}">${name}</span>`:name}${entry.position?` · ${esc(entry.position)}`:""}${entry.class_name?` · ${esc(entry.class_name)}`:""}`;
+  };
   const formatDay=value=>{
     const day=new Date(value+"T00:00:00Z");
     return `${day.toLocaleDateString("ru-RU",{timeZone:"UTC",day:"numeric",month:"long"})} ${day.getUTCFullYear()} года`;
   };
-  const line=(label,entry,isActive)=>`<p class="${isActive?'duty-active':''}">${esc(label)}: ${entry?`<strong>${esc(describe(entry))}</strong>`:esc(describe(entry))}</p>`;
+  const line=(label,entry,isActive)=>`<p class="${isActive?'duty-active':''}">${esc(label)}: ${entry?`<strong>${describe(entry)}</strong>`:describe(entry)}</p>`;
   const html=`<p class="muted">${esc(formatDay(publicDuty.today))}${!active.length?' · текущая смена не определяется':''}</p>`+
     line("Дежурный администратор",entries.find(e=>e.slot===0),active.length>0)+[1,2].map(shift=>line(`${shift}-я смена · дежурный учитель`,entries.find(e=>e.slot===shift),active.includes(shift))).join("");
   for(const box of boxes)box.innerHTML=html;

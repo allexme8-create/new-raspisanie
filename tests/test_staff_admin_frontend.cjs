@@ -12,11 +12,11 @@ function element(id){
  return map.get(id);
 }
 const calls=[];
-const context={token:'admin-token',$:element,esc:s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),confirm:()=>true,document:{addEventListener:(event,fn)=>handlers[event]=fn},api:async(path,opts={})=>{calls.push({path,opts});if(path==='/api/admin/planner')return {project:{classes:[{name:'5А'},{name:'6Б'}]}};if(path==='/api/admin/users'&&!opts.method)return {users:[{id:'u1',email:'teacher@example.com',role:'teacher',homeroom_class:'5А'}]};if(path.endsWith('/password/reset'))return {password:'new-secret'};if(path.endsWith('/password'))return {password:'current-secret'};if(path==='/api/admin/users')return {user:{id:'u1',email:'teacher@example.com'},password:'initial-secret'};return {ok:true}},console};
+const context={token:'admin-token',$:element,esc:s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),confirm:()=>true,document:{addEventListener:(event,fn)=>handlers[event]=fn},api:async(path,opts={})=>{calls.push({path,opts});if(path==='/api/admin/planner')return {project:{classes:[{name:'5А'},{name:'6Б'}]}};if(path==='/api/admin/users'&&!opts.method)return {users:[{id:'u1',email:'teacher@example.com',full_name:'<Иван>',role:'teacher',homeroom_class:'5А'}]};if(path.endsWith('/password/reset'))return {password:'new-secret'};if(path.endsWith('/password'))return {password:'current-secret'};if(path==='/api/admin/users')return {user:{id:'u1',email:'teacher@example.com'},password:'initial-secret'};return {ok:true}},console};
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff-admin.js','utf8'),context);
 (async()=>{
  await handlers['admin-panel-open']();
- assert.match(element('staffUsersList').innerHTML,/Показать пароль/);assert.match(element('staffHomeroom').innerHTML,/5А/);
+ assert.match(element('staffUsersList').innerHTML,/Показать пароль/);assert.match(element('staffUsersList').innerHTML,/<span class="person-teacher">&lt;Иван&gt;<\/span>/);assert.match(element('staffHomeroom').innerHTML,/5А/);
  assert.doesNotMatch(element('staffUsersList').innerHTML,/current-secret/);assert.match(element('staffUsersList').innerHTML,/Классное руководство/);element('staffEditName0').value='Иванова';element('staffEditEmail0').value='teacher@example.com';element('staffEditPosition0').value='Учитель';element('staffEditClass0').value='6Б';await buttons.edit.onsubmit({preventDefault(){}});assert.ok(calls.some(c=>c.path==='/api/admin/users/u1'&&c.opts.body.homeroom_class==='6Б'&&c.opts.body.full_name==='Иванова'));
  await buttons.show.onclick();
  assert.equal(element('staffPassword0').textContent,'Пароль: current-secret');

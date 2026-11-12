@@ -464,11 +464,13 @@ def task_json(row, current: datetime | None = None) -> dict:
     completed = datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
     current = current or now()
     status = ("completed_on_time" if completed <= due else "completed_late") if completed else ("overdue" if current > due else "pending")
-    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name", "project_id", "director_id", "assignee_position", "director_position", "failure_reason", "approved_at")} | {"status": status, "partial": bool(row["partial"]), "rework": bool(row["rework"]), "cycle": row["cycle"]}
+    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name", "project_id", "director_id", "assignee_position", "director_position", "assignee_role", "director_role", "failure_reason", "approved_at")} | {"status": status, "partial": bool(row["partial"]), "rework": bool(row["rework"]), "cycle": row["cycle"]}
 
 
 TASK_SELECT = '''SELECT tasks.*, CASE WHEN assignee.active=1 THEN assignee.email ELSE 'Удалённый пользователь' END AS assignee_email,
                  CASE WHEN director.active=1 THEN director.email ELSE 'Удалённый пользователь' END AS director_email,
+                 CASE WHEN assignee.active=1 THEN assignee.role ELSE '' END AS assignee_role,
+                 CASE WHEN director.active=1 THEN director.role ELSE '' END AS director_role,
                  CASE WHEN assignee.active=1 THEN assignee.full_name ELSE 'Удалённый пользователь' END AS assignee_name,
                  CASE WHEN director.active=1 THEN director.full_name ELSE 'Удалённый пользователь' END AS director_name,
                  CASE WHEN assignee.active=1 THEN COALESCE(NULLIF(assignee.position,''), CASE assignee.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS assignee_position,
@@ -682,12 +684,12 @@ def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=No
         return {"ok": True}
 
     def duty_rows(db, start: date, end: date, viewer_id: str | None = None):
-        rows = db.execute("""SELECT duty_assignments.day,duty_assignments.slot,duty_assignments.user_id,duty_assignments.class_name,users.active,
+        rows = db.execute("""SELECT duty_assignments.day,duty_assignments.slot,duty_assignments.user_id,duty_assignments.class_name,users.active,users.role,
             CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS full_name,
             CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''),CASE users.role WHEN 'teacher' THEN 'Учитель' ELSE 'Заместитель директора' END) ELSE '' END AS position
             FROM duty_assignments JOIN users ON users.id=duty_assignments.user_id
             WHERE duty_assignments.day BETWEEN ? AND ? ORDER BY duty_assignments.day,duty_assignments.slot""", (start.isoformat(), end.isoformat())).fetchall()
-        entries = {(row["day"],row["slot"]): {"day": row["day"], "slot": row["slot"], "class_name": row["class_name"] if row["active"] else "", "full_name": row["full_name"], "position": row["position"], "mine": bool(viewer_id and row["user_id"] == viewer_id), "source": "manual"} for row in rows if date.fromisoformat(row["day"]).weekday()!=6}
+        entries = {(row["day"],row["slot"]): {"day": row["day"], "slot": row["slot"], "class_name": row["class_name"] if row["active"] else "", "full_name": row["full_name"], "position": row["position"], "role":row["role"] if row["active"] else "", "mine": bool(viewer_id and row["user_id"] == viewer_id), "source": "manual"} for row in rows if date.fromisoformat(row["day"]).weekday()!=6}
         templates = db.execute("""SELECT t.effective_day,t.weekday,t.user_id,u.active,u.full_name,u.position FROM duty_weekly_template t LEFT JOIN users u ON u.id=t.user_id WHERE t.effective_day<=? ORDER BY t.effective_day""",(end.isoformat(),)).fetchall()
         overrides = {row["day"]: row for row in db.execute("""SELECT o.day,o.user_id,u.active,u.full_name,u.position FROM duty_admin_overrides o LEFT JOIN users u ON u.id=o.user_id WHERE o.day BETWEEN ? AND ?""",(start.isoformat(),end.isoformat())).fetchall()}
         periods = [period for year in range(start.year-1,end.year+1) for period in quarters_for_year(db,year)]
@@ -704,7 +706,7 @@ def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=No
                 applicable=[t for t in templates if t["weekday"]==current.weekday() and t["effective_day"]<=day]
                 if applicable: row=applicable[-1]; source="template"
             if row is not None and row["user_id"] and row["active"]:
-                entries[key]={"day":day,"slot":0,"class_name":"","full_name":row["full_name"],"position":row["position"] or "Заместитель директора","mine":bool(viewer_id and row["user_id"]==viewer_id),"source":source}
+                entries[key]={"day":day,"slot":0,"class_name":"","full_name":row["full_name"],"position":row["position"] or "Заместитель директора","role":"associate","mine":bool(viewer_id and row["user_id"]==viewer_id),"source":source}
             current += timedelta(days=1)
         return sorted(entries.values(), key=lambda entry:(entry["day"],entry["slot"]))
 
@@ -942,9 +944,9 @@ def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=No
     def projects(user: dict = Depends(ready_user)):
         with store.connect() as db:
             if user["role"] == "director":
-                rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name, CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS owner_position FROM projects JOIN users ON users.id=projects.owner_id ORDER BY projects.created_at DESC").fetchall()
+                rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name, CASE WHEN users.active=1 THEN users.role ELSE '' END AS owner_role, CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS owner_position FROM projects JOIN users ON users.id=projects.owner_id ORDER BY projects.created_at DESC").fetchall()
             else:
-                rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name, CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS owner_position FROM projects JOIN users ON users.id=projects.owner_id WHERE projects.owner_id=? OR EXISTS (SELECT 1 FROM tasks WHERE tasks.project_id=projects.id AND (tasks.assignee_id=? OR EXISTS (SELECT 1 FROM task_collaborators tc WHERE tc.task_id=tasks.id AND tc.user_id=?))) ORDER BY projects.created_at DESC", (user["id"], user["id"], user["id"])).fetchall()
+                rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name, CASE WHEN users.active=1 THEN users.role ELSE '' END AS owner_role, CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS owner_position FROM projects JOIN users ON users.id=projects.owner_id WHERE projects.owner_id=? OR EXISTS (SELECT 1 FROM tasks WHERE tasks.project_id=projects.id AND (tasks.assignee_id=? OR EXISTS (SELECT 1 FROM task_collaborators tc WHERE tc.task_id=tasks.id AND tc.user_id=?))) ORDER BY projects.created_at DESC", (user["id"], user["id"], user["id"])).fetchall()
             projects = []
             for row in rows:
                 project = dict(row)
@@ -1009,12 +1011,12 @@ def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=No
         with store.connect() as db:
             hidden_ids = {row[0] for row in db.execute("SELECT task_id FROM task_hidden WHERE user_id=?", (user["id"],))}
             rows = db.execute(TASK_SELECT + f" WHERE {condition} ORDER BY tasks.deadline ASC, tasks.created_at DESC", params).fetchall()
-            collaborators = db.execute("""SELECT tc.task_id, u.id, CASE WHEN u.active=1 THEN u.full_name ELSE 'Удалённый пользователь' END AS full_name,
+            collaborators = db.execute("""SELECT tc.task_id, u.id, CASE WHEN u.active=1 THEN u.role ELSE '' END AS role, CASE WHEN u.active=1 THEN u.full_name ELSE 'Удалённый пользователь' END AS full_name,
                 CASE WHEN u.active=1 THEN COALESCE(NULLIF(u.position,''),CASE u.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS position
                 FROM task_collaborators tc JOIN users u ON u.id=tc.user_id JOIN tasks ON tasks.id=tc.task_id WHERE """ + condition + " ORDER BY tc.added_at,tc.user_id", params).fetchall()
         grouped = {}
         for row in collaborators:
-            grouped.setdefault(row["task_id"], []).append({key: row[key] for key in ("id", "full_name", "position")})
+            grouped.setdefault(row["task_id"], []).append({key: row[key] for key in ("id", "full_name", "position", "role")})
         return {"tasks": [task_json(row) | {"collaborators": grouped.get(row["id"], []), "hidden": row["id"] in hidden_ids} for row in rows if include_hidden or row["id"] not in hidden_ids]}
 
     @router.get("/api/staff/tasks/{task_id}/collaborators/candidates")
@@ -1057,6 +1059,7 @@ def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=No
         with store.connect() as db:
             rows = db.execute("""SELECT n.id,n.task_id,n.kind,n.created_at,tasks.description,tasks.project_id,
                 CASE WHEN actor.active=1 THEN actor.full_name ELSE 'Удалённый пользователь' END AS actor_name,
+                CASE WHEN actor.active=1 THEN actor.role ELSE '' END AS actor_role,
                 CASE WHEN actor.active=1 THEN COALESCE(NULLIF(actor.position,''),CASE actor.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS actor_position
                 FROM task_notifications n JOIN tasks ON tasks.id=n.task_id JOIN users actor ON actor.id=n.actor_id
                 WHERE n.recipient_id=? AND n.read_at IS NULL ORDER BY n.id DESC""", (user["id"],)).fetchall()
@@ -1191,10 +1194,12 @@ def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=No
             check_task_access(db, task_id, user)
             rows = db.execute("""SELECT task_comments.id, task_comments.text, task_comments.created_at,
                 CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS author_name,
+                CASE WHEN users.active=1 THEN users.role ELSE '' END AS author_role,
                 CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS author_position
                 FROM task_comments JOIN users ON users.id=task_comments.author_id WHERE task_comments.task_id=? ORDER BY task_comments.created_at,task_comments.id""", (task_id,)).fetchall()
             events = db.execute("""SELECT task_events.id, task_events.text, task_events.created_at,
                 CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS author_name,
+                CASE WHEN users.active=1 THEN users.role ELSE '' END AS author_role,
                 CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS author_position
                 FROM task_events JOIN users ON users.id=task_events.author_id WHERE task_events.task_id=? ORDER BY task_events.created_at,task_events.id""", (task_id,)).fetchall()
             through = db.execute("SELECT MAX(id) FROM task_notifications WHERE task_id=? AND recipient_id=? AND read_at IS NULL", (task_id, user["id"])).fetchone()[0]

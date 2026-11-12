@@ -72,8 +72,12 @@ class StaffTests(unittest.TestCase):
         task = self.client.post("/api/staff/tasks", headers=director_headers, json={"assignee_id": associate["user"]["id"], "description": "Задача", "deadline": (staff.now() + timedelta(days=1)).isoformat()})
         self.assertEqual(task.status_code, 201, task.text)
         self.assertEqual(task.json()["task"]["assignee_name"], "Иванов Иван Иванович")
+        self.assertEqual(task.json()["task"]["assignee_role"], "associate")
+        self.assertEqual(task.json()["task"]["director_role"], "director")
         self.client.delete(f"/api/admin/users/{associate['user']['id']}", headers=self.admin)
-        self.assertEqual(self.client.get("/api/staff/tasks", headers=director_headers).json()["tasks"][0]["assignee_name"], "Удалённый пользователь")
+        deleted_task=self.client.get("/api/staff/tasks", headers=director_headers).json()["tasks"][0]
+        self.assertEqual(deleted_task["assignee_name"], "Удалённый пользователь")
+        self.assertEqual(deleted_task["assignee_role"], "")
         with self.store.connect() as db:
             self.assertEqual(db.execute("SELECT full_name FROM users WHERE id=?", (associate["user"]["id"],)).fetchone()[0], "")
 
@@ -309,6 +313,7 @@ class StaffTests(unittest.TestCase):
         self.client.delete("/api/admin/users/"+teacher["user"]["id"],headers=self.admin)
         comments=self.client.get(base+"/comments",headers=dh).json()["comments"]
         self.assertEqual(comments[0]["author_name"],"Удалённый пользователь")
+        self.assertEqual(comments[0]["author_role"],"")
         self.assertEqual(comments[0]["author_position"],"")
         self.store.init()
         self.assertEqual(len(self.client.get(base+"/comments",headers=dh).json()["comments"]),3)
@@ -347,6 +352,7 @@ class StaffTests(unittest.TestCase):
         tasks=self.client.get("/api/staff/tasks",headers=hh).json()["tasks"]
         self.assertEqual([t["id"] for t in tasks],[task["id"]])
         self.assertEqual(tasks[0]["collaborators"][0]["full_name"],"Помощник")
+        self.assertEqual(tasks[0]["collaborators"][0]["role"],"teacher")
         self.assertEqual(len(self.client.get("/api/staff/projects",headers=hh).json()["projects"]),1)
         history=self.client.get(base+"/comments",headers=hh).json()
         self.assertEqual(history["comments"][0]["text"],"Ранее сделано")
@@ -400,6 +406,7 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(first[0]["kind"],"comment")
         self.assertEqual(first[0]["project_id"],project)
         self.assertEqual(first[0]["actor_name"],"Учитель")
+        self.assertEqual(first[0]["actor_role"],"teacher")
         self.assertEqual(first[0]["actor_position"],"Учитель математики")
         self.assertEqual(self.client.get("/api/staff/notifications",headers=dh).json()["notifications"],[])
         self.assertEqual(self.client.get("/api/staff/notifications",headers=th).json()["notifications"],[])
@@ -705,6 +712,8 @@ class StaffTests(unittest.TestCase):
             self.assertEqual(self.client.post("/api/staff/duty",headers=th2,json={"day":day,"shift":2,"class_name":"6А"}).status_code,201)
             public=self.client.get("/api/duties/today").json()
             self.assertEqual([e["slot"] for e in public["entries"]],[0,1,2])
+            self.assertEqual(public["entries"][0]["role"],"associate")
+            self.assertEqual(public["entries"][1]["role"],"teacher")
             self.assertEqual(public["entries"][1]["full_name"],"Иванов Иван")
             self.assertEqual(public["entries"][1]["class_name"],"5А")
             self.assertNotIn("email",str(public));self.assertNotIn("user_id",str(public))

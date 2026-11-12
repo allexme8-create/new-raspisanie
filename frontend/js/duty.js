@@ -5,6 +5,7 @@ function resetDuty(){
   dutyVersion++;dutyQuarterVersion++;dutyQuarterYear=null;byId("dutyQuarterSection").classList.add("hidden");byId("dutyQuarterForm").classList.add("hidden");byId("dutyQuarterYear").value="";dutyCalendar=null;dutySelected=null;dutyTeachers=[];dutyClasses=[];ownHomeroom="";byId("dutyClassManual").value="";dutyWeek=null;dutyWeekDirty=false;dutyAdminDay=null;byId("dutyWeekFields").innerHTML="";byId("dutyWeekSection").classList.add("hidden");byId("dutyAdminForm").classList.add("hidden");byId("dutyTeacher").innerHTML="";byId("dutyClass").value="";byId("dutyMap").innerHTML="";
   byId("dutyError").innerHTML="";byId("dutySelected").textContent="Выберите свободное место на карте.";byId("dutySubmit").disabled=true;
 }
+const dutyRoleClass=role=>["teacher","associate","director"].includes(role)?`person-${role}`:"";
 const dutySlotLabel=slot=>slot===0?"Дежурный администратор":`${slot}-я смена · учитель`;
 function dutyDateText(value){const date=new Date(value+"T00:00:00Z");return `${date.toLocaleDateString("ru-RU",{timeZone:"UTC",day:"numeric",month:"long"})} ${date.getUTCFullYear()} года`;}
 function dutyShortDate(value){
@@ -36,7 +37,7 @@ function renderDuty(){
       const entry=map.get(`${day}:${slot}`),mine=entry?.mine,allowed=(role==="associate"||slot!==0),canAct=data.active&&day>=data.today;
       const editAdmin=role==="associate"&&slot===0&&canAct?` <button type="button" class="duty-action" data-duty-admin="${escapeHTML(day)}">Изменить на эту дату</button>`:"";
       if(entry){const name=entry.full_name||"ФИО не указано",position=entry.position?` · ${entry.position}`:"",cls=entry.class_name?` · ${entry.class_name}`:"";
-        return `<div class="duty-slot occupied"><span class="duty-mobile-label">${escapeHTML(dutySlotLabel(slot))}: </span><strong>${escapeHTML(name)}</strong>${escapeHTML(position+cls)}${mine&&day>=data.today?` <button type="button" class="duty-action" data-duty-cancel="${escapeHTML(day)}" data-slot="${slot}">Отменить запись</button>`:""}${editAdmin}</div>`;}
+        return `<div class="duty-slot occupied"><span class="duty-mobile-label">${escapeHTML(dutySlotLabel(slot))}: </span><strong class="${entry.full_name?dutyRoleClass(entry.role):''}">${escapeHTML(name)}</strong>${escapeHTML(position+cls)}${mine&&day>=data.today?` <button type="button" class="duty-action" data-duty-cancel="${escapeHTML(day)}" data-slot="${slot}">Отменить запись</button>`:""}${editAdmin}</div>`;}
       const selected=dutySelected?.day===day&&dutySelected?.slot===slot;
       return `<div class="duty-slot"><span class="duty-mobile-label">${escapeHTML(dutySlotLabel(slot))}: </span>${allowed&&canAct?`<button type="button" class="duty-action ${selected?'selected':''}" data-duty-select="${escapeHTML(day)}" data-slot="${slot}">${selected?'Выбрано':'Свободно · выбрать'}</button>`:'<span class="muted">Свободно</span>'}${editAdmin}</div>`;
     }).join("");
@@ -70,7 +71,7 @@ async function loadDutyCalendar(){
       dutyTeachers.forEach(u=>{const name=u.full_name||"ФИО не указано";counts.set(name,(counts.get(name)||0)+1);});
       select.innerHTML='<option value="">Выберите учителя</option>'+dutyTeachers.map(u=>{
         const name=u.full_name||"ФИО не указано",label=name+(counts.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"")+(u.position?` · ${u.position}`:"");
-        return `<option value="${escapeHTML(u.id)}"${u.full_name?"":" disabled"}>${escapeHTML(label)}</option>`;
+        return `<option value="${escapeHTML(u.id)}" class="person-teacher"${u.full_name?"":" disabled"}>${escapeHTML(label)}</option>`;
       }).join("");
       if(dutyTeachers.some(u=>u.id===previous&&u.full_name))select.value=previous;
     }
@@ -112,7 +113,7 @@ function deputyOptions(selected){
   const users=dutyWeek?.deputies||[],counts=new Map();users.forEach(u=>{const name=u.full_name||"ФИО не указано";counts.set(name,(counts.get(name)||0)+1);});
   let options=`<option value="">Не назначен</option>`+users.map(u=>{
     const name=u.full_name||"ФИО не указано",label=name+(counts.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"")+(u.position?` · ${u.position}`:"");
-    return `<option value="${escapeHTML(u.id)}"${u.id===selected?' selected':''}${u.full_name?'':' disabled'}>${escapeHTML(label)}</option>`;
+    return `<option value="${escapeHTML(u.id)}" class="person-associate"${u.id===selected?' selected':''}${u.full_name?'':' disabled'}>${escapeHTML(label)}</option>`;
   }).join("");
   if(selected&&!users.some(u=>u.id===selected))options+=`<option value="${escapeHTML(selected)}" selected disabled>Пользователь удалён — выберите замену</option>`;
   return options;
