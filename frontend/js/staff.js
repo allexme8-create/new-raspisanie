@@ -3,7 +3,7 @@ const byId=id=>document.getElementById(id);
 const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const role=location.pathname==="/Director"?"director":location.pathname==="/teacher"?"teacher":"associate";
 const manager=role!=="teacher", key=`schedule_staff_${role}`;
-let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false, unreadNotifications=[];
+let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false, unreadNotifications=[], showHidden=false;
 byId("pageTitle").textContent=role==="director"?"Кабинет директора":role==="associate"?"Кабинет заместителя директора":"Кабинет учителя";
 const roleNames={director:"Директор",associate:"Заместитель директора",teacher:"Учитель"};
 function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;}
@@ -57,19 +57,24 @@ async function loadAssignees(){
 function fmtDate(iso){return new Date(iso).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});}
 function personName(name,position){return (name||"ФИО не указано")+(position?` · ${position}`:"");}
 function taskMarkup(t){
-  const mine=t.assignee_id===staffUser.id;
-  return `<article class="task-card status-${escapeHTML(t.status)}" data-task-card="${escapeHTML(t.id)}"><div class="task-top"><span class="task-status">${escapeHTML(statuses[t.status]||t.status)}</span><span class="task-deadline">Срок: ${escapeHTML(fmtDate(t.deadline))}</span></div>
+  const mine=t.assignee_id===staffUser.id, author=t.director_id===staffUser.id, participant=mine||(t.collaborators||[]).some(u=>u.id===staffUser.id);
+  return `<article class="task-card status-${escapeHTML(t.status)}" data-task-card="${escapeHTML(t.id)}"><div class="task-top"><span class="task-status">${t.approved_at?"Выполнено полностью":escapeHTML(statuses[t.status]||t.status)}</span><span class="task-deadline">Срок: ${escapeHTML(fmtDate(t.deadline))}</span></div>
     <p class="task-notice hidden"></p>
     <p class="task-description">${escapeHTML(t.description)}</p>
     <p class="task-meta">Исполнитель: ${escapeHTML(personName(t.assignee_name,t.assignee_position))} · Автор: ${escapeHTML(personName(t.director_name,t.director_position))}</p>
     <p class="task-meta task-collaborators">${(t.collaborators||[]).length?`Соисполнители: ${(t.collaborators||[]).map(u=>escapeHTML(personName(u.full_name,u.position))).join("; ")}`:""}</p>
+    ${t.hidden?'<p class="task-meta">Удалена из вашего списка</p>':""}
+    <div class="task-actions">
+      ${author&&t.completed_at&&!t.approved_at?`<button class="btn secondary" type="button" data-approve data-completed-at="${escapeHTML(t.completed_at)}">Выполнено полностью</button>`:""}
+      ${t.hidden?'<button class="btn secondary" type="button" data-restore>Вернуть в список</button>':(author||(participant&&t.approved_at))?'<button class="btn secondary" type="button" data-hide>Удалить из моего списка</button>':""}
+    </div>
     <p class="task-rework">${t.rework?"🔄 Доделать — задача возвращена на доработку":""}</p>
     <p class="task-progress-summary">${t.partial?'Частично выполнено':""}</p>
     <p class="task-reason">${t.failure_reason?`${t.completed_at?'Ранее указанная причина':'Причина невыполнения'}: ${escapeHTML(t.failure_reason)}`:""}</p>
     ${t.completed_at?`<p class="task-meta task-completed-at">Отмечено: ${escapeHTML(fmtDate(t.completed_at))}</p>`:""}
     ${mine?`<label class="task-complete"><input type="checkbox" data-complete="${escapeHTML(t.id)}" data-cycle="${Number.isInteger(t.cycle)?t.cycle:0}" ${t.completed_at?"checked disabled":""}> Выполнено</label>`:""}
     <details class="task-discussion" data-discussion="${escapeHTML(t.id)}"><summary>Ход работы и комментарии</summary>
-      ${t.director_id===staffUser.id&&t.completed_at?`<form data-rework data-completed-at="${escapeHTML(t.completed_at)}"><h3>Вернуть на доработку</h3><div class="field"><label>Комментарий — что нужно доделать<textarea name="comment" maxlength="2000" rows="2" required></textarea></label></div><div class="field"><label>Новый срок<input name="deadline" type="datetime-local" required></label></div><button class="btn secondary" type="submit">Отправить на доработку</button></form>`:""}
+      ${t.director_id===staffUser.id&&t.completed_at&&!t.approved_at?`<form data-rework data-completed-at="${escapeHTML(t.completed_at)}"><h3>Вернуть на доработку</h3><div class="field"><label>Комментарий — что нужно доделать<textarea name="comment" maxlength="2000" rows="2" required></textarea></label></div><div class="field"><label>Новый срок<input name="deadline" type="datetime-local" required></label></div><button class="btn secondary" type="submit">Отправить на доработку</button></form>`:""}
       ${t.director_id===staffUser.id&&!t.completed_at?`<form data-invite><label>Добавить соисполнителя<select name="user_id" required><option value="">Загрузка пользователей…</option></select></label><p class="hint">Соисполнитель увидит задачу, историю и сможет писать комментарии. Изменять состояние может основной исполнитель.</p><button class="btn secondary" type="submit">Добавить</button></form>`:""}
       ${mine&&!t.completed_at?`<form data-progress><label class="task-complete"><input type="checkbox" name="partial" ${t.partial?"checked":""}> Частично выполнено</label><div class="field"><label>Причина невыполнения (необязательно)<textarea name="reason" maxlength="2000" rows="2">${escapeHTML(t.failure_reason||"")}</textarea></label></div><button class="btn secondary" type="submit">Сохранить состояние</button></form>`:""}
       <div class="task-comments" aria-live="polite">Загрузка комментариев…</div>
@@ -117,12 +122,12 @@ async function loadNotifications(){
     unreadNotifications=data.notifications||[];
     const box=byId("staffNotifications"),list=byId("staffNotificationList");
     box.classList.toggle("hidden",unreadNotifications.length===0);
-    list.innerHTML=unreadNotifications.map((n,i)=>`<button class="staff-notification" type="button" data-notification-index="${i}"><strong>${n.kind==="completed"?"✅ Задача выполнена":n.kind==="rework"?"🔄 Задача возвращена на доработку":"💬 Новый комментарий"}</strong><span>${escapeHTML(n.description)}</span><small>${escapeHTML(personName(n.actor_name,n.actor_position))} · ${escapeHTML(fmtDate(n.created_at))}</small></button>`).join("");
+    list.innerHTML=unreadNotifications.map((n,i)=>`<button class="staff-notification" type="button" data-notification-index="${i}"><strong>${n.kind==="completed"?"✅ Задача выполнена":n.kind==="approved"?"✅ Задача подтверждена полностью":n.kind==="rework"?"🔄 Задача возвращена на доработку":"💬 Новый комментарий"}</strong><span>${escapeHTML(n.description)}</span><small>${escapeHTML(personName(n.actor_name,n.actor_position))} · ${escapeHTML(fmtDate(n.created_at))}</small></button>`).join("");
     list.querySelectorAll("[data-notification-index]").forEach(button=>button.onclick=async()=>{
       const n=unreadNotifications[Number(button.dataset.notificationIndex)];if(!n)return;
       const view=n.project_id?"staffProjectsView":"staffTasksView",container=byId(n.project_id?"projectList":"taskList");
       let card=Array.from(container.querySelectorAll("[data-task-card]")).find(c=>c.dataset.taskCard===n.task_id);
-      if((!card||n.kind==="rework")&&!taskDraftsOpen()){await loadTasks();card=Array.from(container.querySelectorAll("[data-task-card]")).find(c=>c.dataset.taskCard===n.task_id);}
+      if((!card||n.kind==="rework")&&!taskDraftsOpen()){if(!card){showHidden=true;updateHiddenButtons();}await loadTasks();card=Array.from(container.querySelectorAll("[data-task-card]")).find(c=>c.dataset.taskCard===n.task_id);}
       if(!card){errorAt("taskListError",new Error("Не удалось открыть задачу. Закройте обсуждения и сохраните черновики, затем обновите список."));return;}
       openStaffView(view);card.scrollIntoView({behavior:"smooth",block:"center"});
       const detail=card.querySelector("[data-discussion]");if(detail.open)refreshComments(detail).catch(e=>errorAtElement(detail.querySelector(".task-action-error"),e));else detail.open=true;
@@ -135,6 +140,16 @@ async function loadNotifications(){
 function bindTaskCards(id){
   byId(id).querySelectorAll("[data-task-card]").forEach(card=>{
     const detail=card.querySelector("[data-discussion]"),error=detail.querySelector(".task-action-error"),tid=detail.dataset.discussion;
+    for(const action of ["approve","hide","restore"]){
+      const button=card.querySelector(`[data-${action}]`);if(!button)continue;
+      button.onclick=async()=>{
+        if(taskDraftsOpen()){errorAt("taskListError",new Error("Закройте обсуждения и сохраните или очистите черновики перед изменением задачи."));return;}
+        const message=action==="approve"?"Подтвердить, что задача выполнена полностью? Вернуть её на доработку после подтверждения нельзя.":action==="hide"?"Удалить задачу только из вашего списка? У остальных участников она останется.":"Вернуть задачу в список?";
+        if(!confirm(message))return;button.disabled=true;
+        try{await request(`/api/staff/tasks/${encodeURIComponent(tid)}/${action}`,{method:"POST",...(action==="approve"?{body:{expected_completed_at:button.dataset.completedAt}}:{})});await loadTasks();await loadNotifications();}
+        catch(e){errorAt("taskListError",e);button.disabled=false;}
+      };
+    }
     const invite=detail.querySelector("[data-invite]");
     detail.ontoggle=()=>{if(detail.open){refreshComments(detail).catch(e=>errorAtElement(error,e));if(invite)loadInviteOptions(invite,tid).catch(e=>errorAtElement(error,e));}};
     if(invite)invite.onsubmit=async e=>{e.preventDefault();const button=invite.querySelector("button"),select=invite.elements.user_id;button.disabled=true;error.innerHTML="";
@@ -188,25 +203,31 @@ function errorAtElement(element,error){element.innerHTML=`<div class="alert err"
 async function loadTasks(){
   if(!staffToken||refreshing||taskDraftsOpen())return;refreshing=true;
   try{
-    const [data,projectData]=await Promise.all([request("/api/staff/tasks"),request("/api/staff/projects")]);
+    const [data,projectData]=await Promise.all([request(`/api/staff/tasks${showHidden?"?include_hidden=true":""}`),request("/api/staff/projects")]);
     if(taskDraftsOpen())return;
     byId("taskListError").innerHTML="";
     const ordinary=data.tasks.filter(t=>!t.project_id);
     byId("taskList").innerHTML=ordinary.length?ordinary.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>';
     byId("projectList").innerHTML=projectData.projects.length?projectData.projects.map(p=>{
-      const tasks=data.tasks.filter(t=>t.project_id===p.id),done=tasks.filter(t=>t.completed_at).length;
-      const mine=tasks.filter(t=>t.assignee_id===staffUser.id||(t.collaborators||[]).some(u=>u.id===staffUser.id)),mineDone=mine.filter(t=>t.completed_at).length;
+      const tasks=data.tasks.filter(t=>t.project_id===p.id),done=tasks.filter(t=>t.approved_at).length;
+      const mine=tasks.filter(t=>t.assignee_id===staffUser.id||(t.collaborators||[]).some(u=>u.id===staffUser.id)),mineDone=mine.filter(t=>t.approved_at).length;
       const limited=role!=="director"&&p.owner_id!==staffUser.id;
       const participants=new Map();
-      tasks.forEach(t=>{const people=[{id:t.assignee_id,full_name:t.assignee_name,position:t.assignee_position},...(t.collaborators||[])];people.forEach(u=>{const item=participants.get(u.id)||{name:personName(u.full_name,u.position),total:0,done:0};item.total++;if(t.completed_at)item.done++;participants.set(u.id,item);});});
+      tasks.forEach(t=>{const people=[{id:t.assignee_id,full_name:t.assignee_name,position:t.assignee_position},...(t.collaborators||[])];people.forEach(u=>{const item=participants.get(u.id)||{name:personName(u.full_name,u.position),total:0,done:0};item.total++;if(t.approved_at)item.done++;participants.set(u.id,item);});});
       const involvement=!limited&&participants.size?`<p class="hint">Участники: ${Array.from(participants.values()).map(x=>`${escapeHTML(x.name)} — ${x.done}/${x.total}`).join(" · ")}</p>`:"";
-      return `<article class="project-card"><h3>${escapeHTML(p.title)}</h3><p class="hint">Автор: ${escapeHTML(personName(p.owner_name,p.owner_position))} · ${limited?"Ваши задачи":"Выполнено"}: ${done} из ${tasks.length}${mine.length?` · Ваше участие: ${mineDone} из ${mine.length}`:""}</p>${involvement}${tasks.length?tasks.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>'}</article>`;
+      return `<article class="project-card"><h3>${escapeHTML(p.title)}</h3><p class="hint">Автор: ${escapeHTML(personName(p.owner_name,p.owner_position))} · ${limited?"Ваши задачи подтверждены":"Подтверждено полностью"}: ${limited?done:(p.approved_tasks??done)} из ${limited?tasks.length:(p.total_tasks??tasks.length)}${mine.length?` · Ваше участие: ${mineDone} из ${mine.length}`:""}</p><p class="task-meta">Проект: ${p.finished_at?"выполнен полностью":"в работе"}</p>${p.owner_id===staffUser.id&&!p.finished_at?`<button class="btn secondary" type="button" data-finish-project="${escapeHTML(p.id)}">Проект выполнен полностью</button>`:""}${involvement}${tasks.length?tasks.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>'}</article>`;
     }).join(""):'<p class="nodata">Проектов пока нет.</p>';
-    if(manager){const select=byId("taskProject"),previous=select.value,editable=projectData.projects.filter(p=>role==="director"||p.owner_id===staffUser.id);
+    if(manager){const select=byId("taskProject"),previous=select.value,editable=projectData.projects.filter(p=>!p.finished_at&&(role==="director"||p.owner_id===staffUser.id));
       select.innerHTML='<option value="">Текущие задачи</option>'+editable.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.title)}</option>`).join("");
       if(editable.some(p=>p.id===previous))select.value=previous;
     }
     bindTaskCards("taskList");bindTaskCards("projectList");paintTaskNotifications();
+    byId("projectList").querySelectorAll("[data-finish-project]").forEach(button=>button.onclick=async()=>{
+      if(taskDraftsOpen()){errorAt("taskListError",new Error("Закройте обсуждения и сохраните черновики перед завершением проекта."));return;}
+      if(!confirm("Подтвердить, что проект выполнен полностью? После этого новые задачи добавить нельзя."))return;button.disabled=true;
+      try{await request(`/api/staff/projects/${encodeURIComponent(button.dataset.finishProject)}/complete`,{method:"POST"});await loadTasks();}
+      catch(e){errorAt("taskListError",e);button.disabled=false;}
+    });
   }catch(e){errorAt("taskListError",e);}finally{refreshing=false;}
 }
 byId("staffLoginForm").onsubmit=async e=>{
@@ -238,6 +259,11 @@ byId("taskForm").onsubmit=async e=>{
 };
 document.querySelectorAll("[data-logout]").forEach(button=>button.onclick=async()=>{
   try{await request("/api/staff/logout",{method:"POST"});}catch(e){}staffToken="";staffUser=null;unreadNotifications=[];byId("staffNotifications").classList.add("hidden");byId("staffNotificationList").innerHTML="";sessionStorage.removeItem(key);screen("staffLoginCard");
+});
+function updateHiddenButtons(){document.querySelectorAll("[data-toggle-hidden]").forEach(button=>button.textContent=showHidden?"Скрыть удалённые мной":"Показать удалённые мной");}
+document.querySelectorAll("[data-toggle-hidden]").forEach(button=>button.onclick=()=>{
+  if(taskDraftsOpen()){errorAt("taskListError",new Error("Закройте обсуждения и сохраните или очистите черновики."));return;}
+  showHidden=!showHidden;updateHiddenButtons();loadTasks();
 });
 byId("taskRefresh").onclick=byId("projectRefresh").onclick=()=>{if(taskDraftsOpen()){errorAt("taskListError",new Error("Закройте обсуждения и сохраните или очистите черновики перед обновлением."));return;}if(manager)loadAssignees();loadTasks();};
 setInterval(()=>{if(!document.hidden&&staffToken&&staffUser&&!byId("staffPanel").classList.contains("hidden")){loadTasks();loadNotifications();}},30000);

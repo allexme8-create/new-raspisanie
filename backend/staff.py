@@ -120,6 +120,10 @@ class Complete(BaseModel):
     cycle: int = Field(default=0, ge=0)
 
 
+class ReworkApproval(BaseModel):
+    expected_completed_at: str = Field(min_length=1, max_length=64)
+
+
 class Rework(BaseModel):
     comment: str = Field(max_length=2000)
     deadline: datetime
@@ -230,6 +234,9 @@ class Store:
             if "position" not in columns:
                 db.execute("ALTER TABLE users ADD COLUMN position TEXT NOT NULL DEFAULT ''")
             db.execute("CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, title TEXT NOT NULL, owner_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL)")
+            project_columns = {row["name"] for row in db.execute("PRAGMA table_info(projects)")}
+            if "finished_at" not in project_columns:
+                db.execute("ALTER TABLE projects ADD COLUMN finished_at TEXT")
             task_columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
             if "project_id" not in task_columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN project_id TEXT REFERENCES projects(id)")
@@ -241,6 +248,9 @@ class Store:
                 db.execute("ALTER TABLE tasks ADD COLUMN rework INTEGER NOT NULL DEFAULT 0")
             if "cycle" not in task_columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN cycle INTEGER NOT NULL DEFAULT 0")
+            if "approved_at" not in task_columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN approved_at TEXT")
+            db.execute("CREATE TABLE IF NOT EXISTS task_hidden (task_id TEXT NOT NULL REFERENCES tasks(id), user_id TEXT NOT NULL REFERENCES users(id), hidden_at TEXT NOT NULL, PRIMARY KEY(task_id,user_id))")
             db.execute("CREATE TABLE IF NOT EXISTS task_comments (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, created_at TEXT NOT NULL)")
             db.execute("CREATE INDEX IF NOT EXISTS task_comments_task ON task_comments(task_id, created_at, id)")
             db.execute("CREATE TABLE IF NOT EXISTS task_events (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, created_at TEXT NOT NULL)")
@@ -310,7 +320,7 @@ def task_json(row, current: datetime | None = None) -> dict:
     completed = datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
     current = current or now()
     status = ("completed_on_time" if completed <= due else "completed_late") if completed else ("overdue" if current > due else "pending")
-    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name", "project_id", "director_id", "assignee_position", "director_position", "failure_reason")} | {"status": status, "partial": bool(row["partial"]), "rework": bool(row["rework"]), "cycle": row["cycle"]}
+    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name", "project_id", "director_id", "assignee_position", "director_position", "failure_reason", "approved_at")} | {"status": status, "partial": bool(row["partial"]), "rework": bool(row["rework"]), "cycle": row["cycle"]}
 
 
 TASK_SELECT = '''SELECT tasks.*, CASE WHEN assignee.active=1 THEN assignee.email ELSE 'Удалённый пользователь' END AS assignee_email,
@@ -499,7 +509,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
     def create_project(body: ProjectCreate, user: dict = Depends(manager)):
         pid = secrets.token_hex(16)
         with store.connect() as db:
-            db.execute("INSERT INTO projects VALUES (?,?,?,?)", (pid, body.title, user["id"], iso(now())))
+            db.execute("INSERT INTO projects (id,title,owner_id,created_at) VALUES (?,?,?,?)", (pid, body.title, user["id"], iso(now())))
         return {"id": pid, "title": body.title}
 
     @router.get("/api/staff/projects")
@@ -509,7 +519,29 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name, CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS owner_position FROM projects JOIN users ON users.id=projects.owner_id ORDER BY projects.created_at DESC").fetchall()
             else:
                 rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name, CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS owner_position FROM projects JOIN users ON users.id=projects.owner_id WHERE projects.owner_id=? OR EXISTS (SELECT 1 FROM tasks WHERE tasks.project_id=projects.id AND (tasks.assignee_id=? OR EXISTS (SELECT 1 FROM task_collaborators tc WHERE tc.task_id=tasks.id AND tc.user_id=?))) ORDER BY projects.created_at DESC", (user["id"], user["id"], user["id"])).fetchall()
-        return {"projects": [dict(row) for row in rows]}
+            projects = []
+            for row in rows:
+                project = dict(row)
+                if user["role"] == "director" or row["owner_id"] == user["id"]:
+                    counts = db.execute("SELECT COUNT(*) AS total, COALESCE(SUM(approved_at IS NOT NULL),0) AS approved FROM tasks WHERE project_id=?", (row["id"],)).fetchone()
+                    project.update(total_tasks=counts["total"], approved_tasks=counts["approved"])
+                projects.append(project)
+        return {"projects": projects}
+
+    @router.post("/api/staff/projects/{project_id}/complete")
+    def complete_project(project_id: str, user: dict = Depends(manager)):
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            project = db.execute("SELECT * FROM projects WHERE id=? AND owner_id=?", (project_id,user["id"])).fetchone()
+            if not project:
+                raise HTTPException(404, "Проект не найден")
+            if project["finished_at"]:
+                raise HTTPException(409, "Проект уже выполнен полностью")
+            if db.execute("SELECT 1 FROM tasks WHERE project_id=? AND approved_at IS NULL LIMIT 1", (project_id,)).fetchone():
+                raise HTTPException(409, "Сначала подтвердите полное выполнение всех задач проекта")
+            finished=iso(now())
+            db.execute("UPDATE projects SET finished_at=? WHERE id=?", (finished,project_id))
+        return {"finished_at":finished}
 
     @router.post("/api/staff/tasks", status_code=201)
     def create_task(body: TaskCreate, user: dict = Depends(manager)):
@@ -523,11 +555,13 @@ def make_router(store: Store, require_admin) -> APIRouter:
             if not assignee or assignee["role"] not in allowed:
                 raise HTTPException(422, "Исполнитель не найден или недоступен для назначения")
             if body.project_id:
-                project = db.execute("SELECT owner_id FROM projects WHERE id=?", (body.project_id,)).fetchone()
+                project = db.execute("SELECT owner_id,finished_at FROM projects WHERE id=?", (body.project_id,)).fetchone()
                 if not project:
                     raise HTTPException(404, "Проект не найден")
                 if user["role"] != "director" and project["owner_id"] != user["id"]:
                     raise HTTPException(403, "Добавлять задачи может автор проекта или директор")
+                if project["finished_at"]:
+                    raise HTTPException(409, "Проект выполнен полностью")
             db.execute("INSERT INTO tasks (id,director_id,assignee_id,description,deadline,created_at,project_id) VALUES (?,?,?,?,?,?,?)", (tid, user["id"], body.assignee_id, body.description, iso(body.deadline), iso(now()), body.project_id))
             db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), tid, user["id"], "Задача создана", iso(now())))
             row = db.execute(TASK_SELECT + " WHERE tasks.id=?", (tid,)).fetchone()
@@ -544,9 +578,10 @@ def make_router(store: Store, require_admin) -> APIRouter:
         return condition, (*params, user["id"])
 
     @router.get("/api/staff/tasks")
-    def tasks(user: dict = Depends(ready_user)):
+    def tasks(include_hidden: bool = False, user: dict = Depends(ready_user)):
         condition, params = task_access(user)
         with store.connect() as db:
+            hidden_ids = {row[0] for row in db.execute("SELECT task_id FROM task_hidden WHERE user_id=?", (user["id"],))}
             rows = db.execute(TASK_SELECT + f" WHERE {condition} ORDER BY tasks.deadline ASC, tasks.created_at DESC", params).fetchall()
             collaborators = db.execute("""SELECT tc.task_id, u.id, CASE WHEN u.active=1 THEN u.full_name ELSE 'Удалённый пользователь' END AS full_name,
                 CASE WHEN u.active=1 THEN COALESCE(NULLIF(u.position,''),CASE u.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS position
@@ -554,7 +589,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
         grouped = {}
         for row in collaborators:
             grouped.setdefault(row["task_id"], []).append({key: row[key] for key in ("id", "full_name", "position")})
-        return {"tasks": [task_json(row) | {"collaborators": grouped.get(row["id"], [])} for row in rows]}
+        return {"tasks": [task_json(row) | {"collaborators": grouped.get(row["id"], []), "hidden": row["id"] in hidden_ids} for row in rows if include_hidden or row["id"] not in hidden_ids]}
 
     @router.get("/api/staff/tasks/{task_id}/collaborators/candidates")
     def collaborator_candidates(task_id: str, user: dict = Depends(ready_user)):
@@ -625,6 +660,49 @@ def make_router(store: Store, require_admin) -> APIRouter:
             task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
         return {"task": task_json(task)}
 
+    @router.post("/api/staff/tasks/{task_id}/approve")
+    def approve_task(task_id: str, body: ReworkApproval, user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM tasks WHERE id=? AND director_id=?", (task_id, user["id"])).fetchone()
+            if not row:
+                raise HTTPException(404, "Задача не найдена")
+            if row["approved_at"]:
+                raise HTTPException(409, "Задача уже подтверждена")
+            if not row["completed_at"] or row["completed_at"] != body.expected_completed_at:
+                raise HTTPException(409, "Состояние задачи изменилось. Обновите страницу.")
+            db.execute("UPDATE tasks SET approved_at=? WHERE id=?", (iso(now()), task_id))
+            db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], "Инициатор подтвердил: выполнено полностью", iso(now())))
+            db.execute("""INSERT INTO task_notifications (task_id,recipient_id,actor_id,kind,created_at)
+                SELECT ?,u.id,?,'approved',? FROM users u WHERE u.active=1 AND u.id<>? AND (u.id=? OR EXISTS (SELECT 1 FROM task_collaborators c WHERE c.task_id=? AND c.user_id=u.id))""",
+                (task_id,user["id"],iso(now()),user["id"],row["assignee_id"],task_id))
+            task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
+        return {"task": task_json(task)}
+
+    @router.post("/api/staff/tasks/{task_id}/hide")
+    def hide_task(task_id: str, user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
+            if not row:
+                raise HTTPException(404, "Задача не найдена")
+            participant = row["assignee_id"] == user["id"] or db.execute("SELECT 1 FROM task_collaborators WHERE task_id=? AND user_id=?", (task_id,user["id"])).fetchone()
+            if row["director_id"] != user["id"] and not participant:
+                raise HTTPException(404, "Задача не найдена")
+            if row["director_id"] != user["id"] and not row["approved_at"]:
+                raise HTTPException(409, "Удалить задачу можно после подтверждения инициатором")
+            db.execute("INSERT OR IGNORE INTO task_hidden VALUES (?,?,?)", (task_id,user["id"],iso(now())))
+            db.execute("UPDATE task_notifications SET read_at=? WHERE task_id=? AND recipient_id=? AND read_at IS NULL", (iso(now()),task_id,user["id"]))
+        return {"ok":True}
+
+    @router.post("/api/staff/tasks/{task_id}/restore")
+    def restore_task(task_id: str, user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            result = db.execute("DELETE FROM task_hidden WHERE task_id=? AND user_id=?", (task_id,user["id"]))
+            if not result.rowcount:
+                raise HTTPException(404, "Задача не найдена")
+        return {"ok":True}
+
     @router.post("/api/staff/tasks/{task_id}/rework")
     def return_for_rework(task_id: str, body: Rework, user: dict = Depends(ready_user)):
         if body.deadline <= now():
@@ -634,6 +712,8 @@ def make_router(store: Store, require_admin) -> APIRouter:
             row = db.execute("SELECT * FROM tasks WHERE id=? AND director_id=?", (task_id, user["id"])).fetchone()
             if not row:
                 raise HTTPException(404, "Задача не найдена")
+            if row["approved_at"]:
+                raise HTTPException(409, "Задача подтверждена как полностью выполненная")
             if not row["completed_at"] or row["completed_at"] != body.expected_completed_at:
                 raise HTTPException(409, "Состояние задачи изменилось. Обновите страницу.")
             new_deadline = iso(body.deadline)

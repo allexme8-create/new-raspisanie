@@ -31,9 +31,9 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js'
  assert.match(el('taskList').innerHTML,/Исполнитель: ФИО не указано/);
  task.assignee_name='Удалённый пользователь';await vm.runInContext('loadTasks()',context);
  assert.match(el('taskList').innerHTML,/Исполнитель: Удалённый пользователь/);
- task.project_id='p';task.assignee_id='u1';task.assignee_name='Иванов Иван';task.completed_at='2029-01-01T00:00:00Z';await vm.runInContext('loadTasks()',context);
+ task.project_id='p';task.assignee_id='u1';task.assignee_name='Иванов Иван';task.completed_at='2029-01-01T00:00:00Z';task.approved_at='2029-01-01T01:00:00Z';await vm.runInContext('loadTasks()',context);
  assert.match(el('projectList').innerHTML,/Проект &lt;тест&gt;/);
- assert.match(el('projectList').innerHTML,/Выполнено: 1 из 1/);
+ assert.match(el('projectList').innerHTML,/Подтверждено полностью: 1 из 1/);
  assert.match(el('projectList').innerHTML,/Участники: Иванов Иван · Учитель &lt;физики&gt; — 1\/1/);
  assert.doesNotMatch(el('taskList').innerHTML,/Иванов Иван/);
  assert.match(el('taskProject').innerHTML,/Проект &lt;тест&gt;/);

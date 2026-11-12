@@ -479,6 +479,62 @@ class StaffTests(unittest.TestCase):
         self.store.init()
         self.assertEqual(self.client.get("/api/staff/tasks",headers=th).json()["tasks"][0]["cycle"],2)
 
+    def test_final_approval_personal_deletion_and_project_completion(self):
+        director=self.create("d-final@example.com", "director")
+        deputy=self.create("a-final@example.com", "associate")
+        teacher=self.create("t-final@example.com", "teacher")
+        helper=self.create("h-final@example.com", "teacher")
+        dh,_=self.ready("d-final@example.com", "director", director["password"])
+        ah,_=self.ready("a-final@example.com", "associate", deputy["password"])
+        th,_=self.ready("t-final@example.com", "teacher", teacher["password"])
+        hh,_=self.ready("h-final@example.com", "teacher", helper["password"])
+        project=self.client.post("/api/staff/projects",headers=ah,json={"title":"Проект"}).json()["id"]
+        body={"assignee_id":teacher["user"]["id"],"description":"Работа", "deadline":(staff.now()+timedelta(days=1)).isoformat(),"project_id":project}
+        task=self.client.post("/api/staff/tasks",headers=ah,json=body).json()["task"]
+        url=f"/api/staff/tasks/{task['id']}"
+        self.client.post(url+"/collaborators",headers=ah,json={"user_id":helper["user"]["id"]})
+        self.assertEqual(self.client.post(url+"/hide",headers=th).status_code,409)
+        self.assertEqual(self.client.post(url+"/hide",headers=hh).status_code,409)
+        self.assertEqual(self.client.post(url+"/hide",headers=dh).status_code,404)
+        self.assertEqual(self.client.post(f"/api/staff/projects/{project}/complete",headers=dh).status_code,404)
+        self.assertEqual(self.client.post(f"/api/staff/projects/{project}/complete",headers=ah).status_code,409)
+        # The author may remove their copy even before approval, without affecting others.
+        self.assertEqual(self.client.post(url+"/hide",headers=ah).status_code,200)
+        self.assertEqual(self.client.get("/api/staff/tasks",headers=ah).json()["tasks"],[])
+        archived=self.client.get("/api/staff/tasks?include_hidden=true",headers=ah).json()["tasks"]
+        self.assertTrue(archived[0]["hidden"])
+        self.assertEqual(len(self.client.get("/api/staff/tasks",headers=th).json()["tasks"]),1)
+        proj=self.client.get("/api/staff/projects",headers=ah).json()["projects"][0]
+        self.assertEqual((proj["total_tasks"],proj["approved_tasks"]),(1,0))
+        complete=self.client.put(url+"/completion",headers=th,json={"completed":True}).json()["task"]
+        payload={"expected_completed_at":complete["completed_at"]}
+        self.assertEqual(self.client.post(url+"/hide",headers=th).status_code,409)
+        self.assertEqual(self.client.post(url+"/approve",headers=dh,json=payload).status_code,404)
+        self.assertEqual(self.client.post(url+"/approve",headers=th,json=payload).status_code,404)
+        self.assertEqual(self.client.post(url+"/approve",headers=ah,json={"expected_completed_at":"wrong"}).status_code,409)
+        approval=self.client.post(url+"/approve",headers=ah,json=payload)
+        self.assertEqual(approval.status_code,200,approval.text)
+        self.assertTrue(approval.json()["task"]["approved_at"])
+        self.assertEqual(self.client.post(url+"/approve",headers=ah,json=payload).status_code,409)
+        self.assertEqual(self.client.post(url+"/rework",headers=ah,json={"comment":"доделать", "deadline":(staff.now()+timedelta(days=2)).isoformat(), **payload}).status_code,409)
+        for headers in (th,hh):
+            self.assertTrue(any(n["kind"]=="approved" for n in self.client.get("/api/staff/notifications",headers=headers).json()["notifications"]))
+        self.assertEqual(self.client.post(url+"/hide",headers=th).status_code,200)
+        self.assertEqual(self.client.get("/api/staff/tasks",headers=th).json()["tasks"],[])
+        self.assertEqual(len(self.client.get("/api/staff/tasks",headers=hh).json()["tasks"]),1)
+        self.assertEqual(len(self.client.get("/api/staff/tasks",headers=dh).json()["tasks"]),1)
+        self.assertEqual(self.client.post(url+"/restore",headers=th).status_code,200)
+        self.assertEqual(len(self.client.get("/api/staff/tasks",headers=th).json()["tasks"]),1)
+        self.assertEqual(self.client.post(f"/api/staff/projects/{project}/complete",headers=ah).status_code,200)
+        self.assertTrue(self.client.get("/api/staff/projects",headers=dh).json()["projects"][0]["finished_at"])
+        self.assertEqual(self.client.post("/api/staff/tasks",headers=ah,json=body).status_code,409)
+        self.assertEqual(self.client.post(f"/api/staff/projects/{project}/complete",headers=ah).status_code,409)
+        self.assertTrue(any("выполнено полностью" in e["text"] for e in self.client.get(url+"/comments",headers=hh).json()["events"]))
+        self.store.init()
+        self.assertEqual(self.client.get("/api/staff/tasks",headers=ah).json()["tasks"],[])
+        self.assertEqual(self.client.post(url+"/restore",headers=ah).status_code,200)
+        self.assertEqual(len(self.client.get("/api/staff/tasks",headers=ah).json()["tasks"]),1)
+
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")
         for _ in range(5):

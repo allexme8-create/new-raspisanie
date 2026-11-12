@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-rework-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-approved-1">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -68,11 +68,12 @@
     <div id="taskListError" aria-live="polite"></div>
     <section id="staffTasksView" class="card hidden">
       <div class="staff-heading"><h2 id="taskListTitle">Состояние текущих задач</h2><button class="btn secondary" id="taskRefresh" type="button">Обновить</button></div>
+      <button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button>
       <div id="taskList"></div>
     </section>
-    <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><div id="projectList"></div></section>
+    <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-rework-1"></script>
+<script src="/js/staff.js?v=staff-approved-1"></script>
 </body>
 </html>
