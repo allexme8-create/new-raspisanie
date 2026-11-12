@@ -77,6 +77,20 @@ class StaffTests(unittest.TestCase):
         with self.store.connect() as db:
             self.assertEqual(db.execute("SELECT full_name FROM users WHERE id=?", (associate["user"]["id"],)).fetchone()[0], "")
 
+    def test_admin_can_set_name_at_creation(self):
+        created = self.client.post("/api/admin/users", headers=self.admin, json={"email":"named@example.com", "role":"teacher", "full_name":"  Иванова  Анна Ивановна  ", "position":"Учитель"})
+        self.assertEqual(created.status_code, 201, created.text)
+        user = created.json()["user"]
+        self.assertEqual(user["full_name"], "Иванова Анна Ивановна")
+        self.assertEqual(self.client.get("/api/admin/users", headers=self.admin).json()["users"][0]["full_name"], user["full_name"])
+        headers, _ = self.ready("named@example.com", "teacher", created.json()["password"])
+        self.assertEqual(self.client.get("/api/staff/me", headers=headers).json()["user"]["full_name"], user["full_name"])
+        self.assertEqual(self.client.put("/api/staff/profile", headers=headers, json={"full_name":"Новое ФИО"}).json()["user"]["full_name"], "Новое ФИО")
+        self.assertEqual(self.client.post("/api/admin/users", headers=self.admin, json={"email":"long@example.com", "role":"teacher", "full_name":"x"*201}).status_code, 422)
+        blank = self.client.post("/api/admin/users", headers=self.admin, json={"email":"blank@example.com", "role":"teacher", "full_name":"   "})
+        self.assertEqual(blank.status_code, 201)
+        self.assertEqual(blank.json()["user"]["full_name"], "")
+
     def test_positions_create_update_and_tasks(self):
         director = self.create("dir@example.com", "director")
         created = self.client.post("/api/admin/users", headers=self.admin, json={"email":"teach@example.com", "role":"teacher", "position":"  Учитель   начальных классов  "})

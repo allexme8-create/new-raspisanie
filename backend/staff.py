@@ -65,6 +65,12 @@ class NewUser(BaseModel):
     email: EmailStr
     role: Literal["director", "associate", "teacher"]
     position: str = Field(default="", max_length=200)
+    full_name: str = Field(default="", max_length=200)
+
+    @field_validator("full_name")
+    @classmethod
+    def clean_name(cls, value: str) -> str:
+        return " ".join(value.split())
 
     @field_validator("position")
     @classmethod
@@ -440,12 +446,12 @@ def make_router(store: Store, require_admin) -> APIRouter:
         try:
             encrypted = store.encrypt_password(password)
             with store.connect() as db:
-                db.execute("INSERT INTO users (id,email,role,password_hash,password_ciphertext,must_change,active,created_at,position) VALUES (?,?,?,?,?,1,1,?,?)", (uid, email, body.role, hash_password(password), encrypted, iso(now()), body.position))
+                db.execute("INSERT INTO users (id,email,role,password_hash,password_ciphertext,must_change,active,created_at,position,full_name) VALUES (?,?,?,?,?,1,1,?,?,?)", (uid, email, body.role, hash_password(password), encrypted, iso(now()), body.position, body.full_name))
         except sqlite3.IntegrityError:
             raise HTTPException(409, "Пользователь с таким e-mail уже существует")
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
-        return {"user": {"id": uid, "email": email, "role": body.role, "full_name": "", "position": body.position}, "password": password}
+        return {"user": {"id": uid, "email": email, "role": body.role, "full_name": body.full_name, "position": body.position}, "password": password}
 
     @router.post("/api/admin/users/{user_id}/password")
     def reveal_password(user_id: str, _: None = Depends(explicit_admin)):

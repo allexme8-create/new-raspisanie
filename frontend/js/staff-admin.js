@@ -45,9 +45,9 @@ $("staffCreateForm").onsubmit=async e=>{
   e.preventDefault();const currentToken=token,button=e.currentTarget.querySelector("button");button.disabled=true;
   $("staffAdminResult").innerHTML="";
   try{
-    const data=await api("/api/admin/users",{method:"POST",body:{email:$("staffEmail").value.trim(),role:$("staffRole").value,position:$("staffPosition").value.trim()}});
+    const data=await api("/api/admin/users",{method:"POST",body:{full_name:$("staffFullName").value.trim(),email:$("staffEmail").value.trim(),role:$("staffRole").value,position:$("staffPosition").value.trim()}});
     if(!currentToken||token!==currentToken)return;
-    $("staffEmail").value="";$("staffPosition").value="";
+    $("staffFullName").value="";$("staffEmail").value="";$("staffPosition").value="";
     $("staffAdminResult").innerHTML=`<div class="alert ok">Пользователь ${esc(data.user.email)} создан. Пароль: <b>${esc(data.password)}</b><br>Передайте его пользователю безопасным способом.</div>`;
     await loadStaffUsers();
   }catch(error){if(token===currentToken)$("staffAdminResult").innerHTML=`<div class="alert err">${esc(error.message)}</div>`;}

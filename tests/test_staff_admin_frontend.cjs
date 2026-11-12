@@ -4,6 +4,7 @@ const vm=require('node:vm');
 const page=fs.readFileSync('frontend/admin.html','utf8');
 assert.doesNotMatch(page,/SMTP_PASSWORD|data-oauth-provider|mailSettingsForm/);
 assert.match(page,/Создать пользователя/);
+assert.match(page,/id="staffFullName"[^>]*maxlength="200"/);
 const map=new Map(),handlers={};
 const buttons={show:{dataset:{showUser:'0'}},reset:{dataset:{resetUser:'0'}},del:{dataset:{deleteUser:'0'}}};
 function element(id){
@@ -22,10 +23,12 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff-adm
  await buttons.show.onclick();assert.equal(element('staffPassword0').textContent,'');
  await buttons.reset.onclick();
  assert.equal(element('staffPassword0').textContent,'Новый пароль: new-secret');
- element('staffEmail').value='teacher@example.com';element('staffRole').value='associate';element('staffPosition').value='Заместитель директора по УВР';
+ element('staffFullName').value='  Иванова Анна  ';element('staffEmail').value='teacher@example.com';element('staffRole').value='associate';element('staffPosition').value='Заместитель директора по УВР';
  await element('staffCreateForm').onsubmit({preventDefault(){},currentTarget:{querySelector:()=>({disabled:false})}});
  assert.match(element('staffAdminResult').innerHTML,/initial-secret/);
  assert.equal(calls.find(c=>c.path==='/api/admin/users' && c.opts.method==='POST').opts.body.position,'Заместитель директора по УВР');
+ assert.equal(calls.find(c=>c.path==='/api/admin/users' && c.opts.method==='POST').opts.body.full_name,'Иванова Анна');
+ assert.equal(element('staffFullName').value,'');
  handlers['admin-panel-close']();assert.equal(element('staffAdminResult').innerHTML,'');assert.equal(element('staffUsersList').innerHTML,'');
  assert.ok(calls.some(c=>c.path==='/api/admin/users/u1/password/reset'));
  console.log('Staff admin password UI OK');
