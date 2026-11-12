@@ -1,4 +1,25 @@
 "use strict";
+function renderMailSettings(data){
+  $("mailSender").value=data.source==="automatic"?data.sender:"";
+  const mode=data.source==="automatic"?"Автоматически по адресу отправителя":"Настройки сервера";
+  const details=data.host&&data.sender?`${esc(data.sender)} · ${esc(data.host)}:${esc(data.port)} · ${esc(data.security.toUpperCase())}`:"Отправитель или сервер не настроен";
+  const password=data.password_configured?"SMTP_PASSWORD задан (подключение ещё не проверено)":"SMTP_PASSWORD не задан";
+  $("mailSettingsStatus").innerHTML=`<div class="alert">${esc(mode)}: ${details}<br>${esc(password)}</div>`;
+}
+async function loadMailSettings(){
+  try{renderMailSettings(await api("/api/admin/mail-settings"));}
+  catch(error){$("mailSettingsStatus").innerHTML=`<div class="alert err">${esc(error.message)}</div>`;}
+}
+async function saveMailSettings(sender){
+  const buttons=$("mailSettingsForm").querySelectorAll("button");buttons.forEach(b=>b.disabled=true);
+  try{renderMailSettings(await api("/api/admin/mail-settings",{method:"PUT",body:{sender}}));}
+  catch(error){$("mailSettingsStatus").innerHTML=`<div class="alert err">${esc(error.message)}</div>`;}
+  finally{buttons.forEach(b=>b.disabled=false);}
+}
+$("mailSettingsForm").onsubmit=e=>{e.preventDefault();saveMailSettings($("mailSender").value.trim());};
+$("mailUseEnvironment").onclick=()=>{if(confirm("Переключиться на SMTP-настройки из переменных сервера?"))saveMailSettings(null);};
+document.addEventListener("admin-panel-open",loadMailSettings);
+if(!$("adminPanel").classList.contains("hidden"))loadMailSettings();
 async function loadStaffUsers(){
   try{
     const data=await api("/api/admin/users");

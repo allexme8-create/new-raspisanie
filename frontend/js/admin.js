@@ -31,6 +31,7 @@ async function api(path,{method="GET",body,form}={}){
 function showPanel(on){
   $("loginCard").classList.toggle("hidden",on);
   $("adminPanel").classList.toggle("hidden",!on);
+  if(on)document.dispatchEvent(new Event("admin-panel-open"));
 }
 function logout(callApi=true){
   const oldToken=token;

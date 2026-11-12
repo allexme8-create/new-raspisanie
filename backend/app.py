@@ -155,7 +155,7 @@ app.include_router(staff.make_router(staff_store, require_admin))
 @app.middleware("http")
 async def private_no_cache(request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith(("/api/staff/", "/api/admin/users")) or request.url.path in ("/Director", "/associate"):
+    if request.url.path.startswith(("/api/staff/", "/api/admin/users", "/api/admin/mail-settings")) or request.url.path in ("/Director", "/associate"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
     return response

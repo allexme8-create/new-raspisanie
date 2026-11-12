@@ -28,7 +28,7 @@ class StaffTests(unittest.TestCase):
         self.client = TestClient(app)
         self.admin = {"Authorization": "Bearer admin"}
         self.passwords = {}
-        self.sender = patch.object(staff, "send_registration", side_effect=lambda email, role, password: self.passwords.update({email: password}))
+        self.sender = patch.object(staff, "send_registration", side_effect=lambda email, role, password, sender=None: self.passwords.update({email: password}))
         self.sender.start()
 
     def tearDown(self):
@@ -146,7 +146,7 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/staff/me", headers=deputy).status_code, 200)
         with patch.object(staff, "send_account_deleted") as sent:
             self.assertEqual(self.client.delete(url, headers=self.admin).status_code, 200)
-            sent.assert_called_once_with("deputy@example.com")
+            sent.assert_called_once_with("deputy@example.com", None)
             self.assertEqual(self.client.delete(url, headers=self.admin).status_code, 404)
             sent.assert_called_once()
         self.assertEqual(self.client.get("/api/staff/me", headers=deputy).status_code, 401)
@@ -178,11 +178,60 @@ class StaffTests(unittest.TestCase):
     def test_deletion_email_text(self):
         with patch.object(staff, "send_mail") as send:
             staff.send_account_deleted("deputy@example.com")
-        recipient, subject, body = send.call_args.args
+        recipient, subject, body, sender = send.call_args.args
+        self.assertIsNone(sender)
         self.assertEqual(recipient, "deputy@example.com")
         self.assertIn("удалена", subject)
         self.assertIn("удалил", body)
         self.assertNotIn("пароль", body.lower())
+
+    def test_auto_smtp_settings_and_fallback(self):
+        self.assertEqual(self.client.get("/api/admin/mail-settings").status_code, 401)
+        self.assertEqual(self.client.put("/api/admin/mail-settings", json={"sender": "staff@yandex.ru"}).status_code, 401)
+        with patch.dict("os.environ", {"SMTP_PASSWORD": "not-shown", "SMTP_HOST": "custom.example", "SMTP_FROM": "custom@example.com", "SMTP_SECURITY": "starttls", "SMTP_PORT": "587"}, clear=True):
+            response = self.client.put("/api/admin/mail-settings", headers=self.admin, json={"sender": "School@Yandex.ru"})
+            self.assertEqual(response.status_code, 200, response.text)
+            config = response.json()
+            self.assertEqual((config["sender"], config["host"], config["port"], config["security"]), ("school@yandex.ru", "smtp.yandex.ru", 465, "ssl"))
+            self.assertTrue(config["password_configured"])
+            self.assertNotIn("not-shown", response.text)
+            self.assertEqual(self.store.sender(), "school@yandex.ru")
+            self.assertEqual(self.client.put("/api/admin/mail-settings", headers=self.admin, json={"sender": "school@unknown.com"}).status_code, 422)
+            self.assertEqual(self.store.sender(), "school@yandex.ru")
+            self.assertEqual(self.client.put("/api/admin/mail-settings", headers=self.admin, json={"sender": "not-an-email"}).status_code, 422)
+            fallback = self.client.put("/api/admin/mail-settings", headers=self.admin, json={"sender": None}).json()
+            self.assertEqual(fallback["source"], "environment")
+            self.assertEqual(fallback["host"], "custom.example")
+            self.assertIsNone(self.store.sender())
+        for address, host in [("a@gmail.com", "smtp.gmail.com"), ("a@mail.ru", "smtp.mail.ru"), ("a@ya.ru", "smtp.yandex.ru")]:
+            self.assertEqual(staff.smtp_settings(address)["host"], host)
+
+    def test_auto_smtp_used_for_registration_and_deletion(self):
+        self.client.put("/api/admin/mail-settings", headers=self.admin, json={"sender": "sender@mail.ru"})
+        self.sender.stop()
+        try:
+            with patch.dict("os.environ", {}, clear=True):
+                failed = self.client.post("/api/admin/users", headers=self.admin, json={"email": "a@example.com", "role": "associate"})
+            self.assertEqual(failed.status_code, 503)
+            self.assertIn("SMTP_PASSWORD", failed.json()["detail"])
+            self.assertEqual(self.client.get("/api/admin/users", headers=self.admin).json()["users"], [])
+        finally:
+            self.sender.start()
+        user = self.create("a@example.com", "associate")
+        with patch.object(staff, "send_account_deleted") as sent:
+            self.assertEqual(self.client.delete("/api/admin/users/"+user["id"], headers=self.admin).status_code, 200)
+            sent.assert_called_once_with("a@example.com", "sender@mail.ru")
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "SMTP_PASSWORD"):
+                staff.send_mail("a@example.com", "Subject", "Body", "sender@mail.ru")
+        from unittest.mock import MagicMock
+        client = MagicMock()
+        client.__enter__.return_value = client
+        with patch.dict("os.environ", {"SMTP_PASSWORD": "app-password", "SMTP_HOST": "ignored", "SMTP_PORT": "123"}, clear=True), patch.object(staff.smtplib, "SMTP_SSL", return_value=client) as smtp:
+            staff.send_mail("a@example.com", "Subject", "Body", "sender@mail.ru")
+        self.assertEqual(smtp.call_args.args[:2], ("smtp.mail.ru", 465))
+        client.login.assert_called_once_with("sender@mail.ru", "app-password")
+        self.assertEqual(client.send_message.call_args.args[0]["From"], "sender@mail.ru")
 
     def test_bruteforce_throttle(self):
         self.create("a@example.com", "associate")

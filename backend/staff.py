@@ -43,15 +43,43 @@ def check_password(password: str, stored: str) -> bool:
         return False
 
 
-def send_mail(email: str, subject: str, body: str) -> None:
+# Только заранее известные серверы: домен получателя на SMTP не влияет.
+SMTP_PROVIDERS = {
+    **{domain: ("smtp.yandex.ru", 465, "ssl") for domain in ("yandex.ru", "yandex.com", "ya.ru", "yandex.by", "yandex.kz")},
+    **{domain: ("smtp.mail.ru", 465, "ssl") for domain in ("mail.ru", "list.ru", "inbox.ru", "bk.ru")},
+    **{domain: ("smtp.gmail.com", 465, "ssl") for domain in ("gmail.com", "googlemail.com")},
+}
+
+
+def smtp_settings(sender_email: str | None) -> dict:
+    secret_present = bool(os.environ.get("SMTP_PASSWORD", ""))
+    if sender_email:
+        domain = sender_email.rsplit("@", 1)[-1].lower()
+        provider = SMTP_PROVIDERS.get(domain)
+        if not provider:
+            raise RuntimeError("Неизвестный почтовый сервис. Поддерживаются Яндекс, Mail.ru и Gmail; для остальных используйте настройки сервера.")
+        host, port, security = provider
+        return {"source": "automatic", "sender": sender_email, "username": sender_email, "host": host, "port": port, "security": security, "password_configured": secret_present}
     host = os.environ.get("SMTP_HOST", "").strip()
     sender = os.environ.get("SMTP_FROM", "").strip()
-    username, secret = os.environ.get("SMTP_USER", ""), os.environ.get("SMTP_PASSWORD", "")
+    username = os.environ.get("SMTP_USER", "").strip()
     security = os.environ.get("SMTP_SECURITY", "starttls").lower()
-    if not host or not sender or security not in ("ssl", "starttls"):
-        raise RuntimeError("SMTP не настроен: укажите SMTP_HOST, SMTP_FROM и защищённый режим SMTP_SECURITY.")
     try:
         port = int(os.environ.get("SMTP_PORT", "465" if security == "ssl" else "587"))
+    except ValueError as exc:
+        raise RuntimeError("Некорректный SMTP_PORT в настройках сервера.") from exc
+    return {"source": "environment", "sender": sender, "username": username, "host": host, "port": port, "security": security, "password_configured": secret_present}
+
+
+def send_mail(email: str, subject: str, body: str, sender_email: str | None = None) -> None:
+    config = smtp_settings(sender_email)
+    host, sender, username, security, port = (config[k] for k in ("host", "sender", "username", "security", "port"))
+    secret = os.environ.get("SMTP_PASSWORD", "")
+    if not host or not sender or security not in ("ssl", "starttls"):
+        raise RuntimeError("SMTP не настроен: укажите почту отправителя или настройки SMTP на сервере.")
+    if sender_email and not secret:
+        raise RuntimeError("Для почты отправителя задайте SMTP_PASSWORD в настройках сервера (обычно это пароль приложения).")
+    try:
         msg = EmailMessage()
         msg["From"] = sender
         msg["To"] = email
@@ -72,7 +100,7 @@ def send_mail(email: str, subject: str, body: str) -> None:
         raise RuntimeError("Не удалось отправить письмо через SMTP. Проверьте настройки почты и доступность сервера.") from exc
 
 
-def send_registration(email: str, role: str, password: str) -> None:
+def send_registration(email: str, role: str, password: str, sender_email: str | None = None) -> None:
     base_url = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
     if base_url:
         try:
@@ -84,16 +112,20 @@ def send_registration(email: str, role: str, password: str) -> None:
             raise RuntimeError("PUBLIC_BASE_URL должен содержать HTTPS-адрес сайта без пути.")
     path = "/Director" if role == "director" else "/associate"
     address = base_url + path if base_url else f"откройте сайт сервиса и перейдите на {path}"
-    send_mail(email, "Доступ к сервису расписания", f"Здравствуйте!\n\nДля вас создана учётная запись.\nСтраница входа: {address}\nЛогин: {email}\nВременный пароль: {password}\n\nПри первом входе необходимо сменить пароль. Не пересылайте это письмо и удалите его после смены пароля.\n")
+    send_mail(email, "Доступ к сервису расписания", f"Здравствуйте!\n\nДля вас создана учётная запись.\nСтраница входа: {address}\nЛогин: {email}\nВременный пароль: {password}\n\nПри первом входе необходимо сменить пароль. Не пересылайте это письмо и удалите его после смены пароля.\n", sender_email)
 
 
-def send_account_deleted(email: str) -> None:
-    send_mail(email, "Учётная запись удалена", "Здравствуйте!\n\nАдминистратор удалил вашу учётную запись в сервисе расписания. Доступ к личному кабинету прекращён. Если у вас возникли вопросы, обратитесь к администратору.\n")
+def send_account_deleted(email: str, sender_email: str | None = None) -> None:
+    send_mail(email, "Учётная запись удалена", "Здравствуйте!\n\nАдминистратор удалил вашу учётную запись в сервисе расписания. Доступ к личному кабинету прекращён. Если у вас возникли вопросы, обратитесь к администратору.\n", sender_email)
 
 
 class NewUser(BaseModel):
     email: EmailStr
     role: Literal["director", "associate"]
+
+
+class MailSettings(BaseModel):
+    sender: EmailStr | None = None
 
 
 class Login(BaseModel):
@@ -160,11 +192,19 @@ class Store:
                     assignee_id TEXT NOT NULL REFERENCES users(id), description TEXT NOT NULL,
                     deadline TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY, value TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS login_attempts (
                     key TEXT PRIMARY KEY, failures INTEGER NOT NULL, blocked_until INTEGER NOT NULL
                 );
             ''')
         self.path.chmod(0o600)
+
+    def sender(self) -> str | None:
+        with self.connect() as db:
+            row = db.execute("SELECT value FROM settings WHERE key='smtp_sender'").fetchone()
+        return row["value"] if row else None
 
 
 def public_user(user) -> dict:
@@ -215,6 +255,27 @@ def make_router(store: Store, require_admin) -> APIRouter:
             raise HTTPException(403, "Доступ только для директора")
         return user
 
+    @router.get("/api/admin/mail-settings")
+    def get_mail_settings(_: None = Depends(require_admin)):
+        try:
+            return smtp_settings(store.sender())
+        except RuntimeError as exc:
+            raise HTTPException(422, str(exc)) from exc
+
+    @router.put("/api/admin/mail-settings")
+    def set_mail_settings(body: MailSettings, _: None = Depends(require_admin)):
+        sender = str(body.sender).strip().lower() if body.sender else None
+        try:
+            settings = smtp_settings(sender)
+        except RuntimeError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        with store.connect() as db:
+            if sender:
+                db.execute("INSERT INTO settings(key,value) VALUES('smtp_sender',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (sender,))
+            else:
+                db.execute("DELETE FROM settings WHERE key='smtp_sender'")
+        return settings
+
     @router.get("/api/admin/users")
     def list_users(_: None = Depends(require_admin)):
         with store.connect() as db:
@@ -231,7 +292,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
         except sqlite3.IntegrityError:
             raise HTTPException(409, "Пользователь с таким e-mail уже существует")
         try:
-            send_registration(email, body.role, password)
+            send_registration(email, body.role, password, store.sender())
         except RuntimeError as exc:
             with store.connect() as db:
                 db.execute("DELETE FROM users WHERE id=? AND active=0", (uid,))
@@ -250,7 +311,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
             if not row:
                 raise HTTPException(404, "Пользователь не найден")
             try:
-                send_account_deleted(row["email"])
+                send_account_deleted(row["email"], store.sender())
             except RuntimeError as exc:
                 raise HTTPException(503, f"Пользователь не удалён. {exc}") from exc
             db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
