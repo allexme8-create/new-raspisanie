@@ -523,6 +523,23 @@ def make_router(store: Store, require_admin) -> APIRouter:
             raise HTTPException(403, "Доступ только для руководства")
         return user
 
+    @router.get("/api/staff/deadline-stats")
+    def deadline_stats(user: dict = Depends(manager)):
+        # All tasks authored by this user, including personal hidden copies and
+        # project tasks. A returned task is measured against its current deadline.
+        with store.connect() as db:
+            rows = db.execute("SELECT deadline,completed_at FROM tasks WHERE director_id=?", (user["id"],)).fetchall()
+        current = now()
+        stats = {"total": len(rows), "in_progress": 0, "overdue": 0, "completed_on_time": 0, "completed_late": 0}
+        for row in rows:
+            deadline = datetime.fromisoformat(row["deadline"])
+            if row["completed_at"]:
+                completed = datetime.fromisoformat(row["completed_at"])
+                stats["completed_on_time" if completed <= deadline else "completed_late"] += 1
+            else:
+                stats["overdue" if current > deadline else "in_progress"] += 1
+        return stats
+
     @router.get("/api/staff/assignees")
     def assignees(user: dict = Depends(manager)):
         roles = ("associate", "teacher") if user["role"] == "director" else ("teacher",)

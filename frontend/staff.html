@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-undo-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-stats-1">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -35,6 +35,7 @@
     <nav id="staffHome" class="home-choices" aria-label="Разделы личного кабинета">
       <button class="home-choice" type="button" data-staff-view="staffProfileView"><span class="home-choice-icon" aria-hidden="true">👤</span><strong>Мой профиль</strong><span aria-hidden="true">→</span></button>
       <button class="home-choice" id="staffCreateChoice" type="button" data-staff-view="staffCreateView"><span class="home-choice-icon" aria-hidden="true">✏️</span><strong>Поставить задачу или создать проект</strong><span aria-hidden="true">→</span></button>
+      <button class="home-choice" id="staffStatsChoice" type="button" data-staff-view="staffStatsView"><span class="home-choice-icon" aria-hidden="true">📊</span><strong>Статистика сроков</strong><span aria-hidden="true">→</span></button>
       <button class="home-choice" type="button" data-staff-view="staffTasksView"><span class="home-choice-icon" aria-hidden="true">📋</span><strong>Состояние текущих задач</strong><span aria-hidden="true">→</span></button>
       <button class="home-choice" type="button" data-staff-view="staffProjectsView"><span class="home-choice-icon" aria-hidden="true">📁</span><strong>Состояние проектов</strong><span aria-hidden="true">→</span></button>
     </nav>
@@ -66,6 +67,11 @@
     </section>
     </div>
     <div id="taskListError" aria-live="polite"></div>
+    <section id="staffStatsView" class="card hidden">
+      <div class="staff-heading"><h2>Статистика сроков</h2><button class="btn secondary" id="statsRefresh" type="button">Обновить</button></div>
+      <p class="hint">Все задачи, поставленные вами, включая проектные и удалённые из вашего списка. Выполнение считается по отметке исполнителя; для возвращённых задач учитывается новый срок.</p>
+      <div id="statsError" aria-live="polite"></div><div id="deadlineStats" aria-live="polite"><p class="muted">Загрузка…</p></div>
+    </section>
     <section id="staffTasksView" class="card hidden">
       <div class="staff-heading"><h2 id="taskListTitle">Состояние текущих задач</h2><button class="btn secondary" id="taskRefresh" type="button">Обновить</button></div>
       <button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button>
@@ -74,6 +80,6 @@
     <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-undo-1"></script>
+<script src="/js/staff.js?v=staff-stats-1"></script>
 </body>
 </html>

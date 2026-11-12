@@ -9,13 +9,14 @@ const roleNames={director:"Директор",associate:"Заместитель �
 function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;}
 const statuses={pending:"В работе",overdue:"Просрочено",completed_on_time:"Выполнено в срок",completed_late:"Выполнено с просрочкой"};
 function screen(id){["staffLoginCard","changePasswordCard","staffPanel"].forEach(x=>byId(x).classList.toggle("hidden",x!==id));}
-const staffViews=["staffProfileView","staffCreateView","staffTasksView","staffProjectsView"];
+const staffViews=["staffProfileView","staffCreateView","staffStatsView","staffTasksView","staffProjectsView"];
 function openStaffView(id){
-  if(id==="staffCreateView"&&!manager)return;
+  if((id==="staffCreateView"||id==="staffStatsView")&&!manager)return;
   if(id!=="staffHome"&&!staffViews.includes(id))return;
   byId("staffHome").classList.toggle("hidden",id!=="staffHome");
   byId("staffBack").classList.toggle("hidden",id==="staffHome");
   staffViews.forEach(view=>byId(view).classList.toggle("hidden",view!==id));
+  if(id==="staffStatsView")loadDeadlineStats();
 }
 document.querySelectorAll("[data-staff-view]").forEach(button=>button.onclick=()=>openStaffView(button.dataset.staffView));
 byId("staffBack").onclick=()=>openStaffView("staffHome");
@@ -36,11 +37,24 @@ async function showSession(data){
   if(data.must_change){screen("changePasswordCard");return;}
   screen("staffPanel");showIdentity(staffUser);
   byId("staffFullName").value=staffUser.full_name||"";byId("staffPosition").value=staffUser.position||"";byId("profileResult").innerHTML="";
-  byId("staffCreateChoice").classList.toggle("hidden",!manager);openStaffView("staffHome");
+  byId("staffCreateChoice").classList.toggle("hidden",!manager);byId("staffStatsChoice").classList.toggle("hidden",!manager);openStaffView("staffHome");
   if(manager)await loadAssignees();
   await loadTasks();
   await loadNotifications();
+  if(manager)await loadDeadlineStats();
 }
+async function loadDeadlineStats(){
+  if(!manager||!staffToken||!staffUser)return;
+  const tokenAtStart=staffToken;
+  try{
+    const stats=await request("/api/staff/deadline-stats");if(staffToken!==tokenAtStart)return;
+    const number=value=>Number.isSafeInteger(value)&&value>=0?value:0;
+    const total=number(stats.total),onTime=number(stats.completed_on_time),late=number(stats.completed_late),done=onTime+late;
+    byId("statsError").innerHTML="";
+    byId("deadlineStats").innerHTML=`<div class="deadline-stats"><div><strong>${total}</strong><span>Всего задач</span></div><div><strong>${number(stats.in_progress)}</strong><span>В работе, срок не истёк</span></div><div class="deadline-stat-warn"><strong>${number(stats.overdue)}</strong><span>Просрочено</span></div><div class="deadline-stat-ok"><strong>${onTime}</strong><span>Выполнено в срок</span></div><div class="deadline-stat-warn"><strong>${late}</strong><span>Выполнено с опозданием</span></div><div><strong>${done?`${Math.round(onTime/done*100)}%`:"—"}</strong><span>В срок среди выполненных</span></div></div>`;
+  }catch(e){if(staffToken===tokenAtStart)errorAt("statsError",e);}
+}
+byId("statsRefresh").onclick=loadDeadlineStats;
 async function loadAssignees(){
   try{
     const data=await request("/api/staff/assignees"),select=byId("taskAssignee"),previous=select.value;
@@ -275,5 +289,5 @@ document.querySelectorAll("[data-toggle-hidden]").forEach(button=>button.onclick
   showHidden=!showHidden;updateHiddenButtons();loadTasks();
 });
 byId("taskRefresh").onclick=byId("projectRefresh").onclick=()=>{if(taskDraftsOpen()){errorAt("taskListError",new Error("Закройте обсуждения и сохраните или очистите черновики перед обновлением."));return;}if(manager)loadAssignees();loadTasks();};
-setInterval(()=>{if(!document.hidden&&staffToken&&staffUser&&!byId("staffPanel").classList.contains("hidden")){loadTasks();loadNotifications();}},30000);
+setInterval(()=>{if(!document.hidden&&staffToken&&staffUser&&!byId("staffPanel").classList.contains("hidden")){loadTasks();loadNotifications();if(manager)loadDeadlineStats();}},30000);
 if(staffToken)request("/api/staff/me").then(showSession).catch(e=>{if(staffToken)errorAt("staffLoginError",e);screen("staffLoginCard");});

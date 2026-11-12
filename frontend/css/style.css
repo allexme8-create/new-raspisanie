@@ -272,3 +272,5 @@ footer a{color:var(--muted)}
 .task-rework{font-weight:750;color:#a44008;margin:6px 0}.task-discussion input[type=datetime-local]{display:block;width:100%;margin-top:6px;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit}
 
 .task-actions{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.task-actions:empty{display:none}.task-actions .btn{width:auto;padding:8px 12px}.staff-hidden-toggle{margin-bottom:10px}.project-card>[data-finish-project]{width:auto;margin:6px 0 10px;padding:8px 12px}
+
+.deadline-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.deadline-stats>div{display:flex;flex-direction:column;gap:3px;border:1px solid var(--line);border-radius:12px;background:#f8f9fd;padding:12px}.deadline-stats strong{font-size:23px;line-height:1.2;color:var(--ink)}.deadline-stats span{font-size:13px;color:var(--muted)}.deadline-stats .deadline-stat-warn{background:#fff5ef;border-color:#f3d7c7}.deadline-stats .deadline-stat-warn strong{color:#b45309}.deadline-stats .deadline-stat-ok{background:var(--ok-soft);border-color:var(--ok-line)}.deadline-stats .deadline-stat-ok strong{color:var(--ok)}

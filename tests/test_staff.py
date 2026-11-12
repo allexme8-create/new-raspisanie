@@ -5,6 +5,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -580,6 +581,38 @@ class StaffTests(unittest.TestCase):
             "Задача выполнена", "Инициатор подтвердил: выполнено полностью"])]
         visible = staff.visible_task_events(events)
         self.assertEqual([e["text"] for e in visible], ["Задача создана", "Задача выполнена", "Возвращено на доработку. Причина: исправить", "Задача выполнена", "Инициатор подтвердил: выполнено полностью"])
+
+    def test_initiator_deadline_stats(self):
+        director=self.create("stats-d@example.com", "director")
+        deputy=self.create("stats-a@example.com", "associate")
+        teacher=self.create("stats-t@example.com", "teacher")
+        dh,_=self.ready("stats-d@example.com", "director", director["password"])
+        ah,_=self.ready("stats-a@example.com", "associate", deputy["password"])
+        th,_=self.ready("stats-t@example.com", "teacher", teacher["password"])
+        self.assertEqual(self.client.get("/api/staff/deadline-stats").status_code,401)
+        self.assertEqual(self.client.get("/api/staff/deadline-stats",headers=th).status_code,403)
+        empty=self.client.get("/api/staff/deadline-stats",headers=dh).json()
+        self.assertEqual(empty,{"total":0,"in_progress":0,"overdue":0,"completed_on_time":0,"completed_late":0})
+        project=self.client.post("/api/staff/projects",headers=ah,json={"title":"Проект заместителя"}).json()["id"]
+        body={"assignee_id":teacher["user"]["id"],"description":"Задача","deadline":(staff.now()+timedelta(days=1)).isoformat()}
+        ids=[self.client.post("/api/staff/tasks",headers=dh,json=body | ({"project_id":project} if i==0 else {})).json()["task"]["id"] for i in range(4)]
+        self.client.post("/api/staff/tasks",headers=ah,json=body | {"project_id":project})
+        current=datetime(2030,1,1,tzinfo=timezone.utc)
+        before=(current-timedelta(days=1)).isoformat();after=(current+timedelta(days=1)).isoformat()
+        with self.store.connect() as db:
+            db.execute("UPDATE tasks SET deadline=? WHERE id=?",(after,ids[0]))
+            db.execute("UPDATE tasks SET deadline=? WHERE id=?",(before,ids[1]))
+            db.execute("UPDATE tasks SET deadline=?,completed_at=? WHERE id=?",(before,before,ids[2]))
+            db.execute("UPDATE tasks SET deadline=?,completed_at=? WHERE id=?",(before,current.isoformat(),ids[3]))
+        self.client.post(f"/api/staff/tasks/{ids[3]}/hide",headers=dh)
+        with patch.object(staff,"now",return_value=current):
+            result=self.client.get("/api/staff/deadline-stats",headers=dh).json()
+            self.assertEqual(result,{"total":4,"in_progress":1,"overdue":1,"completed_on_time":1,"completed_late":1})
+            self.assertEqual(self.client.get("/api/staff/deadline-stats",headers=ah).json()["total"],1)
+            with self.store.connect() as db:
+                db.execute("UPDATE tasks SET completed_at=NULL,deadline=?,rework=1 WHERE id=?",(after,ids[3]))
+            result=self.client.get("/api/staff/deadline-stats",headers=dh).json()
+            self.assertEqual((result["in_progress"],result["completed_late"]),(2,0))
 
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")
