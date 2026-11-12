@@ -233,6 +233,66 @@ class StaffTests(unittest.TestCase):
         client.login.assert_called_once_with("sender@mail.ru", "app-password")
         self.assertEqual(client.send_message.call_args.args[0]["From"], "sender@mail.ru")
 
+    def test_password_reset_flow_revokes_sessions_and_is_one_use(self):
+        user = self.create("reset@example.com", "associate")
+        old_session = self.ready("reset@example.com", "associate")
+        body = {"email": "reset@example.com", "role": "associate"}
+        with patch.object(staff, "send_password_reset") as send:
+            response = self.client.post("/api/staff/password-reset/request", json=body)
+            self.assertEqual(response.status_code, 200)
+            args = send.call_args.args
+            self.assertEqual(args[0], "reset@example.com")
+            code = args[2]
+            self.assertNotIn(code, response.text)
+            with self.store.connect() as db:
+                row = db.execute("SELECT token_hash FROM password_resets WHERE user_id=?", (user["id"],)).fetchone()
+                self.assertNotIn(code, row["token_hash"])
+            self.client.post("/api/staff/password-reset/request", json=body)
+            send.assert_called_once()  # Повторная отправка ограничена.
+        unknown = self.client.post("/api/staff/password-reset/request", json={"email": "unknown@example.com", "role": "associate"})
+        self.assertEqual(unknown.json(), response.json())
+        confirm = body | {"code": code, "password": "новый пароль для восстановления"}
+        self.assertEqual(self.client.post("/api/staff/password-reset/confirm", json=confirm | {"role": "director"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/staff/password-reset/confirm", json=confirm | {"code": "wrong"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/staff/password-reset/confirm", json=confirm).status_code, 200)
+        self.assertEqual(self.client.post("/api/staff/password-reset/confirm", json=confirm).status_code, 400)
+        self.assertEqual(self.client.get("/api/staff/me", headers=old_session).status_code, 401)
+        login = self.client.post("/api/staff/login", json=body | {"password": confirm["password"]})
+        self.assertEqual(login.status_code, 200)
+        self.assertFalse(login.json()["must_change"])
+
+    def test_reset_expiry_failure_and_attempt_limit(self):
+        user = self.create("reset@example.com", "director")
+        body = {"email": "reset@example.com", "role": "director"}
+        with patch.object(staff, "send_password_reset", side_effect=RuntimeError("SMTP error")):
+            response = self.client.post("/api/staff/password-reset/request", json=body)
+            self.assertEqual(response.status_code, 200)
+        with self.store.connect() as db:
+            self.assertIsNone(db.execute("SELECT * FROM password_resets WHERE user_id=?", (user["id"],)).fetchone())
+            db.execute("DELETE FROM reset_throttle")
+        with patch.object(staff, "send_password_reset") as send:
+            self.client.post("/api/staff/password-reset/request", json=body)
+            code = send.call_args.args[2]
+        confirm = body | {"code": code, "password": "a very strong new password"}
+        with self.store.connect() as db:
+            db.execute("UPDATE password_resets SET expires=0 WHERE user_id=?", (user["id"],))
+        self.assertEqual(self.client.post("/api/staff/password-reset/confirm", json=confirm).status_code, 400)
+        with self.store.connect() as db:
+            db.execute("UPDATE password_resets SET expires=? WHERE user_id=?", (int(staff.time.time())+100, user["id"]))
+        for _ in range(10):
+            self.assertEqual(self.client.post("/api/staff/password-reset/confirm", json=confirm | {"code": "wrong"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/staff/password-reset/confirm", json=confirm).status_code, 400)
+
+    def test_reset_code_revoked_on_deletion(self):
+        user = self.create("reset@example.com", "associate")
+        body = {"email": "reset@example.com", "role": "associate"}
+        with patch.object(staff, "send_password_reset") as send:
+            self.client.post("/api/staff/password-reset/request", json=body)
+            code = send.call_args.args[2]
+        with patch.object(staff, "send_account_deleted"):
+            self.assertEqual(self.client.delete("/api/admin/users/" + user["id"], headers=self.admin).status_code, 200)
+        self.assertEqual(self.client.post("/api/staff/password-reset/confirm", json=body | {"code": code, "password": "a very strong password"}).status_code, 400)
+
     def test_bruteforce_throttle(self):
         self.create("a@example.com", "associate")
         for _ in range(5):

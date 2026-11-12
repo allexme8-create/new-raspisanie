@@ -236,3 +236,5 @@ footer a{color:var(--muted)}
 .task-complete{display:inline-flex;align-items:center;gap:8px;margin-top:8px;font-weight:650;cursor:pointer}
 .task-complete input{width:19px;height:19px;accent-color:var(--ok)}
 @media(max-width:640px){.staff-main .field input,.staff-main .field select,.staff-main .field textarea{font-size:16px}}
+
+.reset-confirm{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}

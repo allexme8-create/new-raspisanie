@@ -7,7 +7,7 @@ let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false
 byId("pageTitle").textContent=role==="director"?"Кабинет директора":"Кабинет заместителя директора";
 byId("taskListTitle").textContent=role==="director"?"Контроль задач":"Мои задачи";
 const statuses={pending:"В работе",overdue:"Просрочено",completed_on_time:"Выполнено в срок",completed_late:"Выполнено с просрочкой"};
-function screen(id){["staffLoginCard","changePasswordCard","staffPanel"].forEach(x=>byId(x).classList.toggle("hidden",x!==id));}
+function screen(id){["staffLoginCard","resetPasswordCard","changePasswordCard","staffPanel"].forEach(x=>byId(x).classList.toggle("hidden",x!==id));}
 function errorAt(id,error){byId(id).innerHTML=`<div class="alert err">${escapeHTML(error.message)}</div>`;}
 async function request(path,{method="GET",body,anonymous=false}={}){
   const headers={};
@@ -65,6 +65,29 @@ byId("staffLoginForm").onsubmit=async e=>{
   e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("staffLoginError").innerHTML="";
   try{const data=await request("/api/staff/login",{method:"POST",anonymous:true,body:{email:byId("loginEmail").value.trim(),password:byId("loginPassword").value,role}});staffToken=data.token;sessionStorage.setItem(key,staffToken);byId("loginPassword").value="";await showSession(data);}
   catch(error){errorAt("staffLoginError",error);}finally{button.disabled=false;}
+};
+byId("forgotPassword").onclick=()=>{
+  byId("resetEmail").value=byId("loginEmail").value;
+  byId("resetMessage").innerHTML="";screen("resetPasswordCard");
+};
+byId("resetBack").onclick=()=>{byId("resetCode").value="";byId("resetNewPassword").value="";byId("resetRepeatPassword").value="";screen("staffLoginCard");};
+byId("resetRequestForm").onsubmit=async e=>{
+  e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("resetMessage").innerHTML="";
+  try{
+    const data=await request("/api/staff/password-reset/request",{method:"POST",anonymous:true,body:{email:byId("resetEmail").value.trim(),role}});
+    byId("resetMessage").innerHTML=`<div class="alert ok">${escapeHTML(data.message)} Проверьте также папку «Спам».</div>`;
+  }catch(error){errorAt("resetMessage",error);}finally{button.disabled=false;}
+};
+byId("resetConfirmForm").onsubmit=async e=>{
+  e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("resetMessage").innerHTML="";
+  try{
+    const email=byId("resetEmail").value.trim(),password=byId("resetNewPassword").value;
+    if(!email)throw new Error("Укажите e-mail учётной записи");
+    if(password!==byId("resetRepeatPassword").value)throw new Error("Пароли не совпадают");
+    await request("/api/staff/password-reset/confirm",{method:"POST",anonymous:true,body:{email,role,code:byId("resetCode").value.trim(),password}});
+    byId("loginEmail").value=email;byId("resetCode").value="";byId("resetNewPassword").value="";byId("resetRepeatPassword").value="";
+    byId("staffLoginError").innerHTML='<div class="alert ok">Пароль изменён. Войдите с новым паролем.</div>';screen("staffLoginCard");
+  }catch(error){errorAt("resetMessage",error);}finally{button.disabled=false;}
 };
 byId("staffPasswordForm").onsubmit=async e=>{
   e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("passwordError").innerHTML="";

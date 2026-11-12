@@ -15,10 +15,11 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 SESSION_TTL = 12 * 60 * 60
+RESET_TTL = 30 * 60
 
 
 def now() -> datetime:
@@ -119,6 +120,11 @@ def send_account_deleted(email: str, sender_email: str | None = None) -> None:
     send_mail(email, "Учётная запись удалена", "Здравствуйте!\n\nАдминистратор удалил вашу учётную запись в сервисе расписания. Доступ к личному кабинету прекращён. Если у вас возникли вопросы, обратитесь к администратору.\n", sender_email)
 
 
+def send_password_reset(email: str, role: str, code: str, sender_email: str | None = None) -> None:
+    path = "/Director" if role == "director" else "/associate"
+    send_mail(email, "Восстановление доступа к сервису расписания", f"Здравствуйте!\n\nПолучен запрос на восстановление пароля. Откройте сайт сервиса, страницу {path}, и нажмите «Забыли пароль?». Введите ваш e-mail и код ниже. Код действует 30 минут и может быть использован только один раз.\n\nКод: {code}\n\nЕсли вы не запрашивали восстановление, проигнорируйте это письмо. Никому не сообщайте код.\n", sender_email)
+
+
 class NewUser(BaseModel):
     email: EmailStr
     role: Literal["director", "associate"]
@@ -132,6 +138,16 @@ class Login(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=256)
     role: Literal["director", "associate"]
+
+
+class ResetRequest(BaseModel):
+    email: EmailStr
+    role: Literal["director", "associate"]
+
+
+class ResetConfirm(ResetRequest):
+    code: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=12, max_length=256)
 
 
 class PasswordChange(BaseModel):
@@ -194,6 +210,16 @@ class Store:
                 );
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY, value TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS password_resets (
+                    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS reset_throttle (
+                    key TEXT PRIMARY KEY, requested_at INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS reset_ip_throttle (
+                    key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, count INTEGER NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS login_attempts (
                     key TEXT PRIMARY KEY, failures INTEGER NOT NULL, blocked_until INTEGER NOT NULL
@@ -315,10 +341,72 @@ def make_router(store: Store, require_admin) -> APIRouter:
             except RuntimeError as exc:
                 raise HTTPException(503, f"Пользователь не удалён. {exc}") from exc
             db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            db.execute("DELETE FROM password_resets WHERE user_id=?", (user_id,))
             db.execute("DELETE FROM login_attempts WHERE key=?", (hashlib.sha256(row["email"].encode()).hexdigest(),))
             # Задачи остаются для истории, но учетная запись и e-mail для входа удаляются.
             db.execute("UPDATE users SET active=0, email=?, password_hash='', must_change=1 WHERE id=?", (f"__deleted__:{user_id}", user_id))
         return {"ok": True, "message": "Пользователь удалён, уведомление отправлено"}
+
+    def deliver_reset(user_id: str, email: str, role: str, code: str, code_hash: str, sender: str | None) -> None:
+        try:
+            send_password_reset(email, role, code, sender)
+        except Exception:
+            # Ошибка доставки не раскрывается пользователю и не оставляет рабочий код.
+            with store.connect() as db:
+                db.execute("DELETE FROM password_resets WHERE user_id=? AND token_hash=?", (user_id, code_hash))
+
+    @router.post("/api/staff/password-reset/request")
+    def request_reset(body: ResetRequest, request: Request, background: BackgroundTasks):
+        email = str(body.email).strip().lower()
+        current = int(time.time())
+        key = hashlib.sha256((body.role + ":" + email).encode()).hexdigest()
+        peer = request.client.host if request.client else "unknown"
+        ip_key = hashlib.sha256(peer.encode()).hexdigest()
+        delivery = None
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("DELETE FROM reset_throttle WHERE requested_at<?", (current - 86400,))
+            db.execute("DELETE FROM reset_ip_throttle WHERE window_start<?", (current - 3600,))
+            db.execute("DELETE FROM password_resets WHERE expires<=?", (current,))
+            ip_limit = db.execute("SELECT * FROM reset_ip_throttle WHERE key=?", (ip_key,)).fetchone()
+            count = ip_limit["count"] if ip_limit and ip_limit["window_start"] > current - 60 else 0
+            window = ip_limit["window_start"] if count else current
+            db.execute("INSERT INTO reset_ip_throttle VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET window_start=excluded.window_start, count=excluded.count", (ip_key, window, count + 1))
+            last = db.execute("SELECT requested_at FROM reset_throttle WHERE key=?", (key,)).fetchone()
+            allowed = count < 20 and (not last or last["requested_at"] <= current - 60)
+            if allowed:
+                db.execute("INSERT INTO reset_throttle VALUES (?,?) ON CONFLICT(key) DO UPDATE SET requested_at=excluded.requested_at", (key, current))
+                user = db.execute("SELECT id FROM users WHERE email=? AND role=? AND active=1", (email, body.role)).fetchone()
+                if user:
+                    code = secrets.token_urlsafe(32)
+                    code_hash = token_hash(code)
+                    db.execute("INSERT INTO password_resets(user_id,token_hash,expires,attempts) VALUES (?,?,?,0) ON CONFLICT(user_id) DO UPDATE SET token_hash=excluded.token_hash, expires=excluded.expires, attempts=0", (user["id"], code_hash, current + RESET_TTL))
+                    sender_row = db.execute("SELECT value FROM settings WHERE key='smtp_sender'").fetchone()
+                    delivery = (user["id"], email, body.role, code, code_hash, sender_row["value"] if sender_row else None)
+        if delivery:
+            background.add_task(deliver_reset, *delivery)
+        return {"message": "Если учётная запись существует и почта настроена, письмо с кодом будет отправлено. Повторный запрос возможен через минуту."}
+
+    @router.post("/api/staff/password-reset/confirm")
+    def confirm_reset(body: ResetConfirm):
+        email = str(body.email).strip().lower()
+        current = int(time.time())
+        success = False
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT users.id, password_resets.token_hash, password_resets.expires, password_resets.attempts FROM users JOIN password_resets ON password_resets.user_id=users.id WHERE users.email=? AND users.role=? AND users.active=1", (email, body.role)).fetchone()
+            if row and row["expires"] > current and row["attempts"] < 10:
+                if hmac.compare_digest(row["token_hash"], token_hash(body.code.strip())):
+                    db.execute("UPDATE users SET password_hash=?, must_change=0 WHERE id=?", (hash_password(body.password), row["id"]))
+                    db.execute("DELETE FROM sessions WHERE user_id=?", (row["id"],))
+                    db.execute("DELETE FROM password_resets WHERE user_id=?", (row["id"],))
+                    db.execute("DELETE FROM login_attempts WHERE key=?", (hashlib.sha256(email.encode()).hexdigest(),))
+                    success = True
+                else:
+                    db.execute("UPDATE password_resets SET attempts=attempts+1 WHERE user_id=?", (row["id"],))
+        if not success:
+            raise HTTPException(400, "Неверный или истёкший код. Запросите восстановление ещё раз.")
+        return {"ok": True}
 
     @router.post("/api/staff/login")
     def login(body: Login):
