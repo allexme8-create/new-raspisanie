@@ -1,9 +1,9 @@
 "use strict";
 function renderMailSettings(data){
-  $("mailSender").value=data.source==="automatic"?data.sender:"";
-  const mode=data.source==="automatic"?"Автоматически по адресу отправителя":"Настройки сервера";
+  $("mailSender").value=["automatic","oauth"].includes(data.source)?data.sender:"";
+  const mode=data.source==="oauth"?`OAuth · ${data.provider==="yandex"?"Яндекс":"Mail.ru"}`:data.source==="automatic"?"SMTP по паролю приложения":"Настройки сервера";
   const details=data.host&&data.sender?`${esc(data.sender)} · ${esc(data.host)}:${esc(data.port)} · ${esc(data.security.toUpperCase())}`:"Отправитель или сервер не настроен";
-  const password=data.password_configured?"SMTP_PASSWORD задан (подключение ещё не проверено)":"SMTP_PASSWORD не задан";
+  const password=data.source==="oauth"?"OAuth сохранён; SMTP_PASSWORD не требуется. Доступ проверяется при отправке.":data.password_configured?"SMTP_PASSWORD задан (подключение ещё не проверено)":"SMTP_PASSWORD не задан";
   $("mailSettingsStatus").innerHTML=`<div class="alert">${esc(mode)}: ${details}<br>${esc(password)}</div>`;
 }
 async function loadMailSettings(){
@@ -16,8 +16,22 @@ async function saveMailSettings(sender){
   catch(error){$("mailSettingsStatus").innerHTML=`<div class="alert err">${esc(error.message)}</div>`;}
   finally{buttons.forEach(b=>b.disabled=false);}
 }
-$("mailSettingsForm").onsubmit=e=>{e.preventDefault();saveMailSettings($("mailSender").value.trim());};
-$("mailUseEnvironment").onclick=()=>{if(confirm("Переключиться на SMTP-настройки из переменных сервера?"))saveMailSettings(null);};
+$("mailSettingsForm").querySelectorAll("[data-oauth-provider]").forEach(button=>button.onclick=async()=>{
+  const input=$("mailSender");
+  if(!input.reportValidity())return;
+  const popup=window.open("about:blank","_blank");
+  if(!popup){$("mailSettingsStatus").innerHTML='<div class="alert err">Разрешите открытие новой вкладки для подключения почты.</div>';return;}
+  popup.opener=null;
+  button.disabled=true;
+  try{
+    const data=await api("/api/admin/mail-oauth/start",{method:"POST",body:{provider:button.dataset.oauthProvider,sender:input.value.trim()}});
+    popup.location.replace(data.url);
+  }catch(error){popup.close();$("mailSettingsStatus").innerHTML=`<div class="alert err">${esc(error.message)}</div>`;}
+  finally{button.disabled=false;}
+});
+document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!$("adminPanel").classList.contains("hidden"))loadMailSettings();});
+$("mailSettingsForm").onsubmit=e=>{e.preventDefault();if(confirm("Переключиться на SMTP по паролю приложения? Текущее OAuth-подключение будет удалено."))saveMailSettings($("mailSender").value.trim());};
+$("mailUseEnvironment").onclick=()=>{if(confirm("Переключиться на SMTP-настройки сервера? Текущее OAuth-подключение будет удалено."))saveMailSettings(null);};
 document.addEventListener("admin-panel-open",loadMailSettings);
 if(!$("adminPanel").classList.contains("hidden"))loadMailSettings();
 async function loadStaffUsers(){

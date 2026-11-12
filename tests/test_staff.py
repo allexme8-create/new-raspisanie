@@ -12,10 +12,13 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import staff
+import mail_oauth
+from cryptography.fernet import Fernet
+from urllib.parse import urlsplit, parse_qs
 
 
 def admin(authorization: str = Header(default="")):
-    if authorization != "Bearer admin":
+    if authorization not in ("Bearer admin", "Bearer admin2"):
         raise HTTPException(401, "Требуется администратор")
 
 
@@ -178,8 +181,9 @@ class StaffTests(unittest.TestCase):
     def test_deletion_email_text(self):
         with patch.object(staff, "send_mail") as send:
             staff.send_account_deleted("deputy@example.com")
-        recipient, subject, body, sender = send.call_args.args
+        recipient, subject, body, sender, oauth = send.call_args.args
         self.assertIsNone(sender)
+        self.assertIsNone(oauth)
         self.assertEqual(recipient, "deputy@example.com")
         self.assertIn("удалена", subject)
         self.assertIn("удалил", body)
@@ -292,6 +296,115 @@ class StaffTests(unittest.TestCase):
         with patch.object(staff, "send_account_deleted"):
             self.assertEqual(self.client.delete("/api/admin/users/" + user["id"], headers=self.admin).status_code, 200)
         self.assertEqual(self.client.post("/api/staff/password-reset/confirm", json=body | {"code": code, "password": "a very strong password"}).status_code, 400)
+
+    def test_oauth_yandex_and_mailru_authorization_and_secret_storage(self):
+        env = {"PUBLIC_BASE_URL": "https://school.example", "MAIL_OAUTH_ENCRYPTION_KEY": Fernet.generate_key().decode(), "YANDEX_OAUTH_CLIENT_ID":"y-id", "YANDEX_OAUTH_CLIENT_SECRET":"y-secret", "MAILRU_OAUTH_CLIENT_ID":"m-id", "MAILRU_OAUTH_CLIENT_SECRET":"m-secret"}
+        with patch.dict("os.environ", env, clear=True):
+            self.assertEqual(self.client.post("/api/admin/mail-oauth/start", json={"sender":"s@yandex.ru","provider":"yandex"}).status_code, 401)
+            for provider, sender, domain in [("yandex","s@yandex.ru","oauth.yandex.ru"),("mailru","s@mail.ru","oauth.mail.ru")]:
+                start = self.client.post("/api/admin/mail-oauth/start", headers=self.admin, json={"sender":sender,"provider":provider})
+                self.assertEqual(start.status_code, 200, start.text)
+                url = urlsplit(start.json()["url"])
+                self.assertEqual(url.hostname, domain)
+                state = parse_qs(url.query)["state"][0]
+                payload={"state":state,"code":"provider-code"}
+                self.assertEqual(self.client.post("/api/admin/mail-oauth/complete", headers={"Authorization":"Bearer admin2"}, json=payload).status_code, 400)
+                issued={"access_token":"secret-access", "refresh_token":"secret-refresh", "expires_at":int(staff.time.time())+3600}
+                with patch.object(mail_oauth, "tokens_request", return_value=issued), patch.object(mail_oauth,"verify_smtp") as verify:
+                    completed=self.client.post("/api/admin/mail-oauth/complete", headers=self.admin, json=payload)
+                self.assertEqual(completed.status_code, 200, completed.text)
+                verify.assert_called_once_with(provider,sender,"secret-access")
+                self.assertNotIn("secret-access",completed.text)
+                self.assertEqual(self.client.post("/api/admin/mail-oauth/complete", headers=self.admin, json=payload).status_code, 400)
+                with self.store.connect() as db:
+                    row=db.execute("SELECT * FROM mail_oauth").fetchone()
+                    self.assertNotIn("secret-access",row["tokens"])
+                    self.assertNotIn("secret-refresh",row["tokens"])
+                self.assertEqual(self.store.credentials(), (sender,"secret-access"))
+                self.assertEqual(self.client.get("/api/admin/mail-settings",headers=self.admin).json()["source"], "oauth")
+            self.assertEqual(self.client.put("/api/admin/mail-settings",headers=self.admin,json={"sender":None}).status_code, 200)
+            self.assertIsNone(mail_oauth.access_for_store(self.store))
+
+    def test_oauth_refresh_and_xoauth_smtp_without_password(self):
+        from unittest.mock import MagicMock
+        import base64
+        env={"PUBLIC_BASE_URL":"https://school.example", "MAIL_OAUTH_ENCRYPTION_KEY":Fernet.generate_key().decode(), "YANDEX_OAUTH_CLIENT_ID":"id", "YANDEX_OAUTH_CLIENT_SECRET":"secret"}
+        with patch.dict("os.environ",env,clear=True):
+            with self.store.connect() as db:
+                db.execute("INSERT INTO mail_oauth VALUES (1,?,?,?)", ("yandex","sender@yandex.ru",mail_oauth.encrypted({"access_token":"old","refresh_token":"refresh","expires_at":0})))
+            new={"access_token":"new-access","refresh_token":"rotated","expires_at":int(staff.time.time())+3600}
+            with patch.object(mail_oauth,"tokens_request",return_value=new) as refresh:
+                self.assertEqual(self.store.credentials(), ("sender@yandex.ru","new-access"))
+                refresh.assert_called_once()
+            with self.store.connect() as db:
+                stored=mail_oauth.decrypted(db.execute("SELECT tokens FROM mail_oauth").fetchone()["tokens"])
+                self.assertEqual(stored["refresh_token"],"rotated")
+            client=MagicMock();client.__enter__.return_value=client;client.docmd.return_value=(235,b"OK")
+            with patch.object(staff.smtplib,"SMTP_SSL",return_value=client):
+                staff.send_mail("target@example.com","Заголовок","Текст","sender@yandex.ru","new-access")
+            command,payload=client.docmd.call_args.args
+            self.assertEqual(command,"AUTH")
+            self.assertIn(b"auth=Bearer new-access",base64.b64decode(payload.split(" ")[1]))
+            client.login.assert_not_called()
+            client.send_message.assert_called_once()
+
+    def test_oauth_smtp_failure_does_not_connect(self):
+        env={"PUBLIC_BASE_URL":"https://school.example", "MAIL_OAUTH_ENCRYPTION_KEY":Fernet.generate_key().decode(), "YANDEX_OAUTH_CLIENT_ID":"id", "YANDEX_OAUTH_CLIENT_SECRET":"secret"}
+        with patch.dict("os.environ",env,clear=True):
+            wrong=self.client.post("/api/admin/mail-oauth/start",headers=self.admin,json={"provider":"yandex","sender":"x@mail.ru"})
+            self.assertEqual(wrong.status_code,422)
+            start=self.client.post("/api/admin/mail-oauth/start",headers=self.admin,json={"provider":"yandex","sender":"x@yandex.ru"})
+            state=parse_qs(urlsplit(start.json()["url"]).query)["state"][0]
+            with patch.object(mail_oauth,"tokens_request",return_value={"access_token":"x","refresh_token":"y","expires_at":9999999999}), patch.object(mail_oauth,"verify_smtp",side_effect=RuntimeError("SMTP error")):
+                failed=self.client.post("/api/admin/mail-oauth/complete",headers=self.admin,json={"state":state,"code":"code"})
+            self.assertEqual(failed.status_code,502)
+            self.assertIsNone(mail_oauth.access_for_store(self.store))
+
+    def test_oauth_used_for_all_staff_messages(self):
+        env={"PUBLIC_BASE_URL":"https://school.example", "MAIL_OAUTH_ENCRYPTION_KEY":Fernet.generate_key().decode(), "YANDEX_OAUTH_CLIENT_ID":"id", "YANDEX_OAUTH_CLIENT_SECRET":"secret"}
+        with patch.dict("os.environ",env,clear=True):
+            with self.store.connect() as db:
+                db.execute("INSERT INTO mail_oauth VALUES (1,?,?,?)", ("yandex","sender@yandex.ru",mail_oauth.encrypted({"access_token":"access", "refresh_token":"refresh", "expires_at":int(staff.time.time())+3600})))
+            with patch.object(staff,"send_registration") as send:
+                response=self.client.post("/api/admin/users",headers=self.admin,json={"email":"new@example.com","role":"associate"})
+                self.assertEqual(response.status_code,201,response.text)
+                self.assertEqual(send.call_args.args[3:],("sender@yandex.ru","access"))
+                user=response.json()["user"]
+            with patch.object(staff,"send_password_reset") as send:
+                self.client.post("/api/staff/password-reset/request",json={"email":"new@example.com","role":"associate"})
+                self.assertEqual(send.call_args.args[3:],("sender@yandex.ru","access"))
+            with patch.object(staff,"send_account_deleted") as send:
+                self.assertEqual(self.client.delete("/api/admin/users/"+user["id"],headers=self.admin).status_code,200)
+                self.assertEqual(send.call_args.args[1:],("sender@yandex.ru","access"))
+
+    def test_oauth_token_exchange_uses_fixed_endpoints_and_does_not_follow_redirects(self):
+        from unittest.mock import MagicMock
+        env={"PUBLIC_BASE_URL":"https://school.example", "MAIL_OAUTH_ENCRYPTION_KEY":Fernet.generate_key().decode(), "YANDEX_OAUTH_CLIENT_ID":"yid", "YANDEX_OAUTH_CLIENT_SECRET":"ysecret", "MAILRU_OAUTH_CLIENT_ID":"mid", "MAILRU_OAUTH_CLIENT_SECRET":"msecret"}
+        response=MagicMock();response.status_code=200;response.json.return_value={"access_token":"a","refresh_token":"r","expires_in":3600}
+        with patch.dict("os.environ",env,clear=True), patch.object(mail_oauth.requests,"post",return_value=response) as post:
+            mail_oauth.tokens_request("yandex",{"grant_type":"authorization_code","code":"code"})
+            self.assertEqual(post.call_args.args[0],"https://oauth.yandex.ru/token")
+            self.assertFalse(post.call_args.kwargs["allow_redirects"])
+            mail_oauth.tokens_request("mailru",{"grant_type":"authorization_code","code":"code"})
+            self.assertEqual(post.call_args.kwargs["auth"],("mid","msecret"))
+            mail_oauth.tokens_request("mailru",{"grant_type":"refresh_token","refresh_token":"r"})
+            self.assertEqual(post.call_args.kwargs["data"]["client_id"],"mid")
+            self.assertIsNone(post.call_args.kwargs["auth"])
+
+    def test_oauth_expired_state_and_refresh_error_fail_closed(self):
+        env={"PUBLIC_BASE_URL":"https://school.example", "MAIL_OAUTH_ENCRYPTION_KEY":Fernet.generate_key().decode(), "YANDEX_OAUTH_CLIENT_ID":"id", "YANDEX_OAUTH_CLIENT_SECRET":"secret", "SMTP_PASSWORD":"old-password"}
+        with patch.dict("os.environ",env,clear=True):
+            start=self.client.post("/api/admin/mail-oauth/start",headers=self.admin,json={"provider":"yandex","sender":"x@yandex.ru"})
+            state=parse_qs(urlsplit(start.json()["url"]).query)["state"][0]
+            with self.store.connect() as db:
+                db.execute("UPDATE mail_oauth_pending SET expires=0")
+                db.execute("INSERT INTO mail_oauth VALUES (1,?,?,?)", ("yandex","x@yandex.ru",mail_oauth.encrypted({"access_token":"old","refresh_token":"refresh","expires_at":0})))
+            self.assertEqual(self.client.post("/api/admin/mail-oauth/complete",headers=self.admin,json={"state":state,"code":"code"}).status_code,400)
+            with patch.object(mail_oauth,"tokens_request",side_effect=RuntimeError("refresh failed")), patch.object(staff,"send_registration") as send:
+                failed=self.client.post("/api/admin/users",headers=self.admin,json={"email":"new@example.com","role":"associate"})
+                self.assertEqual(failed.status_code,503)
+                send.assert_not_called()  # Never fall back to SMTP_PASSWORD.
+            self.assertEqual(self.client.get("/api/admin/users",headers=self.admin).json()["users"],[])
 
     def test_bruteforce_throttle(self):
         self.create("a@example.com", "associate")

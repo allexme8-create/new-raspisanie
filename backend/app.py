@@ -154,8 +154,11 @@ app.include_router(staff.make_router(staff_store, require_admin))
 
 @app.middleware("http")
 async def private_no_cache(request, call_next):
+    # Авторизационный код нужен только браузеру; не передаём query в access log Uvicorn.
+    if request.url.path == "/mail-oauth/callback":
+        request.scope["query_string"] = b""
     response = await call_next(request)
-    if request.url.path.startswith(("/api/staff/", "/api/admin/users", "/api/admin/mail-settings")) or request.url.path in ("/Director", "/associate"):
+    if request.url.path.startswith(("/api/staff/", "/api/admin/users", "/api/admin/mail-settings", "/api/admin/mail-oauth/")) or request.url.path in ("/Director", "/associate", "/mail-oauth/callback"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
     return response
@@ -534,6 +537,11 @@ def director_page() -> FileResponse:
 @app.get("/associate", include_in_schema=False)
 def associate_page() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "staff.html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/mail-oauth/callback", include_in_schema=False)
+def mail_oauth_callback_page() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "mail-oauth-callback.html", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'"})
 
 
 @app.get("/healthz", include_in_schema=False)

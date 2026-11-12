@@ -16,6 +16,8 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+
+import mail_oauth
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 SESSION_TTL = 12 * 60 * 60
@@ -72,13 +74,13 @@ def smtp_settings(sender_email: str | None) -> dict:
     return {"source": "environment", "sender": sender, "username": username, "host": host, "port": port, "security": security, "password_configured": secret_present}
 
 
-def send_mail(email: str, subject: str, body: str, sender_email: str | None = None) -> None:
+def send_mail(email: str, subject: str, body: str, sender_email: str | None = None, oauth_token: str | None = None) -> None:
     config = smtp_settings(sender_email)
     host, sender, username, security, port = (config[k] for k in ("host", "sender", "username", "security", "port"))
     secret = os.environ.get("SMTP_PASSWORD", "")
     if not host or not sender or security not in ("ssl", "starttls"):
         raise RuntimeError("SMTP не настроен: укажите почту отправителя или настройки SMTP на сервере.")
-    if sender_email and not secret:
+    if sender_email and not secret and not oauth_token:
         raise RuntimeError("Для почты отправителя задайте SMTP_PASSWORD в настройках сервера (обычно это пароль приложения).")
     try:
         msg = EmailMessage()
@@ -94,14 +96,16 @@ def send_mail(email: str, subject: str, body: str, sender_email: str | None = No
         with client:
             if security == "starttls":
                 client.starttls(context=context)
-            if username:
+            if oauth_token:
+                mail_oauth.smtp_auth(client, sender, oauth_token)
+            elif username:
                 client.login(username, secret)
             client.send_message(msg)
     except Exception as exc:
         raise RuntimeError("Не удалось отправить письмо через SMTP. Проверьте настройки почты и доступность сервера.") from exc
 
 
-def send_registration(email: str, role: str, password: str, sender_email: str | None = None) -> None:
+def send_registration(email: str, role: str, password: str, sender_email: str | None = None, oauth_token: str | None = None) -> None:
     base_url = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
     if base_url:
         try:
@@ -113,16 +117,16 @@ def send_registration(email: str, role: str, password: str, sender_email: str | 
             raise RuntimeError("PUBLIC_BASE_URL должен содержать HTTPS-адрес сайта без пути.")
     path = "/Director" if role == "director" else "/associate"
     address = base_url + path if base_url else f"откройте сайт сервиса и перейдите на {path}"
-    send_mail(email, "Доступ к сервису расписания", f"Здравствуйте!\n\nДля вас создана учётная запись.\nСтраница входа: {address}\nЛогин: {email}\nВременный пароль: {password}\n\nПри первом входе необходимо сменить пароль. Не пересылайте это письмо и удалите его после смены пароля.\n", sender_email)
+    send_mail(email, "Доступ к сервису расписания", f"Здравствуйте!\n\nДля вас создана учётная запись.\nСтраница входа: {address}\nЛогин: {email}\nВременный пароль: {password}\n\nПри первом входе необходимо сменить пароль. Не пересылайте это письмо и удалите его после смены пароля.\n", sender_email, oauth_token)
 
 
-def send_account_deleted(email: str, sender_email: str | None = None) -> None:
-    send_mail(email, "Учётная запись удалена", "Здравствуйте!\n\nАдминистратор удалил вашу учётную запись в сервисе расписания. Доступ к личному кабинету прекращён. Если у вас возникли вопросы, обратитесь к администратору.\n", sender_email)
+def send_account_deleted(email: str, sender_email: str | None = None, oauth_token: str | None = None) -> None:
+    send_mail(email, "Учётная запись удалена", "Здравствуйте!\n\nАдминистратор удалил вашу учётную запись в сервисе расписания. Доступ к личному кабинету прекращён. Если у вас возникли вопросы, обратитесь к администратору.\n", sender_email, oauth_token)
 
 
-def send_password_reset(email: str, role: str, code: str, sender_email: str | None = None) -> None:
+def send_password_reset(email: str, role: str, code: str, sender_email: str | None = None, oauth_token: str | None = None) -> None:
     path = "/Director" if role == "director" else "/associate"
-    send_mail(email, "Восстановление доступа к сервису расписания", f"Здравствуйте!\n\nПолучен запрос на восстановление пароля. Откройте сайт сервиса, страницу {path}, и нажмите «Забыли пароль?». Введите ваш e-mail и код ниже. Код действует 30 минут и может быть использован только один раз.\n\nКод: {code}\n\nЕсли вы не запрашивали восстановление, проигнорируйте это письмо. Никому не сообщайте код.\n", sender_email)
+    send_mail(email, "Восстановление доступа к сервису расписания", f"Здравствуйте!\n\nПолучен запрос на восстановление пароля. Откройте сайт сервиса, страницу {path}, и нажмите «Забыли пароль?». Введите ваш e-mail и код ниже. Код действует 30 минут и может быть использован только один раз.\n\nКод: {code}\n\nЕсли вы не запрашивали восстановление, проигнорируйте это письмо. Никому не сообщайте код.\n", sender_email, oauth_token)
 
 
 class NewUser(BaseModel):
@@ -132,6 +136,16 @@ class NewUser(BaseModel):
 
 class MailSettings(BaseModel):
     sender: EmailStr | None = None
+
+
+class OAuthStart(BaseModel):
+    provider: Literal["yandex", "mailru"]
+    sender: EmailStr
+
+
+class OAuthComplete(BaseModel):
+    state: str = Field(min_length=1, max_length=128)
+    code: str = Field(min_length=1, max_length=2048)
 
 
 class Login(BaseModel):
@@ -208,6 +222,12 @@ class Store:
                     assignee_id TEXT NOT NULL REFERENCES users(id), description TEXT NOT NULL,
                     deadline TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT
                 );
+                CREATE TABLE IF NOT EXISTS mail_oauth (
+                    id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL, sender TEXT NOT NULL, tokens TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS mail_oauth_pending (
+                    state_hash TEXT PRIMARY KEY, admin_hash TEXT NOT NULL, provider TEXT NOT NULL, sender TEXT NOT NULL, expires INTEGER NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY, value TEXT NOT NULL
                 );
@@ -226,6 +246,10 @@ class Store:
                 );
             ''')
         self.path.chmod(0o600)
+
+    def credentials(self) -> tuple[str | None, str | None]:
+        oauth = mail_oauth.access_for_store(self)
+        return oauth if oauth else (self.sender(), None)
 
     def sender(self) -> str | None:
         with self.connect() as db:
@@ -284,6 +308,10 @@ def make_router(store: Store, require_admin) -> APIRouter:
     @router.get("/api/admin/mail-settings")
     def get_mail_settings(_: None = Depends(require_admin)):
         try:
+            with store.connect() as db:
+                row = db.execute("SELECT provider,sender FROM mail_oauth WHERE id=1").fetchone()
+            if row:
+                return smtp_settings(row["sender"]) | {"source": "oauth", "provider": row["provider"]}
             return smtp_settings(store.sender())
         except RuntimeError as exc:
             raise HTTPException(422, str(exc)) from exc
@@ -296,11 +324,54 @@ def make_router(store: Store, require_admin) -> APIRouter:
         except RuntimeError as exc:
             raise HTTPException(422, str(exc)) from exc
         with store.connect() as db:
+            db.execute("DELETE FROM mail_oauth")
             if sender:
                 db.execute("INSERT INTO settings(key,value) VALUES('smtp_sender',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (sender,))
             else:
                 db.execute("DELETE FROM settings WHERE key='smtp_sender'")
         return settings
+
+    def admin_binding(authorization: str, x_admin_token: str) -> str:
+        token = authorization.removeprefix("Bearer ").strip() if authorization.startswith("Bearer ") else x_admin_token.strip()
+        if not token:
+            raise HTTPException(401, "Для подключения войдите в админку заново")
+        return mail_oauth.digest(token)
+
+    @router.post("/api/admin/mail-oauth/start")
+    def oauth_start(body: OAuthStart, _: None = Depends(require_admin), authorization: str = Header(default=""), x_admin_token: str = Header(default="", alias="X-Admin-Token")):
+        binding = admin_binding(authorization, x_admin_token)
+        sender = str(body.sender).strip().lower()
+        nonce = secrets.token_urlsafe(32)
+        try:
+            url = mail_oauth.authorize_url(body.provider, nonce, sender)
+        except RuntimeError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        with store.connect() as db:
+            db.execute("DELETE FROM mail_oauth_pending WHERE expires<=?", (int(time.time()),))
+            db.execute("INSERT INTO mail_oauth_pending VALUES (?,?,?,?,?)", (mail_oauth.digest(nonce), binding, body.provider, sender, int(time.time()) + 600))
+        return {"url": url}
+
+    @router.post("/api/admin/mail-oauth/complete")
+    def oauth_complete(body: OAuthComplete, _: None = Depends(require_admin), authorization: str = Header(default=""), x_admin_token: str = Header(default="", alias="X-Admin-Token")):
+        binding = admin_binding(authorization, x_admin_token)
+        state_hash = mail_oauth.digest(body.state)
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM mail_oauth_pending WHERE state_hash=? AND admin_hash=? AND expires>?", (state_hash, binding, int(time.time()))).fetchone()
+            if not row:
+                raise HTTPException(400, "Ссылка авторизации недействительна или истекла. Начните подключение заново.")
+            db.execute("DELETE FROM mail_oauth_pending WHERE state_hash=?", (state_hash,))
+        try:
+            tokens = mail_oauth.tokens_request(row["provider"], {"grant_type": "authorization_code", "code": body.code})
+            if not tokens.get("refresh_token"):
+                raise RuntimeError("Провайдер не выдал refresh token. Проверьте настройки приложения и повторите подключение.")
+            mail_oauth.verify_smtp(row["provider"], row["sender"], tokens["access_token"])
+            sealed = mail_oauth.encrypted(tokens)
+        except RuntimeError as exc:
+            raise HTTPException(502, str(exc)) from exc
+        with store.connect() as db:
+            db.execute("INSERT INTO mail_oauth VALUES (1,?,?,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,sender=excluded.sender,tokens=excluded.tokens", (row["provider"], row["sender"], sealed))
+        return {"sender": row["sender"], "provider": row["provider"]}
 
     @router.get("/api/admin/users")
     def list_users(_: None = Depends(require_admin)):
@@ -318,7 +389,9 @@ def make_router(store: Store, require_admin) -> APIRouter:
         except sqlite3.IntegrityError:
             raise HTTPException(409, "Пользователь с таким e-mail уже существует")
         try:
-            send_registration(email, body.role, password, store.sender())
+            sender, access = store.credentials()
+            if access: send_registration(email, body.role, password, sender, access)
+            else: send_registration(email, body.role, password, sender)
         except RuntimeError as exc:
             with store.connect() as db:
                 db.execute("DELETE FROM users WHERE id=? AND active=0", (uid,))
@@ -329,6 +402,10 @@ def make_router(store: Store, require_admin) -> APIRouter:
 
     @router.delete("/api/admin/users/{user_id}")
     def delete_user(user_id: str, _: None = Depends(require_admin)):
+        try:
+            sender, access = store.credentials()
+        except RuntimeError as exc:
+            raise HTTPException(503, f"Пользователь не удалён. {exc}") from exc
         with store.connect() as db:
             # Сериализуем удаление и отправку, чтобы параллельные запросы не
             # отправляли несколько уведомлений и не меняли ту же учётную запись.
@@ -337,7 +414,8 @@ def make_router(store: Store, require_admin) -> APIRouter:
             if not row:
                 raise HTTPException(404, "Пользователь не найден")
             try:
-                send_account_deleted(row["email"], store.sender())
+                if access: send_account_deleted(row["email"], sender, access)
+                else: send_account_deleted(row["email"], sender)
             except RuntimeError as exc:
                 raise HTTPException(503, f"Пользователь не удалён. {exc}") from exc
             db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
@@ -349,7 +427,9 @@ def make_router(store: Store, require_admin) -> APIRouter:
 
     def deliver_reset(user_id: str, email: str, role: str, code: str, code_hash: str, sender: str | None) -> None:
         try:
-            send_password_reset(email, role, code, sender)
+            active_sender, access = store.credentials()
+            if access: send_password_reset(email, role, code, active_sender, access)
+            else: send_password_reset(email, role, code, active_sender)
         except Exception:
             # Ошибка доставки не раскрывается пользователю и не оставляет рабочий код.
             with store.connect() as db:

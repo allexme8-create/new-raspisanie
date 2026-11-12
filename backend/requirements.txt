@@ -9,3 +9,4 @@ a2wsgi>=1.10   # нужен только для WSGI-хостингов (PythonA
 
 email-validator>=2.0
 httpx>=0.27
+cryptography>=42

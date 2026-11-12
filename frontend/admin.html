@@ -39,12 +39,15 @@
     <section class="card">
       <h2>Пользователи руководства</h2>
       <h3>Почта отправителя</h3>
-      <p class="hint">Укажите адрес Яндекса, Mail.ru или Gmail: сервер, порт и шифрование определятся автоматически. Пароль приложения задаётся отдельно в переменной SMTP_PASSWORD на сервере, в админку его вводить не нужно.</p>
+      <p class="hint">Для OAuth укажите адрес отправителя и подключите его через почтовый сервис. Сначала зарегистрируйте OAuth-приложение и задайте настройки на сервере (см. DEPLOY.md). Mail.ru использует разрешение mail.imap, которое может включать доступ к чтению почты и потребовать согласования у провайдера. Подключайте его только если согласны с этим доступом.</p>
       <form id="mailSettingsForm" class="planner-form">
         <label for="mailSender">E-mail отправителя<input id="mailSender" type="email" maxlength="254" required placeholder="sender@yandex.ru" autocomplete="off"></label>
-        <button class="btn" type="submit">Настроить по адресу</button>
+        <button class="btn" type="button" data-oauth-provider="yandex">Подключить Яндекс</button>
+        <button class="btn" type="button" data-oauth-provider="mailru">Подключить Mail.ru</button>
+        <button class="btn secondary" type="submit">SMTP по паролю приложения</button>
         <button class="btn secondary" id="mailUseEnvironment" type="button">Использовать настройки сервера</button>
       </form>
+      <p class="hint">Для SMTP по паролю потребуется SMTP_PASSWORD в настройках сервера. При переключении на него или настройки сервера OAuth-подключение будет удалено.</p>
       <div id="mailSettingsStatus" aria-live="polite"></div>
       <p class="hint">Создайте директора или заместителя. Логин (e-mail) и временный пароль отправляются на указанную почту; при первом входе пароль нужно сменить. При удалении пользователь получает уведомление, доступ прекращается, а история задач сохраняется без его e-mail. Для создания и удаления требуется настроенный SMTP.</p>
       <form id="staffCreateForm" class="planner-form">
@@ -118,8 +121,8 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="/js/admin.js?v=mail-auto-1"></script>
+<script src="/js/admin.js?v=mail-oauth-1"></script>
 <script src="/js/planner.js?v=planner-1"></script>
-<script src="/js/staff-admin.js?v=mail-auto-1"></script>
+<script src="/js/staff-admin.js?v=mail-oauth-1"></script>
 </body>
 </html>
