@@ -16,12 +16,19 @@ async function loadStaffUsers(){
     const selected=$("staffHomeroom").value;$("staffHomeroom").innerHTML=classOptions(selected);if(staffClassCatalog.includes(selected))$("staffHomeroom").value=selected;
     updateCreateClassVisibility();
     const list=$("staffUsersList");
-    list.innerHTML=data.users.length?`<ul class="staff-user-list">${data.users.map((u,i)=>`<li><div class="staff-user-details"><span>${u.full_name ? `${esc(u.full_name)} · ` : ""}${esc(u.email)} · ${esc(u.position || (u.role==="director"?"директор":u.role==="teacher"?"учитель":"заместитель директора"))}</span>${u.role==="teacher"?`<div class="staff-homeroom"><label for="staffUserClass${i}">Классное руководство</label><select id="staffUserClass${i}">${classOptions(u.homeroom_class||"")}</select> <button type="button" class="btn secondary" data-homeroom-user="${i}">Сохранить класс</button></div>`:""}<div id="staffPassword${i}" class="staff-password" aria-live="polite"></div></div><div class="staff-user-actions"><button type="button" class="btn secondary" data-show-user="${i}">Показать пароль</button><button type="button" class="btn secondary" data-reset-user="${i}">Обновить пароль</button><button type="button" class="btn danger" data-delete-user="${i}">Удалить</button></div></li>`).join("")}</ul>`:'<p class="muted">Пользователей пока нет.</p>';
-    list.querySelectorAll("[data-homeroom-user]").forEach(button=>button.onclick=async()=>{
-      const i=Number(button.dataset.homeroomUser),user=data.users[i];button.disabled=true;
-      try{await api(`/api/admin/users/${encodeURIComponent(user.id)}/homeroom`,{method:"PUT",body:{homeroom_class:$(`staffUserClass${i}`).value}});
-        if(token!==currentToken)return;$("staffAdminResult").innerHTML='<div class="alert ok">Классное руководство сохранено.</div>';await loadStaffUsers();
-      }catch(error){if(token===currentToken)$("staffAdminResult").innerHTML=`<div class="alert err">${esc(error.message)}</div>`;}finally{button.disabled=false;}
+    list.innerHTML=data.users.length?`<ul class="staff-user-list">${data.users.map((u,i)=>`<li><div class="staff-user-details"><span>${u.full_name ? `${esc(u.full_name)} · ` : ""}${esc(u.email)} · ${esc(u.position || (u.role==="director"?"директор":u.role==="teacher"?"учитель":"заместитель директора"))}</span><details class="staff-user-edit"><summary>Редактировать пользователя</summary><form class="planner-form" data-edit-user="${i}">
+      <label>ФИО<input id="staffEditName${i}" maxlength="200" value="${esc(u.full_name||"")}"></label>
+      <label>E-mail<input id="staffEditEmail${i}" type="email" maxlength="254" value="${esc(u.email)}" required></label>
+      <label>Должность<input id="staffEditPosition${i}" maxlength="200" value="${esc(u.position||"")}"></label>
+      ${u.role==="teacher"?`<label>Классное руководство<select id="staffEditClass${i}">${classOptions(u.homeroom_class||"")}</select></label>`:""}
+      <button type="submit" class="btn secondary">Сохранить изменения</button><div id="staffEditResult${i}" aria-live="polite"></div>
+      </form><p class="hint">Роль и пароль здесь не изменяются.</p></details><div id="staffPassword${i}" class="staff-password" aria-live="polite"></div></div><div class="staff-user-actions"><button type="button" class="btn secondary" data-show-user="${i}">Показать пароль</button><button type="button" class="btn secondary" data-reset-user="${i}">Обновить пароль</button><button type="button" class="btn danger" data-delete-user="${i}">Удалить</button></div></li>`).join("")}</ul>`:'<p class="muted">Пользователей пока нет.</p>';
+    list.querySelectorAll("[data-edit-user]").forEach(form=>form.onsubmit=async event=>{
+      event.preventDefault();const i=Number(form.dataset.editUser),user=data.users[i],button=form.querySelector('button[type="submit"]');button.disabled=true;
+      $(`staffEditResult${i}`).innerHTML="";
+      try{await api(`/api/admin/users/${encodeURIComponent(user.id)}`,{method:"PUT",body:{full_name:$(`staffEditName${i}`).value.trim(),email:$(`staffEditEmail${i}`).value.trim(),position:$(`staffEditPosition${i}`).value.trim(),homeroom_class:user.role==="teacher"?$(`staffEditClass${i}`).value:""}});
+        if(token!==currentToken)return;$("staffAdminResult").innerHTML='<div class="alert ok">Пользователь обновлён.</div>';await loadStaffUsers();
+      }catch(error){if(token===currentToken)$(`staffEditResult${i}`).innerHTML=`<div class="alert err">${esc(error.message)}</div>`;}finally{button.disabled=false;}
     });
     list.querySelectorAll("[data-show-user]").forEach(button=>button.onclick=async()=>{
       const i=Number(button.dataset.showUser),user=data.users[i],out=$(`staffPassword${i}`);

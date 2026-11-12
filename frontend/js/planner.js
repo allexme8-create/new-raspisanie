@@ -16,7 +16,7 @@ function plannerRender(){
   const loadOptions=p.loads.map(x=>`<option value="${esc(x.id)}">${esc(`${x.class_name} · ${x.subject} · ${x.teacher} · ${x.room}`)}</option>`).join("");
   const nameForm=(type,label)=>`<form data-form="${type}" class="planner-form">${input(`${type}Name`,label,label)}<button class="btn" type="submit">Добавить</button></form>`;
   plannerRoot.innerHTML=`
-    <div class="planner-actions"><button type="button" id="plannerRefresh" class="btn secondary">Обновить черновик</button><button type="button" id="plannerGenerate" class="btn">Автоподбор</button><button type="button" id="plannerPublish" class="btn">Опубликовать</button></div>
+    <div class="planner-actions"><button type="button" id="plannerRefresh" class="btn secondary">Обновить черновик</button><button type="button" id="plannerImportClasses" class="btn secondary">Добавить классы из расписания</button><button type="button" id="plannerGenerate" class="btn">Автоподбор</button><button type="button" id="plannerPublish" class="btn">Опубликовать</button></div>
     <div id="plannerMessage" aria-live="polite"></div>
     <p class="hint">Изменения сохраняются в черновике. Автоподбор сохраняет уже расставленные уроки; публикация заменяет текущее расписание на сайте только после проверки.</p>
     <details open><summary>1. Справочники</summary><div class="planner-grid">
@@ -34,6 +34,10 @@ function plannerRender(){
   plannerRoot.querySelectorAll("[data-kind]").forEach(b=>b.onclick=()=>plannerChange(d=>d[b.dataset.kind].splice(Number(b.dataset.index),1)));
   plannerRoot.querySelectorAll("[data-un-teacher]").forEach(b=>b.onclick=()=>plannerChange(d=>d.teachers[Number(b.dataset.unTeacher)].unavailable.splice(Number(b.dataset.index),1)));
   $("plannerRefresh").onclick=()=>plannerLoad();
+  $("plannerImportClasses").onclick=async()=>{
+    try{const data=await api("/api/admin/planner/import-classes",{method:"POST"});await plannerLoad();document.dispatchEvent(new Event("planner-catalog-changed"));toast(data.added.length?`Добавлено классов: ${data.added.length}`:"Все классы из расписания уже добавлены");}
+    catch(error){plannerError(error);}
+  };
   $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
   $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }

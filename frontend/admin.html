@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-homeroom-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-edit-classes-1">
 </head>
 <body>
 
@@ -39,6 +39,7 @@
     <section class="card">
       <h2>Пользователи</h2>
       <p class="hint">Укажите e-mail как логин и выберите роль. Пароль создаётся автоматически; передайте его пользователю безопасным способом. При первом входе пользователь сменит пароль. Администратор может показать текущий пароль или создать новый. Письма не отправляются.</p>
+      <p class="hint">Чтобы изменить данные или назначить классное руководство существующему учителю, откройте «Редактировать пользователя» в списке ниже. Классы берутся из расписания и справочника конструктора.</p>
       <p class="hint">Доступ к паролям имеют администраторы: используйте HTTPS и надёжный пароль администратора.</p>
       <form id="staffCreateForm" class="planner-form">
         <label>ФИО (необязательно)<input id="staffFullName" type="text" maxlength="200" autocomplete="name" placeholder="Фамилия Имя Отчество"></label>
@@ -114,8 +115,8 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="/js/admin.js?v=staff-homeroom-1"></script>
-<script src="/js/planner.js?v=planner-homeroom-1"></script>
-<script src="/js/staff-admin.js?v=staff-homeroom-1"></script>
+<script src="/js/admin.js?v=staff-edit-classes-1"></script>
+<script src="/js/planner.js?v=planner-edit-classes-1"></script>
+<script src="/js/staff-admin.js?v=staff-edit-classes-1"></script>
 </body>
 </html>

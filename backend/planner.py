@@ -66,7 +66,7 @@ class Placement(BaseModel):
 
 class Project(BaseModel):
     revision: int = Field(default=0, ge=0)
-    classes: list[SchoolClass] = Field(default_factory=list, max_length=100)
+    classes: list[SchoolClass] = Field(default_factory=list, max_length=500)
     teachers: list[Teacher] = Field(default_factory=list, max_length=200)
     subjects: list[Named] = Field(default_factory=list, max_length=200)
     rooms: list[Named] = Field(default_factory=list, max_length=200)

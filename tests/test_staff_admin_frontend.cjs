@@ -6,9 +6,9 @@ assert.doesNotMatch(page,/SMTP_PASSWORD|data-oauth-provider|mailSettingsForm/);
 assert.match(page,/Создать пользователя/);
 assert.match(page,/id="staffFullName"[^>]*maxlength="200"/);
 const map=new Map(),handlers={};
-const buttons={homeroom:{dataset:{homeroomUser:'0'}},show:{dataset:{showUser:'0'}},reset:{dataset:{resetUser:'0'}},del:{dataset:{deleteUser:'0'}}};
+const buttons={edit:{dataset:{editUser:'0'},querySelector:()=>({disabled:false})},show:{dataset:{showUser:'0'}},reset:{dataset:{resetUser:'0'}},del:{dataset:{deleteUser:'0'}}};
 function element(id){
- if(!map.has(id))map.set(id,{innerHTML:'',textContent:'',value:'',disabled:false,classList:{contains:()=>true,toggle(){}},querySelector:selector=>selector.startsWith('[data-show-user')?buttons.show:{disabled:false},querySelectorAll:selector=>selector==='[data-homeroom-user]'?[buttons.homeroom]:selector==='[data-show-user]'?[buttons.show]:selector==='[data-reset-user]'?[buttons.reset]:selector==='[data-delete-user]'?[buttons.del]:[]});
+ if(!map.has(id))map.set(id,{innerHTML:'',textContent:'',value:'',disabled:false,classList:{contains:()=>true,toggle(){}},querySelector:selector=>selector.startsWith('[data-show-user')?buttons.show:{disabled:false},querySelectorAll:selector=>selector==='[data-edit-user]'?[buttons.edit]:selector==='[data-show-user]'?[buttons.show]:selector==='[data-reset-user]'?[buttons.reset]:selector==='[data-delete-user]'?[buttons.del]:[]});
  return map.get(id);
 }
 const calls=[];
@@ -17,7 +17,7 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff-adm
 (async()=>{
  await handlers['admin-panel-open']();
  assert.match(element('staffUsersList').innerHTML,/Показать пароль/);assert.match(element('staffHomeroom').innerHTML,/5А/);
- assert.doesNotMatch(element('staffUsersList').innerHTML,/current-secret/);assert.match(element('staffUsersList').innerHTML,/Классное руководство/);element('staffUserClass0').value='6Б';await buttons.homeroom.onclick();assert.ok(calls.some(c=>c.path==='/api/admin/users/u1/homeroom'&&c.opts.body.homeroom_class==='6Б'));
+ assert.doesNotMatch(element('staffUsersList').innerHTML,/current-secret/);assert.match(element('staffUsersList').innerHTML,/Классное руководство/);element('staffEditName0').value='Иванова';element('staffEditEmail0').value='teacher@example.com';element('staffEditPosition0').value='Учитель';element('staffEditClass0').value='6Б';await buttons.edit.onsubmit({preventDefault(){}});assert.ok(calls.some(c=>c.path==='/api/admin/users/u1'&&c.opts.body.homeroom_class==='6Б'&&c.opts.body.full_name==='Иванова'));
  await buttons.show.onclick();
  assert.equal(element('staffPassword0').textContent,'Пароль: current-secret');
  await buttons.show.onclick();assert.equal(element('staffPassword0').textContent,'');

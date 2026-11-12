@@ -66,6 +66,7 @@ state: dict = {
     "second_shift_classes": [],
     "updated_at": None,
     "planner": None,
+    "planner_class_imported": False,
 }
 
 _revoked_tokens: set[str] = set()
@@ -83,7 +84,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -225,10 +226,18 @@ def _ingest(buf: bytes, source_name: str) -> str:
         raise ParseError(str(exc)) from exc
     safe = _safe_upload_name(source_name)
     (UPLOAD_DIR / f"{kind}__{safe}").write_bytes(buf)
-    state[kind] = data
-    state["files"][kind] = source_name
-    _touch_updated_at()
-    _save_state()
+    with _planner_lock:
+        previous_data,previous_name=state[kind],state["files"][kind]
+        state[kind] = data
+        state["files"][kind] = source_name
+        try:
+            _import_schedule_classes()
+        except ValueError as exc:
+            state[kind],state["files"][kind]=previous_data,previous_name
+            raise ParseError(str(exc)) from exc
+        state["planner_class_imported"] = True
+        _touch_updated_at()
+        _save_state()
     return kind
 
 
@@ -290,6 +299,50 @@ def get_status() -> dict:
 
 def _planner_project() -> planner.Project:
     return planner.Project.model_validate(state.get("planner") or {})
+
+
+def _import_schedule_classes() -> list[str]:
+    """Merge published schedule classes into the draft without replacing its data.
+
+    Caller holds _planner_lock and saves the state. Existing names and shifts win.
+    """
+    project = _planner_project()
+    names = {c.name.casefold() for c in project.classes}
+    added = []
+    second_shift = set(_second_shift_classes())
+    for name in _available_classes():
+        if name.casefold() in names:
+            continue
+        if len(project.classes)>=500 or len(name)>80:
+            raise ValueError("Невозможно перенести все классы: превышен предел конструктора или длина названия")
+        project.classes.append(planner.SchoolClass(name=name,shift=2 if name in second_shift else 1))
+        names.add(name.casefold()); added.append(name)
+    if added:
+        project.revision += 1
+        state["planner"] = project.model_dump()
+    return added
+
+
+@app.on_event("startup")
+def migrate_schedule_classes():
+    # One-time migration; do not resurrect a class deliberately deleted later.
+    with _planner_lock:
+        if not state.get("planner_class_imported") and _available_classes():
+            _import_schedule_classes()
+            state["planner_class_imported"] = True
+            _save_state()
+
+
+@app.post("/api/admin/planner/import-classes")
+def import_schedule_classes(_: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        try:
+            added=_import_schedule_classes()
+        except ValueError as exc:
+            raise HTTPException(422,str(exc)) from exc
+        if added:
+            _save_state()
+        return {"added":added,"project":_planner_project().model_dump()}
 
 
 @app.get("/api/admin/planner")

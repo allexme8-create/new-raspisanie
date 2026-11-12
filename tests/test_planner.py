@@ -34,6 +34,45 @@ def project():
 
 
 class PlannerTests(unittest.TestCase):
+    def test_migrate_schedule_classes_and_preserve_planner(self):
+        original=copy.deepcopy(backend.state)
+        try:
+            backend.state["planner"]=project().model_dump()
+            backend.state["teachers"]={"classes":["5а","7б","8в"],"grid":{}}
+            backend.state["subjects"]={"classes":["7б","9г"],"grid":{}}
+            backend.state["second_shift_classes"]=["7б"]
+            backend.state["planner_class_imported"]=False
+            with patch.object(backend,"_save_state") as save:
+                backend.migrate_schedule_classes()
+                result=backend._planner_project()
+                self.assertEqual([c.name for c in result.classes],["5а","6а","7б","8в","9г"])
+                self.assertEqual(next(c.shift for c in result.classes if c.name=="7б"),2)
+                self.assertEqual(result.revision,1)
+                self.assertEqual(len(result.loads),2)
+                self.assertTrue(backend.state["planner_class_imported"])
+                save.assert_called_once()
+                self.assertEqual(backend.import_schedule_classes()["added"],[])
+                backend.state["planner"]["classes"]=[c for c in backend.state["planner"]["classes"] if c["name"]!="7б"]
+                backend.migrate_schedule_classes()
+                self.assertNotIn("7б",[c.name for c in backend._planner_project().classes])
+                self.assertEqual(backend.import_schedule_classes()["added"],["7б"])
+        finally:
+            backend.state.clear();backend.state.update(original)
+
+    def test_uploaded_schedule_adds_classes_without_overwriting_draft(self):
+        original=copy.deepcopy(backend.state)
+        try:
+            backend.state["planner"]=project().model_dump()
+            backend.state["teachers"]=None;backend.state["subjects"]=None
+            with tempfile.TemporaryDirectory() as folder,patch.object(backend,"UPLOAD_DIR",Path(folder)),patch.object(backend,"_save_state"),patch.object(backend,"parse_schedule_file",return_value=("teachers",{"classes":["10а","5а"],"grid":{}})):
+                backend._ingest(b"file","schedule.xlsx")
+                result=backend._planner_project()
+                self.assertIn("10а",[c.name for c in result.classes])
+                self.assertEqual(result.revision,1)
+                self.assertEqual(len(result.loads),2)
+        finally:
+            backend.state.clear();backend.state.update(original)
+
     def test_cannot_remove_class_with_homeroom_teacher(self):
         original=copy.deepcopy(backend.state)
         with tempfile.TemporaryDirectory() as folder:

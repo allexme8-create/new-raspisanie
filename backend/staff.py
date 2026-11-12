@@ -102,6 +102,23 @@ class NewUser(BaseModel):
         return " ".join(value.split())
 
 
+class AdminUserUpdate(BaseModel):
+    email: EmailStr
+    full_name: str = Field(default="", max_length=200)
+    position: str = Field(default="", max_length=200)
+    homeroom_class: str = Field(default="", max_length=80)
+
+    @field_validator("full_name", "position")
+    @classmethod
+    def clean_text(cls, value: str) -> str:
+        return " ".join(value.split())
+
+    @field_validator("homeroom_class")
+    @classmethod
+    def clean_class(cls, value: str) -> str:
+        return value.strip()
+
+
 class HomeroomUpdate(BaseModel):
     homeroom_class: str = Field(default="", max_length=80)
 
@@ -528,6 +545,22 @@ def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=No
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
         return {"user": {"id": uid, "email": email, "role": body.role, "full_name": body.full_name, "position": body.position, "homeroom_class":body.homeroom_class}, "password": password}
+
+    @router.put("/api/admin/users/{user_id}")
+    def edit_user(user_id: str, body: AdminUserUpdate, _: None = Depends(explicit_admin)):
+        with catalog_guard():
+            try:
+                with store.connect() as db:
+                    db.execute("BEGIN IMMEDIATE")
+                    row=db.execute("SELECT role FROM users WHERE id=? AND active=1",(user_id,)).fetchone()
+                    if not row:
+                        raise HTTPException(404,"Пользователь не найден")
+                    validate_homeroom(row["role"],body.homeroom_class)
+                    db.execute("UPDATE users SET email=?,full_name=?,position=?,homeroom_class=? WHERE id=?",(str(body.email).strip().lower(),body.full_name,body.position,body.homeroom_class,user_id))
+                    updated=db.execute("SELECT id,email,role,full_name,position,homeroom_class FROM users WHERE id=?",(user_id,)).fetchone()
+            except sqlite3.IntegrityError:
+                raise HTTPException(409,"Пользователь с таким e-mail уже существует")
+        return {"user":public_user(updated)}
 
     @router.put("/api/admin/users/{user_id}/homeroom")
     def update_homeroom(user_id: str, body: HomeroomUpdate, _: None = Depends(explicit_admin)):

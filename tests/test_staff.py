@@ -720,6 +720,25 @@ class StaffTests(unittest.TestCase):
             self.assertFalse(self.client.get("/api/staff/duty",headers=ah).json()["active"])
             self.assertEqual(self.client.post("/api/staff/duty",headers=ah,json={"day":"2027-09-01"}).status_code,422)
 
+    def test_admin_edit_user_and_homeroom(self):
+        self.client.close();catalog=["5А","6Б"]
+        app=FastAPI();app.include_router(staff.make_router(self.store,admin,class_catalog=lambda:catalog));self.client=TestClient(app)
+        teacher=self.create("edit@example.com","teacher");other=self.create("existing@example.com","associate")
+        th,password=self.ready("edit@example.com","teacher",teacher["password"])
+        uid=teacher["user"]["id"];url=f"/api/admin/users/{uid}"
+        body={"email":"new@example.com","full_name":"  Иванова  Анна  ","position":" Учитель ","homeroom_class":"5А"}
+        self.assertEqual(self.client.put(url,headers=th,json=body).status_code,401)
+        self.assertEqual(self.client.put(url,headers=self.admin,json={**body,"email":"existing@example.com"}).status_code,409)
+        self.assertEqual(self.client.put(url,headers=self.admin,json={**body,"homeroom_class":"нет"}).status_code,422)
+        self.assertEqual(self.client.put(f"/api/admin/users/{other['user']['id']}",headers=self.admin,json=body).status_code,422)
+        result=self.client.put(url,headers=self.admin,json=body)
+        self.assertEqual(result.status_code,200,result.text)
+        self.assertEqual((result.json()["user"]["full_name"],result.json()["user"]["homeroom_class"]),("Иванова Анна","5А"))
+        self.assertEqual(self.client.get("/api/staff/me",headers=th).json()["user"]["email"],"new@example.com")
+        self.assertEqual(self.login("new@example.com","teacher",password).status_code,200)
+        self.assertEqual(self.login("edit@example.com","teacher",password).status_code,401)
+        self.assertEqual(self.client.put("/api/admin/users/not-found",headers=self.admin,json=body).status_code,404)
+
     def test_homeroom_binding_and_automatic_duty_class(self):
         self.client.close()
         catalog=["5А","6Б"]
