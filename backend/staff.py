@@ -43,31 +43,20 @@ def check_password(password: str, stored: str) -> bool:
         return False
 
 
-def send_registration(email: str, role: str, password: str) -> None:
+def send_mail(email: str, subject: str, body: str) -> None:
     host = os.environ.get("SMTP_HOST", "").strip()
     sender = os.environ.get("SMTP_FROM", "").strip()
     username, secret = os.environ.get("SMTP_USER", ""), os.environ.get("SMTP_PASSWORD", "")
     security = os.environ.get("SMTP_SECURITY", "starttls").lower()
     if not host or not sender or security not in ("ssl", "starttls"):
         raise RuntimeError("SMTP не настроен: укажите SMTP_HOST, SMTP_FROM и защищённый режим SMTP_SECURITY.")
-    base_url = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
-    if base_url:
-        try:
-            parts = urlsplit(base_url)
-            valid_url = parts.scheme == "https" and parts.hostname and not (parts.path or parts.query or parts.fragment or parts.username or parts.password)
-        except ValueError:
-            valid_url = False
-        if not valid_url:
-            raise RuntimeError("PUBLIC_BASE_URL должен содержать HTTPS-адрес сайта без пути.")
     try:
         port = int(os.environ.get("SMTP_PORT", "465" if security == "ssl" else "587"))
         msg = EmailMessage()
         msg["From"] = sender
         msg["To"] = email
-        msg["Subject"] = "Доступ к сервису расписания"
-        path = "/Director" if role == "director" else "/associate"
-        address = base_url + path if base_url else f"откройте сайт сервиса и перейдите на {path}"
-        msg.set_content(f"Здравствуйте!\n\nДля вас создана учётная запись.\nСтраница входа: {address}\nЛогин: {email}\nВременный пароль: {password}\n\nПри первом входе необходимо сменить пароль. Не пересылайте это письмо и удалите его после смены пароля.\n")
+        msg["Subject"] = subject
+        msg.set_content(body)
         context = ssl.create_default_context()
         if security == "ssl":
             client = smtplib.SMTP_SSL(host, port, timeout=15, context=context)
@@ -81,6 +70,25 @@ def send_registration(email: str, role: str, password: str) -> None:
             client.send_message(msg)
     except Exception as exc:
         raise RuntimeError("Не удалось отправить письмо через SMTP. Проверьте настройки почты и доступность сервера.") from exc
+
+
+def send_registration(email: str, role: str, password: str) -> None:
+    base_url = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+    if base_url:
+        try:
+            parts = urlsplit(base_url)
+            valid_url = parts.scheme == "https" and parts.hostname and not (parts.path or parts.query or parts.fragment or parts.username or parts.password)
+        except ValueError:
+            valid_url = False
+        if not valid_url:
+            raise RuntimeError("PUBLIC_BASE_URL должен содержать HTTPS-адрес сайта без пути.")
+    path = "/Director" if role == "director" else "/associate"
+    address = base_url + path if base_url else f"откройте сайт сервиса и перейдите на {path}"
+    send_mail(email, "Доступ к сервису расписания", f"Здравствуйте!\n\nДля вас создана учётная запись.\nСтраница входа: {address}\nЛогин: {email}\nВременный пароль: {password}\n\nПри первом входе необходимо сменить пароль. Не пересылайте это письмо и удалите его после смены пароля.\n")
+
+
+def send_account_deleted(email: str) -> None:
+    send_mail(email, "Учётная запись удалена", "Здравствуйте!\n\nАдминистратор удалил вашу учётную запись в сервисе расписания. Доступ к личному кабинету прекращён. Если у вас возникли вопросы, обратитесь к администратору.\n")
 
 
 class NewUser(BaseModel):
@@ -171,7 +179,8 @@ def task_json(row, current: datetime | None = None) -> dict:
     return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email")} | {"status": status}
 
 
-TASK_SELECT = '''SELECT tasks.*, assignee.email AS assignee_email, director.email AS director_email
+TASK_SELECT = '''SELECT tasks.*, CASE WHEN assignee.active=1 THEN assignee.email ELSE 'Удалённый пользователь' END AS assignee_email,
+                 CASE WHEN director.active=1 THEN director.email ELSE 'Удалённый пользователь' END AS director_email
                  FROM tasks JOIN users assignee ON assignee.id=tasks.assignee_id
                  JOIN users director ON director.id=tasks.director_id'''
 
@@ -230,6 +239,25 @@ def make_router(store: Store, require_admin) -> APIRouter:
         with store.connect() as db:
             db.execute("UPDATE users SET active=1 WHERE id=?", (uid,))
         return {"user": {"id": uid, "email": email, "role": body.role}, "message": "Письмо отправлено"}
+
+    @router.delete("/api/admin/users/{user_id}")
+    def delete_user(user_id: str, _: None = Depends(require_admin)):
+        with store.connect() as db:
+            # Сериализуем удаление и отправку, чтобы параллельные запросы не
+            # отправляли несколько уведомлений и не меняли ту же учётную запись.
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT id,email FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+            if not row:
+                raise HTTPException(404, "Пользователь не найден")
+            try:
+                send_account_deleted(row["email"])
+            except RuntimeError as exc:
+                raise HTTPException(503, f"Пользователь не удалён. {exc}") from exc
+            db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            db.execute("DELETE FROM login_attempts WHERE key=?", (hashlib.sha256(row["email"].encode()).hexdigest(),))
+            # Задачи остаются для истории, но учетная запись и e-mail для входа удаляются.
+            db.execute("UPDATE users SET active=0, email=?, password_hash='', must_change=1 WHERE id=?", (f"__deleted__:{user_id}", user_id))
+        return {"ok": True, "message": "Пользователь удалён, уведомление отправлено"}
 
     @router.post("/api/staff/login")
     def login(body: Login):

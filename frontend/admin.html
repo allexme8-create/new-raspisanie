@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-delete-1">
 </head>
 <body>
 
@@ -38,7 +38,7 @@
   <div id="adminPanel" class="hidden">
     <section class="card">
       <h2>Пользователи руководства</h2>
-      <p class="hint">Создайте директора или заместителя. Логин (e-mail) и временный пароль отправляются на указанную почту; при первом входе пароль нужно сменить. Требуется настроенный SMTP.</p>
+      <p class="hint">Создайте директора или заместителя. Логин (e-mail) и временный пароль отправляются на указанную почту; при первом входе пароль нужно сменить. При удалении пользователь получает уведомление, доступ прекращается, а история задач сохраняется без его e-mail. Для создания и удаления требуется настроенный SMTP.</p>
       <form id="staffCreateForm" class="planner-form">
         <label>E-mail<input id="staffEmail" type="email" maxlength="254" required autocomplete="off" placeholder="name@example.ru"></label>
         <label>Роль<select id="staffRole"><option value="associate">Заместитель директора</option><option value="director">Директор</option></select></label>
@@ -112,6 +112,6 @@
 <div class="toast" id="toast"></div>
 <script src="/js/admin.js?v=planner-1"></script>
 <script src="/js/planner.js?v=planner-1"></script>
-<script src="/js/staff-admin.js?v=staff-1"></script>
+<script src="/js/staff-admin.js?v=staff-delete-1"></script>
 </body>
 </html>

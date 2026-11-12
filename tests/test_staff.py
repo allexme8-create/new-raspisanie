@@ -132,6 +132,58 @@ class StaffTests(unittest.TestCase):
         finally:
             self.sender.start()
 
+    def test_delete_revokes_access_and_preserves_task_history(self):
+        self.create("director@example.com", "director")
+        user = self.create("deputy@example.com", "associate")
+        director = self.ready("director@example.com", "director")
+        deputy = self.ready("deputy@example.com", "associate")
+        deadline = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        task = self.client.post("/api/staff/tasks", headers=director, json={"assignee_id": user["id"], "description": "Отчёт", "deadline": deadline}).json()["task"]
+        url = "/api/admin/users/" + user["id"]
+        self.assertEqual(self.client.delete(url, headers=director).status_code, 401)
+        with patch.object(staff, "send_account_deleted", side_effect=RuntimeError("SMTP недоступен")):
+            self.assertEqual(self.client.delete(url, headers=self.admin).status_code, 503)
+        self.assertEqual(self.client.get("/api/staff/me", headers=deputy).status_code, 200)
+        with patch.object(staff, "send_account_deleted") as sent:
+            self.assertEqual(self.client.delete(url, headers=self.admin).status_code, 200)
+            sent.assert_called_once_with("deputy@example.com")
+            self.assertEqual(self.client.delete(url, headers=self.admin).status_code, 404)
+            sent.assert_called_once()
+        self.assertEqual(self.client.get("/api/staff/me", headers=deputy).status_code, 401)
+        self.assertEqual(self.client.get("/api/staff/associates", headers=director).json()["users"], [])
+        remaining = self.client.get("/api/staff/tasks", headers=director).json()["tasks"]
+        self.assertEqual(remaining[0]["id"], task["id"])
+        self.assertEqual(remaining[0]["assignee_email"], "Удалённый пользователь")
+        new_user = self.create("deputy@example.com", "associate")
+        self.assertNotEqual(new_user["id"], user["id"])
+        new_session = self.ready("deputy@example.com", "associate")
+        self.assertEqual(self.client.get("/api/staff/tasks", headers=new_session).json()["tasks"], [])
+        with self.store.connect() as db:
+            deleted = db.execute("SELECT email,password_hash FROM users WHERE id=?", (user["id"],)).fetchone()
+            self.assertNotEqual(deleted["email"], "deputy@example.com")
+            self.assertEqual(deleted["password_hash"], "")
+
+    def test_deleted_director_is_anonymous_to_assignee(self):
+        director_user = self.create("director@example.com", "director")
+        deputy_user = self.create("deputy@example.com", "associate")
+        director = self.ready("director@example.com", "director")
+        deputy = self.ready("deputy@example.com", "associate")
+        deadline = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+        self.client.post("/api/staff/tasks", headers=director, json={"assignee_id": deputy_user["id"], "description": "Отчёт", "deadline": deadline})
+        with patch.object(staff, "send_account_deleted"):
+            self.assertEqual(self.client.delete("/api/admin/users/" + director_user["id"], headers=self.admin).status_code, 200)
+        self.assertEqual(self.client.get("/api/staff/me", headers=director).status_code, 401)
+        self.assertEqual(self.client.get("/api/staff/tasks", headers=deputy).json()["tasks"][0]["director_email"], "Удалённый пользователь")
+
+    def test_deletion_email_text(self):
+        with patch.object(staff, "send_mail") as send:
+            staff.send_account_deleted("deputy@example.com")
+        recipient, subject, body = send.call_args.args
+        self.assertEqual(recipient, "deputy@example.com")
+        self.assertIn("удалена", subject)
+        self.assertIn("удалил", body)
+        self.assertNotIn("пароль", body.lower())
+
     def test_bruteforce_throttle(self):
         self.create("a@example.com", "associate")
         for _ in range(5):

@@ -218,7 +218,9 @@ footer a{color:var(--muted)}
 .staff-heading .btn{width:auto}
 .staff-heading #staffIdentity{overflow-wrap:anywhere;color:var(--muted);font-size:14px}
 .staff-logout-link{border:0;background:none;color:var(--muted);text-decoration:underline;cursor:pointer;margin-top:12px;padding:4px}
-.staff-user-list{padding-left:20px;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
+.staff-user-list{list-style:none;padding:0;color:var(--muted);font-size:14px;overflow-wrap:anywhere}
+.staff-user-list li{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line)}
+.staff-user-list li span{min-width:0}
 .task-card{border:1px solid var(--line);border-left:5px solid #6b7280;border-radius:12px;padding:14px;margin:10px 0;background:#fff}
 .task-card.status-pending{border-left-color:#d97706;background:#fffbeb}
 .task-card.status-overdue{border-left-color:#dc2626;background:#fef2f2}
