@@ -9,6 +9,16 @@ const roleNames={director:"Директор",associate:"Заместитель �
 function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;}
 const statuses={pending:"В работе",overdue:"Просрочено",completed_on_time:"Выполнено в срок",completed_late:"Выполнено с просрочкой"};
 function screen(id){["staffLoginCard","changePasswordCard","staffPanel"].forEach(x=>byId(x).classList.toggle("hidden",x!==id));}
+const staffViews=["staffProfileView","staffCreateView","staffTasksView","staffProjectsView"];
+function openStaffView(id){
+  if(id==="staffCreateView"&&!manager)return;
+  if(id!=="staffHome"&&!staffViews.includes(id))return;
+  byId("staffHome").classList.toggle("hidden",id!=="staffHome");
+  byId("staffBack").classList.toggle("hidden",id==="staffHome");
+  staffViews.forEach(view=>byId(view).classList.toggle("hidden",view!==id));
+}
+document.querySelectorAll("[data-staff-view]").forEach(button=>button.onclick=()=>openStaffView(button.dataset.staffView));
+byId("staffBack").onclick=()=>openStaffView("staffHome");
 function errorAt(id,error){byId(id).innerHTML=`<div class="alert err">${escapeHTML(error.message)}</div>`;}
 async function request(path,{method="GET",body,anonymous=false}={}){
   const headers={};
@@ -26,7 +36,7 @@ async function showSession(data){
   if(data.must_change){screen("changePasswordCard");return;}
   screen("staffPanel");showIdentity(staffUser);
   byId("staffFullName").value=staffUser.full_name||"";byId("staffPosition").value=staffUser.position||"";byId("profileResult").innerHTML="";
-  byId("createTaskCard").classList.toggle("hidden",!manager);byId("projectCreateCard").classList.toggle("hidden",!manager);
+  byId("staffCreateChoice").classList.toggle("hidden",!manager);openStaffView("staffHome");
   if(manager)await loadAssignees();
   await loadTasks();
 }
@@ -110,6 +120,6 @@ byId("taskForm").onsubmit=async e=>{
 document.querySelectorAll("[data-logout]").forEach(button=>button.onclick=async()=>{
   try{await request("/api/staff/logout",{method:"POST"});}catch(e){}staffToken="";staffUser=null;sessionStorage.removeItem(key);screen("staffLoginCard");
 });
-byId("taskRefresh").onclick=()=>{if(manager)loadAssignees();loadTasks();};
+byId("taskRefresh").onclick=byId("projectRefresh").onclick=()=>{if(manager)loadAssignees();loadTasks();};
 setInterval(()=>{if(!document.hidden&&staffToken&&staffUser&&!byId("staffPanel").classList.contains("hidden"))loadTasks();},30000);
 if(staffToken)request("/api/staff/me").then(showSession).catch(e=>{if(staffToken)errorAt("staffLoginError",e);screen("staffLoginCard");});

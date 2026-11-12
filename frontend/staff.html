@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-job-2">
+<link rel="stylesheet" href="/css/style.css?v=staff-sections-1">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -29,16 +29,24 @@
   </section>
   <div id="staffPanel" class="hidden">
     <div class="staff-heading"><span id="staffIdentity"></span><button class="btn secondary" type="button" data-logout>Выйти</button></div>
-    <details class="card staff-profile">
-      <summary>Мой профиль</summary>
+    <nav id="staffHome" class="home-choices" aria-label="Разделы личного кабинета">
+      <button class="home-choice" type="button" data-staff-view="staffProfileView"><span class="home-choice-icon" aria-hidden="true">👤</span><strong>Мой профиль</strong><span aria-hidden="true">→</span></button>
+      <button class="home-choice" id="staffCreateChoice" type="button" data-staff-view="staffCreateView"><span class="home-choice-icon" aria-hidden="true">✏️</span><strong>Поставить задачу или создать проект</strong><span aria-hidden="true">→</span></button>
+      <button class="home-choice" type="button" data-staff-view="staffTasksView"><span class="home-choice-icon" aria-hidden="true">📋</span><strong>Состояние текущих задач</strong><span aria-hidden="true">→</span></button>
+      <button class="home-choice" type="button" data-staff-view="staffProjectsView"><span class="home-choice-icon" aria-hidden="true">📁</span><strong>Состояние проектов</strong><span aria-hidden="true">→</span></button>
+    </nav>
+    <button class="change-selection home-back hidden" id="staffBack" type="button">← В меню кабинета</button>
+    <section id="staffProfileView" class="card hidden">
+      <h2>Мой профиль</h2>
       <div id="profileResult" aria-live="polite"></div>
       <form id="staffProfileForm">
         <div class="field"><label for="staffFullName">Фамилия, имя и отчество</label><input id="staffFullName" type="text" autocomplete="name" maxlength="200" required></div>
         <div class="field"><label for="staffPosition">Должность</label><input id="staffPosition" type="text" maxlength="200" placeholder="Например, учитель начальных классов"><p class="hint">Если не указана, будет показана роль пользователя.</p></div>
         <button class="btn" type="submit">Сохранить профиль</button>
       </form>
-    </details>
-    <section class="card hidden" id="createTaskCard">
+    </section>
+    <div id="staffCreateView" class="hidden">
+    <section class="card" id="createTaskCard">
       <h2>Поставить задачу</h2><div id="taskCreateError" aria-live="polite"></div>
       <form id="taskForm">
         <div class="field"><label for="taskAssignee">Исполнитель</label><select id="taskAssignee" required></select><p class="hint">Если ФИО не указано, попросите сотрудника заполнить профиль.</p></div>
@@ -49,17 +57,19 @@
         <button class="btn" type="submit">Назначить задачу</button>
       </form>
     </section>
-    <section class="card hidden" id="projectCreateCard">
+    <section class="card" id="projectCreateCard">
       <h2>Создать проект</h2><div id="projectCreateError" aria-live="polite"></div>
       <form id="projectForm"><div class="field"><label for="projectTitle">Название проекта</label><input id="projectTitle" maxlength="200" required></div><button class="btn" type="submit">Создать проект</button></form>
     </section>
-    <section class="card">
-      <div class="staff-heading"><h2 id="taskListTitle">Текущие задачи</h2><button class="btn secondary" id="taskRefresh" type="button">Обновить</button></div>
-      <div id="taskListError" aria-live="polite"></div><div id="taskList"></div>
+    </div>
+    <div id="taskListError" aria-live="polite"></div>
+    <section id="staffTasksView" class="card hidden">
+      <div class="staff-heading"><h2 id="taskListTitle">Состояние текущих задач</h2><button class="btn secondary" id="taskRefresh" type="button">Обновить</button></div>
+      <div id="taskList"></div>
     </section>
-    <section class="card"><h2>Проекты</h2><p class="hint">Выполнение и участие по назначенным задачам.</p><div id="projectList"></div></section>
+    <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-job-2"></script>
+<script src="/js/staff.js?v=staff-sections-1"></script>
 </body>
 </html>
