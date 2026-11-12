@@ -1,0 +1,10 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const page = fs.readFileSync('frontend/admin.html', 'utf8');
+const guide = page.match(/<div class="oauth-guide"[\s\S]*?<\/div>/)?.[0];
+assert.ok(guide, 'OAuth instructions are visible in admin page');
+for (const item of ['PUBLIC_BASE_URL', '/mail-oauth/callback', 'mail:smtp', 'mail.imap', 'YANDEX_OAUTH_CLIENT_ID', 'YANDEX_OAUTH_CLIENT_SECRET', 'MAILRU_OAUTH_CLIENT_ID', 'MAILRU_OAUTH_CLIENT_SECRET', 'MAIL_OAUTH_ENCRYPTION_KEY', 'Fernet.generate_key()', 'Перезапустите сервер', 'не отправляйте в чат']) assert.ok(guide.includes(item), `missing ${item}`);
+assert.match(guide, /без SMTP_PASSWORD/);
+assert.match(guide, /https:\/\/oauth\.yandex\.ru\//);
+assert.match(guide, /https:\/\/o2\.mail\.ru\/app\//);
+console.log('OAuth setup guide OK');
