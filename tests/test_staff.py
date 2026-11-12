@@ -720,6 +720,56 @@ class StaffTests(unittest.TestCase):
             self.assertFalse(self.client.get("/api/staff/duty",headers=ah).json()["active"])
             self.assertEqual(self.client.post("/api/staff/duty",headers=ah,json={"day":"2027-09-01"}).status_code,422)
 
+    def test_quarter_settings_and_sundays(self):
+        a=self.create("quarter-a@example.com","associate")
+        t=self.create("quarter-t@example.com","teacher")
+        d=self.create("quarter-d@example.com","director")
+        ah,_=self.ready("quarter-a@example.com","associate",a["password"])
+        th,_=self.ready("quarter-t@example.com","teacher",t["password"])
+        dh,_=self.ready("quarter-d@example.com","director",d["password"])
+        for headers,name in ((ah,"Заместитель"),(th,"Учитель")):
+            self.client.put("/api/staff/profile",headers=headers,json={"full_name":name})
+        url="/api/staff/duty/quarters/2026"
+        periods=[{"start":"2026-09-10","end":"2026-10-20"},{"start":"2026-11-15","end":"2026-12-25"},{"start":"2027-01-15","end":"2027-03-25"},{"start":"2027-04-05","end":"2027-05-25"}]
+        with patch.object(staff,"school_today",return_value=date(2026,11,9)):
+            self.assertEqual(self.client.get(url).status_code,401)
+            self.assertEqual(self.client.get(url,headers=th).status_code,403)
+            self.assertEqual(self.client.put(url,headers=dh,json={"quarters":periods}).status_code,403)
+            default=self.client.get(url,headers=ah).json()["quarters"]
+            self.assertEqual(default[0],{"start":"2026-09-01","end":"2026-10-31"})
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":"2026-11-15","shift":1,"class_name":"5А"}).status_code,422)
+            self.assertEqual(self.client.put("/api/staff/duty/admin/2026-11-15",headers=ah,json={"user_id":a["user"]["id"]}).status_code,422)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":"2026-11-14","shift":1,"class_name":"5А"}).status_code,201)
+            # Old Sunday records, if any, remain stored but aren't displayed.
+            with self.store.connect() as db:
+                db.execute("INSERT INTO duty_assignments(day,slot,user_id,class_name) VALUES (?,?,?,?)",("2026-11-15",1,t["user"]["id"],"5А"))
+            self.assertNotIn("2026-11-15",[e["day"] for e in self.client.get("/api/staff/duty",headers=th).json()["entries"]])
+            overlap=[dict(x) for x in periods];overlap[1]["start"]="2026-10-20"
+            self.assertEqual(self.client.put(url,headers=ah,json={"quarters":overlap}).status_code,422)
+            invalid=[dict(x) for x in periods];invalid[3]["end"]="2027-08-01"
+            self.assertEqual(self.client.put(url,headers=ah,json={"quarters":invalid}).status_code,422)
+            self.assertEqual(self.client.get(url,headers=ah).json()["quarters"],default)
+            self.assertEqual(self.client.put(url,headers=ah,json={"quarters":periods}).status_code,200)
+            self.assertEqual(self.client.get(url,headers=ah).json()["quarters"],periods)
+            calendar=self.client.get("/api/staff/duty",headers=th).json()
+            self.assertEqual((calendar["start"],calendar["end"],calendar["active"]),("2026-11-15","2026-12-25",False))
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":"2026-11-16","shift":1,"class_name":"5А"}).status_code,422)
+            self.assertEqual(self.client.put("/api/staff/duty/week-template",headers=ah,json={"deputies":[a["user"]["id"]]*5}).status_code,200)
+        with patch.object(staff,"school_today",return_value=date(2026,11,16)):
+            calendar=self.client.get("/api/staff/duty",headers=th).json()
+            self.assertTrue(calendar["active"])
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"][0]["full_name"],"Заместитель")
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":"2026-11-21","shift":1,"class_name":"5А"}).status_code,201)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":"2026-11-22","shift":2,"class_name":"5А"}).status_code,422)
+        with patch.object(staff,"school_today",return_value=date(2026,11,15)):
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"],[])
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM duty_assignments WHERE day IN ('2026-11-14','2026-11-15')").fetchone()[0],2)
+        with patch.object(staff,"school_today",return_value=date(2027,1,11)):
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"],[])
+            self.assertEqual(self.client.get("/api/staff/duty",headers=th).json()["start"],"2027-01-15")
+        self.assertEqual(self.client.get("/api/staff/duty/quarters/2027",headers=ah).json()["quarters"][0]["start"],"2027-09-01")
+
     def test_repeating_deputy_week_and_single_date_override(self):
         a=self.create("week-a@example.com","associate")
         b=self.create("week-b@example.com","associate")

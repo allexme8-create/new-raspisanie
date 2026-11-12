@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-duty-4">
+<link rel="stylesheet" href="/css/style.css?v=staff-duty-5">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -44,6 +44,13 @@
     <section id="staffDutyView" class="card hidden">
       <div class="staff-heading"><h2>Дежурство</h2><button class="btn secondary" id="dutyRefresh" type="button">Обновить карту</button></div>
       <p id="dutyPeriod" class="hint">Загрузка карты…</p><div id="dutyError" aria-live="polite"></div>
+      <details id="dutyQuarterSection" class="duty-form hidden">
+        <summary><strong>Даты учебных четвертей</strong></summary>
+        <p class="hint">Укажите даты для учебного года. Четверти не должны пересекаться. Существующие записи не удаляются, но даты вне четвертей не показываются на карте.</p>
+        <div class="field"><label for="dutyQuarterYear">Учебный год (год начала)</label><input id="dutyQuarterYear" type="number" min="1900" max="2200" step="1"></div>
+        <button class="btn secondary" id="dutyQuarterLoad" type="button">Загрузить даты</button>
+        <form id="dutyQuarterForm" class="hidden"><div id="dutyQuarterFields"></div><button class="btn" id="dutyQuarterSave" type="submit">Сохранить даты четвертей</button></form>
+      </details>
       <details id="dutyWeekSection" class="duty-form hidden">
         <summary><strong>Повторять дежурство заместителей по неделям</strong></summary>
         <p class="hint">Шаблон действует с сегодняшнего дня и повторяется по будням учебных четвертей. Ранее назначенные и вручную изменённые даты сохраняются.</p>
@@ -106,7 +113,7 @@
     <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-duty-4"></script>
-<script src="/js/duty.js?v=staff-duty-4"></script>
+<script src="/js/staff.js?v=staff-duty-5"></script>
+<script src="/js/duty.js?v=staff-duty-5"></script>
 </body>
 </html>

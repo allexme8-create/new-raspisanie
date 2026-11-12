@@ -39,6 +39,23 @@ def duty_quarter(today: date) -> tuple[date, date, int, bool]:
     raise RuntimeError("Не удалось определить четверть")
 
 
+def quarters_for_year(db, year: int) -> list[tuple[date, date, int]]:
+    defaults = [(date(year,9,1),date(year,10,31),1),(date(year,11,1),date(year,12,31),2),
+                (date(year+1,1,10),date(year+1,3,31),3),(date(year+1,4,1),date(year+1,5,31),4)]
+    rows=db.execute("SELECT quarter,start_day,end_day FROM duty_quarters WHERE school_year=? ORDER BY quarter",(year,)).fetchall()
+    return [(date.fromisoformat(row["start_day"]),date.fromisoformat(row["end_day"]),row["quarter"]) for row in rows] if len(rows)==4 else defaults
+
+
+def configured_duty_quarter(db, today: date) -> tuple[date, date, int, bool]:
+    periods=[]
+    for year in (today.year-1,today.year,today.year+1):
+        periods.extend(quarters_for_year(db,year))
+    for start,end,quarter in periods:
+        if today<=end:
+            return start,end,quarter,start<=today
+    raise RuntimeError("Не удалось определить четверть")
+
+
 def now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -150,6 +167,15 @@ class DutyBooking(BaseModel):
     @classmethod
     def clean_class(cls, value: str) -> str:
         return " ".join(value.split())
+
+
+class QuarterPeriod(BaseModel):
+    start: date
+    end: date
+
+
+class QuarterSettings(BaseModel):
+    quarters: list[QuarterPeriod] = Field(min_length=4,max_length=4)
 
 
 class DutyWeekTemplate(BaseModel):
@@ -315,6 +341,9 @@ class Store:
                 user_id TEXT REFERENCES users(id), PRIMARY KEY(effective_day,weekday))""")
             db.execute("""CREATE TABLE IF NOT EXISTS duty_admin_overrides (
                 day TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS duty_quarters (
+                school_year INTEGER NOT NULL, quarter INTEGER NOT NULL CHECK(quarter BETWEEN 1 AND 4),
+                start_day TEXT NOT NULL, end_day TEXT NOT NULL, PRIMARY KEY(school_year,quarter))""")
             # Почтовые настройки и коды больше не используются.
             for name in ("mail_oauth", "mail_oauth_pending", "password_resets", "reset_throttle", "reset_ip_throttle"):
                 db.execute(f"DROP TABLE IF EXISTS {name}")
@@ -574,16 +603,20 @@ def make_router(store: Store, require_admin) -> APIRouter:
             CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''),CASE users.role WHEN 'teacher' THEN 'Учитель' ELSE 'Заместитель директора' END) ELSE '' END AS position
             FROM duty_assignments JOIN users ON users.id=duty_assignments.user_id
             WHERE duty_assignments.day BETWEEN ? AND ? ORDER BY duty_assignments.day,duty_assignments.slot""", (start.isoformat(), end.isoformat())).fetchall()
-        entries = {(row["day"],row["slot"]): {"day": row["day"], "slot": row["slot"], "class_name": row["class_name"] if row["active"] else "", "full_name": row["full_name"], "position": row["position"], "mine": bool(viewer_id and row["user_id"] == viewer_id), "source": "manual"} for row in rows}
+        entries = {(row["day"],row["slot"]): {"day": row["day"], "slot": row["slot"], "class_name": row["class_name"] if row["active"] else "", "full_name": row["full_name"], "position": row["position"], "mine": bool(viewer_id and row["user_id"] == viewer_id), "source": "manual"} for row in rows if date.fromisoformat(row["day"]).weekday()!=6}
         templates = db.execute("""SELECT t.effective_day,t.weekday,t.user_id,u.active,u.full_name,u.position FROM duty_weekly_template t LEFT JOIN users u ON u.id=t.user_id WHERE t.effective_day<=? ORDER BY t.effective_day""",(end.isoformat(),)).fetchall()
         overrides = {row["day"]: row for row in db.execute("""SELECT o.day,o.user_id,u.active,u.full_name,u.position FROM duty_admin_overrides o LEFT JOIN users u ON u.id=o.user_id WHERE o.day BETWEEN ? AND ?""",(start.isoformat(),end.isoformat())).fetchall()}
+        periods = [period for year in range(start.year-1,end.year+1) for period in quarters_for_year(db,year)]
         current = start
         while current <= end:
+            if current.weekday()==6:
+                current += timedelta(days=1)
+                continue
             day = current.isoformat(); key = (day,0); override = overrides.get(day)
             source = None; row = None
             if override is not None:
                 entries.pop(key,None); row=override; source="override"
-            elif key not in entries and current.weekday()<5 and duty_quarter(current)[3]:
+            elif key not in entries and current.weekday()<5 and any(period_start<=current<=period_end for period_start,period_end,_ in periods):
                 applicable=[t for t in templates if t["weekday"]==current.weekday() and t["effective_day"]<=day]
                 if applicable: row=applicable[-1]; source="template"
             if row is not None and row["user_id"] and row["active"]:
@@ -612,6 +645,29 @@ def make_router(store: Store, require_admin) -> APIRouter:
         if not row["full_name"]:
             raise HTTPException(422, "У выбранного заместителя не указано ФИО")
 
+    @router.get("/api/staff/duty/quarters/{year}")
+    def get_duty_quarters(year: int, user: dict = Depends(duty_deputy)):
+        if not 1900 <= year <= 2200:
+            raise HTTPException(422,"Недопустимый учебный год")
+        with store.connect() as db:
+            quarters=quarters_for_year(db,year)
+        return {"school_year":year,"quarters":[{"start":start.isoformat(),"end":end.isoformat()} for start,end,_ in quarters]}
+
+    @router.put("/api/staff/duty/quarters/{year}")
+    def set_duty_quarters(year: int, body: QuarterSettings, user: dict = Depends(duty_deputy)):
+        if not 1900 <= year <= 2200:
+            raise HTTPException(422,"Недопустимый учебный год")
+        previous=None
+        for period in body.quarters:
+            if period.start>period.end or period.start<date(year,8,1) or period.end>date(year+1,7,31) or (previous is not None and period.start<=previous):
+                raise HTTPException(422,"Четверти должны идти по порядку, не пересекаться и находиться в учебном году с 1 августа по 31 июля")
+            previous=period.end
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE"); check_duty_session(db,user)
+            for i,period in enumerate(body.quarters,1):
+                db.execute("INSERT INTO duty_quarters(school_year,quarter,start_day,end_day) VALUES(?,?,?,?) ON CONFLICT(school_year,quarter) DO UPDATE SET start_day=excluded.start_day,end_day=excluded.end_day",(year,i,period.start.isoformat(),period.end.isoformat()))
+        return {"ok":True}
+
     @router.get("/api/staff/duty/week-template")
     def get_duty_week(user: dict = Depends(duty_deputy)):
         today=school_today().isoformat()
@@ -635,39 +691,38 @@ def make_router(store: Store, require_admin) -> APIRouter:
 
     @router.put("/api/staff/duty/admin/{day}")
     def set_duty_admin(day: date, body: DutyAdminOverride, user: dict = Depends(duty_deputy)):
-        today=school_today(); start,end,_,active=duty_quarter(today)
-        if not active or day<today or not start<=day<=end:
-            raise HTTPException(422,"Выберите сегодняшнюю или будущую дату текущей четверти")
+        today=school_today()
         with store.connect() as db:
             db.execute("BEGIN IMMEDIATE"); check_duty_session(db,user)
+            start,end,_,active=configured_duty_quarter(db,today)
+            if day.weekday()==6 or not active or day<today or not start<=day<=end:
+                raise HTTPException(422,"Выберите сегодняшнюю или будущую дату текущей четверти, кроме воскресенья")
             if body.user_id is not None: validate_deputy(db,body.user_id)
             db.execute("INSERT INTO duty_admin_overrides(day,user_id) VALUES(?,?) ON CONFLICT(day) DO UPDATE SET user_id=excluded.user_id",(day.isoformat(),body.user_id))
         return {"ok":True}
 
     @router.delete("/api/staff/duty/admin/{day}")
     def restore_duty_admin(day: date, user: dict = Depends(duty_deputy)):
-        today=school_today(); start,end,_,active=duty_quarter(today)
-        if not active or day<today or not start<=day<=end:
-            raise HTTPException(422,"Выберите сегодняшнюю или будущую дату текущей четверти")
+        today=school_today()
         with store.connect() as db:
             db.execute("BEGIN IMMEDIATE"); check_duty_session(db,user)
+            start,end,_,active=configured_duty_quarter(db,today)
+            if day.weekday()==6 or not active or day<today or not start<=day<=end:
+                raise HTTPException(422,"Выберите сегодняшнюю или будущую дату текущей четверти, кроме воскресенья")
             db.execute("DELETE FROM duty_admin_overrides WHERE day=?",(day.isoformat(),))
         return {"ok":True}
 
     @router.get("/api/staff/duty")
     def duty_calendar(user: dict = Depends(duty_user)):
         today = school_today()
-        start, end, quarter, active = duty_quarter(today)
         with store.connect() as db:
+            start, end, quarter, active = configured_duty_quarter(db,today)
             entries = duty_rows(db, start, end, user["id"])
         return {"today": today.isoformat(), "start": start.isoformat(), "end": end.isoformat(), "quarter": quarter, "active": active, "timezone": SCHOOL_TIMEZONE, "entries": entries}
 
     @router.post("/api/staff/duty", status_code=201)
     def book_duty(body: DutyBooking, user: dict = Depends(duty_user)):
         today = school_today()
-        start, end, _, active = duty_quarter(today)
-        if not active or not start <= body.day <= end or body.day < today:
-            raise HTTPException(422, "Выберите сегодняшнюю или будущую дату текущей четверти")
         if user["role"] == "teacher":
             if body.teacher_id is not None:
                 raise HTTPException(403, "Назначать других учителей может только заместитель")
@@ -689,6 +744,9 @@ def make_router(store: Store, require_admin) -> APIRouter:
         try:
             with store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
+                start,end,_,active=configured_duty_quarter(db,today)
+                if body.day.weekday()==6 or not active or not start<=body.day<=end or body.day<today:
+                    raise HTTPException(422,"Выберите сегодняшнюю или будущую дату текущей четверти, кроме воскресенья")
                 # Recheck session and user inside the transaction before reserving a slot.
                 if not db.execute("SELECT 1 FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=? AND sessions.expires>? AND users.active=1 AND users.id=?", (user["token_hash"], int(time.time()), user["id"])).fetchone():
                     raise HTTPException(401, "Сессия истекла — войдите заново")
@@ -732,7 +790,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
     def public_today_duties():
         today = school_today()
         with store.connect() as db:
-            entries = duty_rows(db,today,today)
+            entries = duty_rows(db,today,today) if configured_duty_quarter(db,today)[3] else []
         for entry in entries:
             entry.pop("mine",None)
             entry.pop("source",None)

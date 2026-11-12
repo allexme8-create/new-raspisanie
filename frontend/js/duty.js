@@ -1,13 +1,13 @@
 "use strict";
-let dutyCalendar=null, dutySelected=null, dutyTeachers=[], dutyVersion=0, dutyWeek=null, dutyWeekDirty=false, dutyAdminDay=null;
+let dutyCalendar=null, dutySelected=null, dutyTeachers=[], dutyVersion=0, dutyWeek=null, dutyWeekDirty=false, dutyAdminDay=null, dutyQuarterYear=null, dutyQuarterVersion=0;
 function resetDuty(){
-  dutyVersion++;dutyCalendar=null;dutySelected=null;dutyTeachers=[];dutyWeek=null;dutyWeekDirty=false;dutyAdminDay=null;byId("dutyWeekFields").innerHTML="";byId("dutyWeekSection").classList.add("hidden");byId("dutyAdminForm").classList.add("hidden");byId("dutyTeacher").innerHTML="";byId("dutyClass").value="";byId("dutyMap").innerHTML="";
+  dutyVersion++;dutyQuarterVersion++;dutyQuarterYear=null;byId("dutyQuarterSection").classList.add("hidden");byId("dutyQuarterForm").classList.add("hidden");byId("dutyQuarterYear").value="";dutyCalendar=null;dutySelected=null;dutyTeachers=[];dutyWeek=null;dutyWeekDirty=false;dutyAdminDay=null;byId("dutyWeekFields").innerHTML="";byId("dutyWeekSection").classList.add("hidden");byId("dutyAdminForm").classList.add("hidden");byId("dutyTeacher").innerHTML="";byId("dutyClass").value="";byId("dutyMap").innerHTML="";
   byId("dutyError").innerHTML="";byId("dutySelected").textContent="Выберите свободное место на карте.";byId("dutySubmit").disabled=true;
 }
 const dutySlotLabel=slot=>slot===0?"Дежурный администратор":`${slot}-я смена · учитель`;
 function dutyDateText(value){const date=new Date(value+"T00:00:00Z");return `${date.toLocaleDateString("ru-RU",{timeZone:"UTC",day:"numeric",month:"long"})} ${date.getUTCFullYear()} года`;}
 function dutyDays(start,end){
-  const result=[];for(let d=new Date(start+"T00:00:00Z"),last=new Date(end+"T00:00:00Z");d<=last;d.setUTCDate(d.getUTCDate()+1))result.push(d.toISOString().slice(0,10));return result;
+  const result=[];for(let d=new Date(start+"T00:00:00Z"),last=new Date(end+"T00:00:00Z");d<=last;d.setUTCDate(d.getUTCDate()+1))if(d.getUTCDay()!==0)result.push(d.toISOString().slice(0,10));return result;
 }
 function renderDuty(){
   if(!dutyCalendar)return;
@@ -59,10 +59,28 @@ async function loadDutyCalendar(){
       }).join("");
       if(dutyTeachers.some(u=>u.id===previous&&u.full_name))select.value=previous;
     }
-    if(week){dutyWeek=week;byId("dutyWeekSection").classList.remove("hidden");if(!dutyWeekDirty)renderDutyWeek();}
+    if(week){dutyWeek=week;byId("dutyWeekSection").classList.remove("hidden");byId("dutyQuarterSection").classList.remove("hidden");
+      if(!byId("dutyQuarterYear").value){const day=new Date(data.start+"T00:00:00Z");byId("dutyQuarterYear").value=String(day.getUTCFullYear()-(day.getUTCMonth()<7?1:0));}
+      if(!dutyWeekDirty)renderDutyWeek();}
     dutyCalendar=data;renderDuty();}
   catch(e){if(staffToken===session&&version===dutyVersion)errorAt("dutyError",e);}
 }
+byId("dutyQuarterLoad").onclick=async()=>{
+  const input=byId("dutyQuarterYear"),year=Number(input.value),session=staffToken,version=++dutyQuarterVersion;
+  if(!Number.isInteger(year)||year<1900||year>2200){errorAt("dutyError",new Error("Укажите учебный год от 1900 до 2200"));return;}
+  byId("dutyQuarterForm").classList.add("hidden");dutyQuarterYear=null;byId("dutyError").innerHTML="";
+  try{const result=await request(`/api/staff/duty/quarters/${year}`);if(session!==staffToken||version!==dutyQuarterVersion)return;
+    dutyQuarterYear=year;byId("dutyQuarterFields").innerHTML=result.quarters.map((q,i)=>`<div class="field"><strong>${i+1}-я четверть</strong><label for="quarterStart${i}">Начало</label><input type="date" id="quarterStart${i}" value="${escapeHTML(q.start)}" required><label for="quarterEnd${i}">Окончание</label><input type="date" id="quarterEnd${i}" value="${escapeHTML(q.end)}" required></div>`).join("");
+    byId("dutyQuarterForm").classList.remove("hidden");
+  }catch(error){if(session===staffToken&&version===dutyQuarterVersion)errorAt("dutyError",error);}
+};
+byId("dutyQuarterYear").oninput=()=>{dutyQuarterVersion++;dutyQuarterYear=null;byId("dutyQuarterForm").classList.add("hidden");};
+byId("dutyQuarterForm").onsubmit=async e=>{
+  e.preventDefault();if(dutyQuarterYear===null)return;const year=dutyQuarterYear,button=byId("dutyQuarterSave"),session=staffToken;button.disabled=true;byId("dutyError").innerHTML="";
+  try{await request(`/api/staff/duty/quarters/${year}`,{method:"PUT",body:{quarters:[0,1,2,3].map(i=>({start:byId(`quarterStart${i}`).value,end:byId(`quarterEnd${i}`).value}))}});
+    if(session!==staffToken)return;byId("dutyError").innerHTML='<div class="alert ok">Даты четвертей сохранены.</div>';await loadDutyCalendar();
+  }catch(error){if(session===staffToken)errorAt("dutyError",error);}finally{button.disabled=false;}
+};
 const dutyWeekDays=["Понедельник","Вторник","Среда","Четверг","Пятница"];
 function deputyOptions(selected){
   const users=dutyWeek?.deputies||[],counts=new Map();users.forEach(u=>{const name=u.full_name||"ФИО не указано";counts.set(name,(counts.get(name)||0)+1);});
