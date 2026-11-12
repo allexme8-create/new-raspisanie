@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-create-name-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-homeroom-1">
 </head>
 <body>
 
@@ -44,6 +44,7 @@
         <label>ФИО (необязательно)<input id="staffFullName" type="text" maxlength="200" autocomplete="name" placeholder="Фамилия Имя Отчество"></label>
         <label>E-mail<input id="staffEmail" type="email" maxlength="254" required autocomplete="off" placeholder="name@example.ru"></label>
         <label>Роль<select id="staffRole"><option value="associate">Заместитель директора</option><option value="director">Директор</option><option value="teacher">Учитель</option></select></label>
+        <label id="staffHomeroomField" class="hidden">Классное руководство<select id="staffHomeroom"><option value="">Без класса</option></select><span class="hint">Классы добавляются в конструкторе расписания.</span></label>
         <label>Должность (необязательно)<input id="staffPosition" type="text" maxlength="200" placeholder="Например, учитель начальных классов"></label>
         <button class="btn" type="submit">Создать пользователя</button>
       </form>
@@ -113,8 +114,8 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="/js/admin.js?v=staff-create-name-1"></script>
-<script src="/js/planner.js?v=planner-1"></script>
-<script src="/js/staff-admin.js?v=staff-create-name-1"></script>
+<script src="/js/admin.js?v=staff-homeroom-1"></script>
+<script src="/js/planner.js?v=planner-homeroom-1"></script>
+<script src="/js/staff-admin.js?v=staff-homeroom-1"></script>
 </body>
 </html>

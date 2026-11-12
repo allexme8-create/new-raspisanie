@@ -720,6 +720,45 @@ class StaffTests(unittest.TestCase):
             self.assertFalse(self.client.get("/api/staff/duty",headers=ah).json()["active"])
             self.assertEqual(self.client.post("/api/staff/duty",headers=ah,json={"day":"2027-09-01"}).status_code,422)
 
+    def test_homeroom_binding_and_automatic_duty_class(self):
+        self.client.close()
+        catalog=["5А","6Б"]
+        app=FastAPI();app.include_router(staff.make_router(self.store,admin,class_catalog=lambda:catalog))
+        self.client=TestClient(app)
+        bad=self.client.post("/api/admin/users",headers=self.admin,json={"email":"bad-class@example.com","role":"teacher","homeroom_class":"7В"})
+        self.assertEqual(bad.status_code,422)
+        bad=self.client.post("/api/admin/users",headers=self.admin,json={"email":"deputy-class@example.com","role":"associate","homeroom_class":"5А"})
+        self.assertEqual(bad.status_code,422)
+        response=self.client.post("/api/admin/users",headers=self.admin,json={"email":"homeroom@example.com","role":"teacher","full_name":"Учитель","homeroom_class":"5А"})
+        self.assertEqual(response.status_code,201,response.text)
+        teacher=response.json();tid=teacher["user"]["id"]
+        self.assertEqual(teacher["user"]["homeroom_class"],"5А")
+        self.assertEqual(self.client.get("/api/admin/users",headers=self.admin).json()["users"][0]["homeroom_class"],"5А")
+        deputy=self.create("homeroom-a@example.com","associate")
+        ah,_=self.ready("homeroom-a@example.com","associate",deputy["password"])
+        th,_=self.ready("homeroom@example.com","teacher",teacher["password"])
+        self.assertEqual(self.client.get("/api/staff/me",headers=th).json()["user"]["homeroom_class"],"5А")
+        self.assertEqual(self.client.get("/api/staff/duty/classes",headers=th).json(),{"classes":catalog,"homeroom_class":"5А"})
+        self.assertEqual(self.client.get("/api/staff/assignees",headers=ah).json()["users"][0]["homeroom_class"],"5А")
+        url=f"/api/admin/users/{tid}/homeroom"
+        self.assertEqual(self.client.put(url,headers=th,json={"homeroom_class":"6Б"}).status_code,401)
+        self.assertEqual(self.client.put(url,headers=self.admin,json={"homeroom_class":"7В"}).status_code,422)
+        self.assertEqual(self.client.put(f"/api/admin/users/{deputy['user']['id']}/homeroom",headers=self.admin,json={"homeroom_class":"5А"}).status_code,422)
+        with patch.object(staff,"school_today",return_value=date(2026,11,9)):
+            post=lambda headers,body:self.client.post("/api/staff/duty",headers=headers,json=body)
+            self.assertEqual(post(ah,{"day":"2026-11-09","shift":1,"teacher_id":tid,"class_name":"6Б"}).status_code,201)
+            entry=next(e for e in self.client.get("/api/duties/today").json()["entries"] if e["slot"]==1)
+            self.assertEqual(entry["class_name"],"5А")
+            self.assertEqual(self.client.put(url,headers=self.admin,json={"homeroom_class":"6Б"}).status_code,200)
+            self.assertEqual(post(th,{"day":"2026-11-10","shift":1}).status_code,201)
+            entries=self.client.get("/api/staff/duty",headers=th).json()["entries"]
+            self.assertEqual(next(e for e in entries if e["day"]=="2026-11-09")["class_name"],"5А")
+            self.assertEqual(next(e for e in entries if e["day"]=="2026-11-10")["class_name"],"6Б")
+            self.assertEqual(self.client.put(url,headers=self.admin,json={"homeroom_class":""}).status_code,200)
+            self.assertEqual(post(th,{"day":"2026-11-11","shift":1,"class_name":"неизвестный"}).status_code,422)
+            self.assertEqual(post(th,{"day":"2026-11-11","shift":1,"class_name":"5А"}).status_code,201)
+        self.assertEqual(self.client.get("/api/admin/users",headers=self.admin).json()["users"][1]["homeroom_class"],"")
+
     def test_quarter_settings_and_sundays(self):
         a=self.create("quarter-a@example.com","associate")
         t=self.create("quarter-t@example.com","teacher")

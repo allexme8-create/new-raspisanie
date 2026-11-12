@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -9,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import app as backend
 import planner
+import staff
 
 
 def bells():
@@ -32,6 +34,24 @@ def project():
 
 
 class PlannerTests(unittest.TestCase):
+    def test_cannot_remove_class_with_homeroom_teacher(self):
+        original=copy.deepcopy(backend.state)
+        with tempfile.TemporaryDirectory() as folder:
+            store=staff.Store(Path(folder)/"staff.sqlite3");store.init()
+            with store.connect() as db:
+                db.execute("INSERT INTO users (id,email,role,password_hash,must_change,active,created_at,homeroom_class) VALUES (?,?,?, ?,0,1,?,?)",("t","t@example.com","teacher","hash","2026-01-01","5а"))
+            try:
+                backend.state["planner"]=project().model_dump()
+                with patch.object(backend,"_save_state"),patch.object(backend,"staff_store",store):
+                    changed=project();changed.classes=[c for c in changed.classes if c.name!="5а"];changed.loads=[l for l in changed.loads if l.class_name!="5а"]
+                    with self.assertRaises(backend.HTTPException) as exc:backend.planner_save(changed)
+                    self.assertEqual(exc.exception.status_code,409)
+                    self.assertIn("классным руководителем",str(exc.exception.detail))
+                    with store.connect() as db:db.execute("UPDATE users SET homeroom_class='' WHERE id='t'")
+                    self.assertEqual([c["name"] for c in backend.planner_save(changed)["project"]["classes"]],["6а"])
+            finally:
+                backend.state.clear();backend.state.update(original)
+
     def test_conflicts_use_real_times_across_shifts(self):
         p = project()
         p.placements = [planner.Placement(load_id="a", day="Пн", lesson=1), planner.Placement(load_id="b", day="Пн", lesson=1)]

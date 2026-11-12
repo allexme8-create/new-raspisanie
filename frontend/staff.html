@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-duty-7">
+<link rel="stylesheet" href="/css/style.css?v=staff-duty-8">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -67,7 +67,7 @@
       <div id="dutyFormParking"><form id="dutyForm" class="duty-form duty-inline-form hidden">
         <p id="dutySelected">Выберите свободное место на карте.</p>
         <div class="field hidden" id="dutyTeacherField"><label for="dutyTeacher">Учитель</label><select id="dutyTeacher"><option value="">Выберите учителя</option></select><p class="hint">Чтобы назначить учителя, в его профиле должно быть указано ФИО.</p></div>
-        <div class="field" id="dutyClassField"><label for="dutyClass">Класс дежурного учителя</label><input id="dutyClass" maxlength="40" placeholder="Например, 5А"></div>
+        <div class="field" id="dutyClassField"><label for="dutyClass">Класс дежурного учителя</label><select id="dutyClass"><option value="">Выберите класс</option></select><input id="dutyClassManual" maxlength="80" placeholder="Например, 5А" class="hidden"><p class="hint" id="dutyClassHint"></p></div>
         <button class="btn" id="dutySubmit" type="submit" disabled>Записаться</button>
         <button class="btn secondary" id="dutyClose" type="button">Отмена</button>
       </form></div>
@@ -114,7 +114,7 @@
     <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-duty-7"></script>
-<script src="/js/duty.js?v=staff-duty-7"></script>
+<script src="/js/staff.js?v=staff-duty-8"></script>
+<script src="/js/duty.js?v=staff-duty-8"></script>
 </body>
 </html>

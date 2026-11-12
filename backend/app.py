@@ -157,9 +157,12 @@ def require_admin_header(
         raise HTTPException(status_code=401, detail="Требуется вход администратора")
 
 
+# Единая блокировка черновика и привязок классов для одного процесса.
+_planner_lock = threading.Lock()
 # Персональные данные не включаются в GitHub-бэкап публичного расписания.
 staff_store = staff.Store(DATA_DIR / "staff.sqlite3")
-app.include_router(staff.make_router(staff_store, require_admin_header))
+app.include_router(staff.make_router(staff_store, require_admin_header,
+    class_catalog=lambda: [c.name for c in _planner_project().classes], catalog_lock=_planner_lock))
 
 
 @app.middleware("http")
@@ -283,7 +286,6 @@ def get_status() -> dict:
 
 
 # Черновик хранится отдельно от опубликованного расписания.
-_planner_lock = threading.Lock()
 
 
 def _planner_project() -> planner.Project:
@@ -304,6 +306,12 @@ def planner_save(project: planner.Project, _: None = Depends(require_admin)) -> 
         errors = planner.references(project)
         if errors:
             raise HTTPException(status_code=422, detail=" ".join(errors[:5]))
+        class_names={c.name for c in project.classes}
+        with staff_store.connect() as db:
+            assigned={row[0] for row in db.execute("SELECT DISTINCT homeroom_class FROM users WHERE active=1 AND role='teacher' AND homeroom_class<>''")}
+        missing=sorted(assigned-class_names)
+        if missing:
+            raise HTTPException(status_code=409, detail="Нельзя удалить класс с классным руководителем: "+", ".join(missing)+". Сначала измените привязку в списке пользователей.")
         project.revision += 1
         state["planner"] = project.model_dump()
         _save_state()

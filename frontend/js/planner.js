@@ -42,7 +42,7 @@ async function plannerLoad(){try{const data=await api("/api/admin/planner");plan
 async function plannerChange(update){
   const next=JSON.parse(JSON.stringify(plannerProject)); update(next);
   plannerRoot.querySelectorAll("button").forEach(b=>b.disabled=true);
-  try{const data=await api("/api/admin/planner",{method:"PUT",body:next});plannerProject=data.project;plannerIssues=data.issues;plannerRender();}
+  try{const data=await api("/api/admin/planner",{method:"PUT",body:next});plannerProject=data.project;plannerIssues=data.issues;plannerRender();document.dispatchEvent(new Event("planner-catalog-changed"));}
   catch(e){plannerRoot.querySelectorAll("button").forEach(b=>b.disabled=false);plannerError(e);}
 }
 async function plannerAction(action){

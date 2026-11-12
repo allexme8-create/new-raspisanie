@@ -8,6 +8,7 @@ import secrets
 import sqlite3
 import tempfile
 import time
+from contextlib import nullcontext
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
@@ -83,6 +84,12 @@ class NewUser(BaseModel):
     role: Literal["director", "associate", "teacher"]
     position: str = Field(default="", max_length=200)
     full_name: str = Field(default="", max_length=200)
+    homeroom_class: str = Field(default="", max_length=80)
+
+    @field_validator("homeroom_class")
+    @classmethod
+    def clean_homeroom(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("full_name")
     @classmethod
@@ -93,6 +100,15 @@ class NewUser(BaseModel):
     @classmethod
     def clean_position(cls, value: str) -> str:
         return " ".join(value.split())
+
+
+class HomeroomUpdate(BaseModel):
+    homeroom_class: str = Field(default="", max_length=80)
+
+    @field_validator("homeroom_class")
+    @classmethod
+    def clean_homeroom(cls, value: str) -> str:
+        return value.strip()
 
 
 class Login(BaseModel):
@@ -161,7 +177,7 @@ class DutyBooking(BaseModel):
     teacher_id: str | None = Field(default=None, min_length=1, max_length=128)
     day: date
     shift: Literal[1, 2] | None = None
-    class_name: str = Field(default="", max_length=40)
+    class_name: str = Field(default="", max_length=80)
 
     @field_validator("class_name")
     @classmethod
@@ -292,9 +308,9 @@ class Store:
                     role TEXT NOT NULL CHECK (role IN ('director','associate','teacher')),
                     password_hash TEXT NOT NULL, must_change INTEGER NOT NULL DEFAULT 1,
                     active INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
-                    password_ciphertext TEXT, full_name TEXT NOT NULL DEFAULT '', position TEXT NOT NULL DEFAULT '')""")
+                    password_ciphertext TEXT, full_name TEXT NOT NULL DEFAULT '', position TEXT NOT NULL DEFAULT '', homeroom_class TEXT NOT NULL DEFAULT '')""")
                 old_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
-                columns_to_copy = [c for c in ("id", "email", "role", "password_hash", "must_change", "active", "created_at", "password_ciphertext", "full_name", "position") if c in old_columns]
+                columns_to_copy = [c for c in ("id", "email", "role", "password_hash", "must_change", "active", "created_at", "password_ciphertext", "full_name", "position", "homeroom_class") if c in old_columns]
                 names = ",".join(columns_to_copy)
                 db.execute(f"INSERT INTO users_new ({names}) SELECT {names} FROM users")
                 db.execute("DROP TABLE users")
@@ -306,6 +322,8 @@ class Store:
                 db.execute("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''")
             if "position" not in columns:
                 db.execute("ALTER TABLE users ADD COLUMN position TEXT NOT NULL DEFAULT ''")
+            if "homeroom_class" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN homeroom_class TEXT NOT NULL DEFAULT ''")
             db.execute("CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, title TEXT NOT NULL, owner_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL)")
             project_columns = {row["name"] for row in db.execute("PRAGMA table_info(projects)")}
             if "finished_at" not in project_columns:
@@ -397,7 +415,7 @@ class Store:
 
 
 def public_user(user) -> dict:
-    return {key: user[key] for key in ("id", "email", "role", "full_name", "position")}
+    return {key: user[key] for key in ("id", "email", "role", "full_name", "position", "homeroom_class")}
 
 
 def visible_task_events(events) -> list[dict]:
@@ -442,11 +460,23 @@ TASK_SELECT = '''SELECT tasks.*, CASE WHEN assignee.active=1 THEN assignee.email
                  JOIN users director ON director.id=tasks.director_id'''
 
 
-def make_router(store: Store, require_admin) -> APIRouter:
+def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=None) -> APIRouter:
     router = APIRouter()
     store.init()
     # A fixed dummy hash makes unknown-account login perform the same expensive work.
     dummy_hash = hash_password(secrets.token_urlsafe(24))
+
+    def catalog_guard():
+        return catalog_lock if catalog_lock is not None else nullcontext()
+
+    def classes():
+        return class_catalog() if class_catalog is not None else []
+
+    def validate_homeroom(role: str, name: str):
+        if name and role != "teacher":
+            raise HTTPException(422, "Классное руководство доступно только учителю")
+        if name and name not in classes():
+            raise HTTPException(422, "Выберите класс из конструктора расписания")
 
     def token_hash(token: str) -> str:
         return hashlib.sha256(token.encode()).hexdigest()
@@ -480,7 +510,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
     @router.get("/api/admin/users")
     def list_users(_: None = Depends(explicit_admin)):
         with store.connect() as db:
-            rows = db.execute("SELECT id,email,role,full_name,position FROM users WHERE active=1 ORDER BY email").fetchall()
+            rows = db.execute("SELECT id,email,role,full_name,position,homeroom_class FROM users WHERE active=1 ORDER BY email").fetchall()
         return {"users": [public_user(row) for row in rows]}
 
     @router.post("/api/admin/users", status_code=201)
@@ -489,13 +519,34 @@ def make_router(store: Store, require_admin) -> APIRouter:
         uid, password = secrets.token_hex(16), secrets.token_urlsafe(18)
         try:
             encrypted = store.encrypt_password(password)
-            with store.connect() as db:
-                db.execute("INSERT INTO users (id,email,role,password_hash,password_ciphertext,must_change,active,created_at,position,full_name) VALUES (?,?,?,?,?,1,1,?,?,?)", (uid, email, body.role, hash_password(password), encrypted, iso(now()), body.position, body.full_name))
+            with catalog_guard():
+                validate_homeroom(body.role,body.homeroom_class)
+                with store.connect() as db:
+                    db.execute("INSERT INTO users (id,email,role,password_hash,password_ciphertext,must_change,active,created_at,position,full_name,homeroom_class) VALUES (?,?,?,?,?,1,1,?,?,?,?)", (uid, email, body.role, hash_password(password), encrypted, iso(now()), body.position, body.full_name, body.homeroom_class))
         except sqlite3.IntegrityError:
             raise HTTPException(409, "Пользователь с таким e-mail уже существует")
         except RuntimeError as exc:
             raise HTTPException(503, str(exc)) from exc
-        return {"user": {"id": uid, "email": email, "role": body.role, "full_name": body.full_name, "position": body.position}, "password": password}
+        return {"user": {"id": uid, "email": email, "role": body.role, "full_name": body.full_name, "position": body.position, "homeroom_class":body.homeroom_class}, "password": password}
+
+    @router.put("/api/admin/users/{user_id}/homeroom")
+    def update_homeroom(user_id: str, body: HomeroomUpdate, _: None = Depends(explicit_admin)):
+        with catalog_guard():
+            with store.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                row=db.execute("SELECT role FROM users WHERE id=? AND active=1",(user_id,)).fetchone()
+                if not row:
+                    raise HTTPException(404,"Пользователь не найден")
+                if row["role"] != "teacher":
+                    raise HTTPException(422,"Классное руководство доступно только учителю")
+                validate_homeroom(row["role"],body.homeroom_class)
+                db.execute("UPDATE users SET homeroom_class=? WHERE id=?",(body.homeroom_class,user_id))
+        return {"ok":True,"homeroom_class":body.homeroom_class}
+
+    @router.get("/api/staff/duty/classes")
+    def duty_classes(user: dict = Depends(ready_user)):
+        with catalog_guard():
+            return {"classes":classes(),"homeroom_class":user["homeroom_class"] if user["role"]=="teacher" else ""}
 
     @router.post("/api/admin/users/{user_id}/password")
     def reveal_password(user_id: str, _: None = Depends(explicit_admin)):
@@ -537,7 +588,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
             db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
             db.execute("DELETE FROM login_attempts WHERE key=?", (hashlib.sha256(row["email"].encode()).hexdigest(),))
             db.execute("DELETE FROM duty_assignments WHERE user_id=? AND day>=?", (user_id,school_today().isoformat()))
-            db.execute("UPDATE users SET active=0,email=?,password_hash='',password_ciphertext=NULL,full_name='',position='',must_change=1 WHERE id=?", (f"__deleted__:{user_id}", user_id))
+            db.execute("UPDATE users SET active=0,email=?,password_hash='',password_ciphertext=NULL,full_name='',position='',homeroom_class='',must_change=1 WHERE id=?", (f"__deleted__:{user_id}", user_id))
         return {"ok": True}
 
     @router.post("/api/staff/login")
@@ -572,7 +623,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
             updated = db.execute("UPDATE users SET full_name=?,position=COALESCE(?,position) WHERE id=? AND active=1 AND EXISTS (SELECT 1 FROM sessions WHERE user_id=? AND token_hash=? AND expires>?)", (body.full_name, body.position, user["id"], user["id"], user["token_hash"], int(time.time())))
             if not updated.rowcount:
                 raise HTTPException(401, "Сессия истекла — войдите заново")
-            row = db.execute("SELECT id,email,role,full_name,position FROM users WHERE id=?", (user["id"],)).fetchone()
+            row = db.execute("SELECT id,email,role,full_name,position,homeroom_class FROM users WHERE id=?", (user["id"],)).fetchone()
         return {"user": public_user(row)}
 
     @router.post("/api/staff/logout")
@@ -726,14 +777,14 @@ def make_router(store: Store, require_admin) -> APIRouter:
         if user["role"] == "teacher":
             if body.teacher_id is not None:
                 raise HTTPException(403, "Назначать других учителей может только заместитель")
-            if body.shift is None or not body.class_name:
-                raise HTTPException(422, "Укажите смену и класс")
+            if body.shift is None:
+                raise HTTPException(422, "Укажите смену")
             if not user["full_name"]:
                 raise HTTPException(422, "Сначала укажите ФИО в профиле")
             slot, class_name, target_id = body.shift, body.class_name, user["id"]
         elif body.teacher_id is not None:
-            if body.shift is None or not body.class_name:
-                raise HTTPException(422, "Укажите смену и класс учителя")
+            if body.shift is None:
+                raise HTTPException(422, "Укажите смену учителя")
             slot, class_name, target_id = body.shift, body.class_name, body.teacher_id
         else:
             if body.shift is not None or body.class_name:
@@ -742,7 +793,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 raise HTTPException(422, "Сначала укажите ФИО в профиле")
             slot, class_name, target_id = 0, "", user["id"]
         try:
-            with store.connect() as db:
+            with catalog_guard(), store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 start,end,_,active=configured_duty_quarter(db,today)
                 if body.day.weekday()==6 or not active or not start<=body.day<=end or body.day<today:
@@ -752,12 +803,18 @@ def make_router(store: Store, require_admin) -> APIRouter:
                     raise HTTPException(401, "Сессия истекла — войдите заново")
                 if slot == 0 and any(entry["slot"]==0 for entry in duty_rows(db,body.day,body.day)):
                     raise HTTPException(409,"Место занято. Обновите карту.")
-                if body.teacher_id is not None:
-                    target = db.execute("SELECT full_name FROM users WHERE id=? AND role='teacher' AND active=1", (target_id,)).fetchone()
+                if slot != 0:
+                    target = db.execute("SELECT full_name,homeroom_class FROM users WHERE id=? AND role='teacher' AND active=1", (target_id,)).fetchone()
                     if not target:
                         raise HTTPException(404, "Активный учитель не найден")
                     if not target["full_name"]:
                         raise HTTPException(422, "У выбранного учителя не указано ФИО")
+                    class_name=target["homeroom_class"] or class_name
+                    if not class_name:
+                        raise HTTPException(422, "Укажите класс дежурного учителя")
+                    available=classes()
+                    if available and class_name not in available:
+                        raise HTTPException(422, "Выберите класс из конструктора расписания")
                 if slot == 0 and db.execute("SELECT 1 FROM duty_admin_overrides WHERE day=?",(body.day.isoformat(),)).fetchone():
                     db.execute("UPDATE duty_admin_overrides SET user_id=? WHERE day=?",(target_id,body.day.isoformat()))
                 else:
@@ -799,7 +856,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
     @router.get("/api/staff/associates")
     def associates(_: dict = Depends(director)):
         with store.connect() as db:
-            rows = db.execute("SELECT id,email,role,full_name,position FROM users WHERE role='associate' AND active=1 ORDER BY email").fetchall()
+            rows = db.execute("SELECT id,email,role,full_name,position,homeroom_class FROM users WHERE role='associate' AND active=1 ORDER BY email").fetchall()
         return {"users": [public_user(row) for row in rows]}
 
     def manager(user: dict = Depends(ready_user)) -> dict:
@@ -838,7 +895,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
     def assignees(user: dict = Depends(manager)):
         roles = ("associate", "teacher") if user["role"] == "director" else ("teacher",)
         with store.connect() as db:
-            rows = db.execute("SELECT id,email,role,full_name,position FROM users WHERE active=1 AND role IN (%s) ORDER BY full_name, id" % ",".join("?" for _ in roles), roles).fetchall()
+            rows = db.execute("SELECT id,email,role,full_name,position,homeroom_class FROM users WHERE active=1 AND role IN (%s) ORDER BY full_name, id" % ",".join("?" for _ in roles), roles).fetchall()
         return {"users": [public_user(row) for row in rows]}
 
     @router.post("/api/staff/projects", status_code=201)

@@ -1,8 +1,8 @@
 "use strict";
-let dutyCalendar=null, dutySelected=null, dutyTeachers=[], dutyVersion=0, dutyWeek=null, dutyWeekDirty=false, dutyAdminDay=null, dutyQuarterYear=null, dutyQuarterVersion=0, dutyFeedback=null, dutySaving=false;
+let dutyCalendar=null, dutySelected=null, dutyTeachers=[], dutyVersion=0, dutyWeek=null, dutyWeekDirty=false, dutyAdminDay=null, dutyQuarterYear=null, dutyQuarterVersion=0, dutyFeedback=null, dutySaving=false, dutyClasses=[], ownHomeroom="";
 function resetDuty(){
   byId("dutyFormParking").appendChild(byId("dutyForm"));byId("dutyForm").classList.add("hidden");dutyFeedback=null;
-  dutyVersion++;dutyQuarterVersion++;dutyQuarterYear=null;byId("dutyQuarterSection").classList.add("hidden");byId("dutyQuarterForm").classList.add("hidden");byId("dutyQuarterYear").value="";dutyCalendar=null;dutySelected=null;dutyTeachers=[];dutyWeek=null;dutyWeekDirty=false;dutyAdminDay=null;byId("dutyWeekFields").innerHTML="";byId("dutyWeekSection").classList.add("hidden");byId("dutyAdminForm").classList.add("hidden");byId("dutyTeacher").innerHTML="";byId("dutyClass").value="";byId("dutyMap").innerHTML="";
+  dutyVersion++;dutyQuarterVersion++;dutyQuarterYear=null;byId("dutyQuarterSection").classList.add("hidden");byId("dutyQuarterForm").classList.add("hidden");byId("dutyQuarterYear").value="";dutyCalendar=null;dutySelected=null;dutyTeachers=[];dutyClasses=[];ownHomeroom="";byId("dutyClassManual").value="";dutyWeek=null;dutyWeekDirty=false;dutyAdminDay=null;byId("dutyWeekFields").innerHTML="";byId("dutyWeekSection").classList.add("hidden");byId("dutyAdminForm").classList.add("hidden");byId("dutyTeacher").innerHTML="";byId("dutyClass").value="";byId("dutyMap").innerHTML="";
   byId("dutyError").innerHTML="";byId("dutySelected").textContent="Выберите свободное место на карте.";byId("dutySubmit").disabled=true;
 }
 const dutySlotLabel=slot=>slot===0?"Дежурный администратор":`${slot}-я смена · учитель`;
@@ -22,7 +22,7 @@ function renderDuty(){
   if(chosen||(dutySelected&&(!data.active||dutySelected.day<data.today||dutySelected.day<data.start||dutySelected.day>data.end)))dutySelected=null;
   const teacherSlot=!!dutySelected&&dutySelected.slot!==0;
   byId("dutyClassField").classList.toggle("hidden",!teacherSlot);
-  byId("dutyClass").required=teacherSlot;
+  updateDutyClass(teacherSlot);
   byId("dutyTeacherField").classList.toggle("hidden",role!=="associate"||!teacherSlot);
   byId("dutyTeacher").required=role==="associate"&&teacherSlot;
   byId("dutySubmit").textContent=role==="associate"&&teacherSlot?"Назначить учителя":"Записаться";
@@ -59,7 +59,11 @@ function renderDuty(){
 async function loadDutyCalendar(){
   if(role==="director"||!staffToken||!staffUser)return;
   const session=staffToken, version=++dutyVersion;
-  try{const [data,teachers,week]=await Promise.all([request("/api/staff/duty"),role==="associate"?request("/api/staff/assignees"):Promise.resolve(null),role==="associate"?request("/api/staff/duty/week-template"):Promise.resolve(null)]);if(staffToken!==session||version!==dutyVersion)return;
+  try{const [data,teachers,week,catalog]=await Promise.all([request("/api/staff/duty"),role==="associate"?request("/api/staff/assignees"):Promise.resolve(null),role==="associate"?request("/api/staff/duty/week-template"):Promise.resolve(null),request("/api/staff/duty/classes")]);if(staffToken!==session||version!==dutyVersion)return;
+    dutyClasses=catalog.classes;ownHomeroom=catalog.homeroom_class||"";
+    const classSelect=byId("dutyClass"),previousClass=classSelect.value;
+    classSelect.innerHTML='<option value="">Выберите класс</option>'+dutyClasses.map(name=>`<option value="${escapeHTML(name)}">${escapeHTML(name)}</option>`).join("");
+    if(dutyClasses.includes(previousClass))classSelect.value=previousClass;
     if(teachers){
       dutyTeachers=teachers.users.filter(u=>u.role==="teacher");
       const select=byId("dutyTeacher"),previous=select.value,counts=new Map();
@@ -76,6 +80,17 @@ async function loadDutyCalendar(){
     dutyCalendar=data;renderDuty();}
   catch(e){if(staffToken===session&&version===dutyVersion)errorAt("dutyError",e);}
 }
+function updateDutyClass(teacherSlot){
+  const teacher=role==="teacher"?null:dutyTeachers.find(u=>u.id===byId("dutyTeacher").value);
+  const homeroom=role==="teacher"?ownHomeroom:(teacher?.homeroom_class||"");
+  const select=byId("dutyClass"),manual=byId("dutyClassManual"),usingCatalog=dutyClasses.length>0;
+  select.classList.toggle("hidden",!usingCatalog);manual.classList.toggle("hidden",usingCatalog);
+  select.disabled=!teacherSlot||!usingCatalog||!!homeroom;manual.disabled=!teacherSlot||usingCatalog||!!homeroom;
+  select.required=teacherSlot&&usingCatalog&&!homeroom;manual.required=teacherSlot&&!usingCatalog&&!homeroom;
+  if(homeroom){if(usingCatalog)select.value=homeroom;else manual.value=homeroom;}
+  byId("dutyClassHint").textContent=homeroom?`Классное руководство: ${homeroom}. Класс подставляется автоматически.`:usingCatalog?"Выберите класс из конструктора расписания.":"Список классов пока пуст. Укажите класс вручную или добавьте классы в конструкторе расписания.";
+}
+byId("dutyTeacher").onchange=()=>{byId("dutyClass").value="";byId("dutyClassManual").value="";updateDutyClass(!!dutySelected&&dutySelected.slot!==0);};
 byId("dutyQuarterLoad").onclick=async()=>{
   const input=byId("dutyQuarterYear"),year=Number(input.value),session=staffToken,version=++dutyQuarterVersion;
   if(!Number.isInteger(year)||year<1900||year>2200){errorAt("dutyError",new Error("Укажите учебный год от 1900 до 2200"));return;}
@@ -127,7 +142,7 @@ byId("dutyForm").onsubmit=async e=>{
   const selection=dutySelected;
   const teacherSlot=selection.slot!==0, assignTeacher=role==="associate"&&teacherSlot;
   const session=staffToken;
-  try{await request("/api/staff/duty",{method:"POST",body:{day:selection.day,shift:teacherSlot?selection.slot:null,class_name:teacherSlot?byId("dutyClass").value.trim():"",...(assignTeacher?{teacher_id:byId("dutyTeacher").value}: {})}});
+  try{await request("/api/staff/duty",{method:"POST",body:{day:selection.day,shift:teacherSlot?selection.slot:null,class_name:teacherSlot?(dutyClasses.length?byId("dutyClass").value:byId("dutyClassManual").value.trim()):"",...(assignTeacher?{teacher_id:byId("dutyTeacher").value}: {})}});
     if(session!==staffToken)return;
     dutySelected=null;dutyFeedback={day:selection.day,text:assignTeacher?"Учитель назначен на дежурство.":"Вы записаны на дежурство."};renderDuty();await loadDutyCalendar();
   }catch(error){if(session!==staffToken)return;dutyFeedback={day:selection.day,text:error.message,error:true};renderDuty();await loadDutyCalendar();}finally{dutySaving=false;if(dutySelected)button.disabled=false;}
