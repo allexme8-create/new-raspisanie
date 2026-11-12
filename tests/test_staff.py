@@ -71,7 +71,7 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(task.status_code, 201, task.text)
         self.assertEqual(task.json()["task"]["assignee_name"], "Иванов Иван Иванович")
         self.client.delete(f"/api/admin/users/{associate['user']['id']}", headers=self.admin)
-        self.assertEqual(self.client.get("/api/staff/tasks", headers=director_headers).json()["tasks"][0]["assignee_name"], "")
+        self.assertEqual(self.client.get("/api/staff/tasks", headers=director_headers).json()["tasks"][0]["assignee_name"], "Удалённый пользователь")
         with self.store.connect() as db:
             self.assertEqual(db.execute("SELECT full_name FROM users WHERE id=?", (associate["user"]["id"],)).fetchone()[0], "")
 

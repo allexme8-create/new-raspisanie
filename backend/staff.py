@@ -199,8 +199,8 @@ def task_json(row, current: datetime | None = None) -> dict:
 
 TASK_SELECT = '''SELECT tasks.*, CASE WHEN assignee.active=1 THEN assignee.email ELSE 'Удалённый пользователь' END AS assignee_email,
                  CASE WHEN director.active=1 THEN director.email ELSE 'Удалённый пользователь' END AS director_email,
-                 CASE WHEN assignee.active=1 THEN assignee.full_name ELSE '' END AS assignee_name,
-                 CASE WHEN director.active=1 THEN director.full_name ELSE '' END AS director_name
+                 CASE WHEN assignee.active=1 THEN assignee.full_name ELSE 'Удалённый пользователь' END AS assignee_name,
+                 CASE WHEN director.active=1 THEN director.full_name ELSE 'Удалённый пользователь' END AS director_name
                  FROM tasks JOIN users assignee ON assignee.id=tasks.assignee_id
                  JOIN users director ON director.id=tasks.director_id'''
 

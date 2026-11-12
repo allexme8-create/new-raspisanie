@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-profile-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-names-2">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -40,7 +40,7 @@
     <section class="card hidden" id="createTaskCard">
       <h2>Поставить задачу</h2><div id="taskCreateError" aria-live="polite"></div>
       <form id="taskForm">
-        <div class="field"><label for="taskAssignee">Заместитель директора</label><select id="taskAssignee" required></select></div>
+        <div class="field"><label for="taskAssignee">Заместитель директора</label><select id="taskAssignee" required></select><p class="hint">Если ФИО не указано, попросите заместителя заполнить профиль.</p></div>
         <div class="field"><label for="taskDescription">Задача</label><textarea id="taskDescription" rows="4" maxlength="5000" required></textarea></div>
         <div class="field"><label for="taskDeadline">Срок выполнения</label><input id="taskDeadline" type="datetime-local" required></div>
         <p class="hint">Время указывается в часовом поясе вашего устройства.</p>
@@ -53,6 +53,6 @@
     </section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-profile-1"></script>
+<script src="/js/staff.js?v=staff-names-2"></script>
 </body>
 </html>
