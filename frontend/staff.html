@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-duty-6">
+<link rel="stylesheet" href="/css/style.css?v=staff-duty-7">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -64,12 +64,13 @@
         <button class="btn secondary" id="dutyAdminRestore" type="button">Вернуть обычное назначение</button>
         <button class="btn secondary" id="dutyAdminClose" type="button">Закрыть</button>
       </form>
-      <form id="dutyForm" class="duty-form">
+      <div id="dutyFormParking"><form id="dutyForm" class="duty-form duty-inline-form hidden">
         <p id="dutySelected">Выберите свободное место на карте.</p>
         <div class="field hidden" id="dutyTeacherField"><label for="dutyTeacher">Учитель</label><select id="dutyTeacher"><option value="">Выберите учителя</option></select><p class="hint">Чтобы назначить учителя, в его профиле должно быть указано ФИО.</p></div>
         <div class="field" id="dutyClassField"><label for="dutyClass">Класс дежурного учителя</label><input id="dutyClass" maxlength="40" placeholder="Например, 5А"></div>
         <button class="btn" id="dutySubmit" type="submit" disabled>Записаться</button>
-      </form>
+        <button class="btn secondary" id="dutyClose" type="button">Отмена</button>
+      </form></div>
       <div id="dutyMap"></div>
     </section>
     <section id="staffProfileView" class="card hidden">
@@ -113,7 +114,7 @@
     <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-duty-6"></script>
-<script src="/js/duty.js?v=staff-duty-6"></script>
+<script src="/js/staff.js?v=staff-duty-7"></script>
+<script src="/js/duty.js?v=staff-duty-7"></script>
 </body>
 </html>

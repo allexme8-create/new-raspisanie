@@ -1,6 +1,7 @@
 "use strict";
-let dutyCalendar=null, dutySelected=null, dutyTeachers=[], dutyVersion=0, dutyWeek=null, dutyWeekDirty=false, dutyAdminDay=null, dutyQuarterYear=null, dutyQuarterVersion=0;
+let dutyCalendar=null, dutySelected=null, dutyTeachers=[], dutyVersion=0, dutyWeek=null, dutyWeekDirty=false, dutyAdminDay=null, dutyQuarterYear=null, dutyQuarterVersion=0, dutyFeedback=null, dutySaving=false;
 function resetDuty(){
+  byId("dutyFormParking").appendChild(byId("dutyForm"));byId("dutyForm").classList.add("hidden");dutyFeedback=null;
   dutyVersion++;dutyQuarterVersion++;dutyQuarterYear=null;byId("dutyQuarterSection").classList.add("hidden");byId("dutyQuarterForm").classList.add("hidden");byId("dutyQuarterYear").value="";dutyCalendar=null;dutySelected=null;dutyTeachers=[];dutyWeek=null;dutyWeekDirty=false;dutyAdminDay=null;byId("dutyWeekFields").innerHTML="";byId("dutyWeekSection").classList.add("hidden");byId("dutyAdminForm").classList.add("hidden");byId("dutyTeacher").innerHTML="";byId("dutyClass").value="";byId("dutyMap").innerHTML="";
   byId("dutyError").innerHTML="";byId("dutySelected").textContent="Выберите свободное место на карте.";byId("dutySubmit").disabled=true;
 }
@@ -27,6 +28,9 @@ function renderDuty(){
   byId("dutySubmit").textContent=role==="associate"&&teacherSlot?"Назначить учителя":"Записаться";
   byId("dutySelected").textContent=dutySelected?`Выбрано: ${dutyDateText(dutySelected.day)} · ${dutySlotLabel(dutySelected.slot)}`:"Выберите свободное место на карте.";
   byId("dutySubmit").disabled=!dutySelected||!data.active;
+  // Preserve the form, its entered values and listeners before rebuilding the map.
+  byId("dutyFormParking").appendChild(byId("dutyForm"));
+  byId("dutyForm").classList.toggle("hidden",!dutySelected);
   byId("dutyMap").innerHTML=`<div class="duty-grid"><div class="duty-grid-head"><b>Дата</b><b>Дежурный администратор</b><b>1-я смена</b><b>2-я смена</b></div>${dutyDays(data.start,data.end).map(day=>{
     const slots=[0,1,2].map(slot=>{
       const entry=map.get(`${day}:${slot}`),mine=entry?.mine,allowed=(role==="associate"||slot!==0),canAct=data.active&&day>=data.today;
@@ -36,9 +40,12 @@ function renderDuty(){
       const selected=dutySelected?.day===day&&dutySelected?.slot===slot;
       return `<div class="duty-slot"><span class="duty-mobile-label">${escapeHTML(dutySlotLabel(slot))}: </span>${allowed&&canAct?`<button type="button" class="duty-action ${selected?'selected':''}" data-duty-select="${escapeHTML(day)}" data-slot="${slot}">${selected?'Выбрано':'Свободно · выбрать'}</button>`:'<span class="muted">Свободно</span>'}${editAdmin}</div>`;
     }).join("");
-    return `<div class="duty-row ${day===data.today?'duty-today':''}"><strong>${escapeHTML(dutyShortDate(day))}${day===data.today?' · сегодня':''}</strong>${slots}</div>`;
+    return `<div class="duty-row ${day===data.today?'duty-today':''}"><strong>${escapeHTML(dutyShortDate(day))}${day===data.today?' · сегодня':''}</strong>${slots}</div>${dutyFeedback?.day===day?`<div class="duty-inline-feedback alert ${dutyFeedback.error?'err':'ok'}" role="status">${escapeHTML(dutyFeedback.text)}</div>`:""}${dutySelected?.day===day?'<div id="dutyFormHere" class="duty-inline-location"></div>':""}`;
   }).join("")}</div>`;
-  byId("dutyMap").querySelectorAll("[data-duty-select]").forEach(button=>button.onclick=()=>{dutySelected={day:button.dataset.dutySelect,slot:Number(button.dataset.slot)};renderDuty();byId("dutyForm").scrollIntoView({behavior:"smooth",block:"center"});});
+  if(dutySelected)byId("dutyFormHere").appendChild(byId("dutyForm"));
+  byId("dutyMap").querySelectorAll("[data-duty-select]").forEach(button=>button.onclick=()=>{
+    if(dutySaving)return;dutyFeedback=null;dutySelected={day:button.dataset.dutySelect,slot:Number(button.dataset.slot)};renderDuty();
+  });
   byId("dutyMap").querySelectorAll("[data-duty-admin]").forEach(button=>button.onclick=()=>{
     dutyAdminDay=button.dataset.dutyAdmin;byId("dutyAdminSelected").textContent=`Изменить дежурного администратора: ${dutyDateText(dutyAdminDay)}`;
     byId("dutyAdminDeputy").innerHTML=deputyOptions(null);byId("dutyAdminForm").classList.remove("hidden");byId("dutyAdminForm").scrollIntoView({behavior:"smooth",block:"center"});
@@ -114,13 +121,16 @@ async function saveDutyAdmin(restore){
 byId("dutyAdminForm").onsubmit=e=>{e.preventDefault();return saveDutyAdmin(false);};
 byId("dutyAdminRestore").onclick=()=>saveDutyAdmin(true);
 byId("dutyRefresh").onclick=()=>{byId("dutyError").innerHTML="";loadDutyCalendar();};
+byId("dutyClose").onclick=()=>{if(dutySaving)return;dutySelected=null;dutyFeedback=null;renderDuty();};
 byId("dutyForm").onsubmit=async e=>{
-  e.preventDefault();if(!dutySelected)return;const button=byId("dutySubmit");button.disabled=true;byId("dutyError").innerHTML="";
+  e.preventDefault();if(!dutySelected||dutySaving)return;dutySaving=true;const button=byId("dutySubmit");button.disabled=true;byId("dutyError").innerHTML="";
   const selection=dutySelected;
   const teacherSlot=selection.slot!==0, assignTeacher=role==="associate"&&teacherSlot;
+  const session=staffToken;
   try{await request("/api/staff/duty",{method:"POST",body:{day:selection.day,shift:teacherSlot?selection.slot:null,class_name:teacherSlot?byId("dutyClass").value.trim():"",...(assignTeacher?{teacher_id:byId("dutyTeacher").value}: {})}});
-    dutySelected=null;byId("dutyError").innerHTML=assignTeacher?'<div class="alert ok">Учитель назначен на дежурство.</div>':'<div class="alert ok">Вы записаны на дежурство.</div>';await loadDutyCalendar();
-  }catch(error){errorAt("dutyError",error);await loadDutyCalendar();}finally{if(dutySelected)button.disabled=false;}
+    if(session!==staffToken)return;
+    dutySelected=null;dutyFeedback={day:selection.day,text:assignTeacher?"Учитель назначен на дежурство.":"Вы записаны на дежурство."};renderDuty();await loadDutyCalendar();
+  }catch(error){if(session!==staffToken)return;dutyFeedback={day:selection.day,text:error.message,error:true};renderDuty();await loadDutyCalendar();}finally{dutySaving=false;if(dutySelected)button.disabled=false;}
 };
 
-setInterval(()=>{if(!document.hidden&&staffToken&&staffUser&&!byId("staffDutyView").classList.contains("hidden"))loadDutyCalendar();},60000);
+setInterval(()=>{if(!document.hidden&&staffToken&&staffUser&&!dutySelected&&!dutySaving&&!byId("staffDutyView").classList.contains("hidden"))loadDutyCalendar();},60000);
