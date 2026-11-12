@@ -268,3 +268,5 @@ footer a{color:var(--muted)}
 .staff-notification span{flex:1 1 200px;white-space:pre-wrap;overflow-wrap:anywhere}.staff-notification small{color:#754c3b}
 .task-card.task-has-notification{outline:3px solid #f05227;outline-offset:2px}
 .task-notice{display:inline-block;border-radius:7px;background:#c63012;color:#fff;font-size:13px;font-weight:750;padding:5px 9px;margin:10px 0 0}
+
+.task-rework{font-weight:750;color:#a44008;margin:6px 0}.task-discussion input[type=datetime-local]{display:block;width:100%;margin-top:6px;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit}

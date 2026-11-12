@@ -434,6 +434,51 @@ class StaffTests(unittest.TestCase):
         self.store.init()
         self.assertEqual(len(self.client.get("/api/staff/notifications",headers=th).json()["notifications"]),1)
 
+    def test_initiator_can_return_completed_task_for_rework(self):
+        director=self.create("d-rework@example.com", "director")
+        associate=self.create("a-rework@example.com", "associate")
+        teacher=self.create("t-rework@example.com", "teacher")
+        other=self.create("other-rework@example.com", "teacher")
+        dh,_=self.ready("d-rework@example.com", "director", director["password"])
+        ah,_=self.ready("a-rework@example.com", "associate", associate["password"])
+        th,_=self.ready("t-rework@example.com", "teacher", teacher["password"])
+        oh,_=self.ready("other-rework@example.com", "teacher", other["password"])
+        project=self.client.post("/api/staff/projects",headers=ah,json={"title":"Проект"}).json()["id"]
+        body={"assignee_id":teacher["user"]["id"], "description":"Отчёт", "deadline":(staff.now()+timedelta(days=1)).isoformat(), "project_id":project}
+        task=self.client.post("/api/staff/tasks",headers=ah,json=body).json()["task"]
+        url=f"/api/staff/tasks/{task['id']}"
+        new_deadline=(staff.now()+timedelta(days=2)).isoformat()
+        payload={"comment":"Нужно дополнить", "deadline":new_deadline, "expected_completed_at":"2020-01-01T00:00:00+00:00"}
+        self.assertEqual(self.client.post(url+"/rework",headers=ah,json=payload).status_code,409)
+        done=self.client.put(url+"/completion",headers=th,json={"completed":True,"cycle":0}).json()["task"]
+        payload["expected_completed_at"]=done["completed_at"]
+        for headers in (dh,th,oh):
+            self.assertEqual(self.client.post(url+"/rework",headers=headers,json=payload).status_code,404)
+        self.assertEqual(self.client.post(url+"/rework",headers=ah,json=payload | {"comment":"   "}).status_code,422)
+        self.assertEqual(self.client.post(url+"/rework",headers=ah,json=payload | {"deadline":(staff.now()-timedelta(days=1)).isoformat()}).status_code,422)
+        self.assertEqual(self.client.post(url+"/rework",headers=ah,json=payload | {"deadline":"2030-01-01T12:00:00"}).status_code,422)
+        returned=self.client.post(url+"/rework",headers=ah,json=payload)
+        self.assertEqual(returned.status_code,200,returned.text)
+        updated=returned.json()["task"]
+        self.assertEqual(updated["deadline"],new_deadline)
+        self.assertIsNone(updated["completed_at"])
+        self.assertTrue(updated["rework"])
+        self.assertEqual(updated["cycle"],1)
+        self.assertEqual(self.client.post(url+"/rework",headers=ah,json=payload).status_code,409)
+        history=self.client.get(url+"/comments",headers=th).json()["events"]
+        self.assertTrue(any("Задача выполнена"==event["text"] for event in history))
+        self.assertTrue(any("Нужно дополнить" in event["text"] and done["completed_at"] in event["text"] for event in history))
+        self.assertTrue(any(n["kind"]=="rework" for n in self.client.get("/api/staff/notifications",headers=th).json()["notifications"]))
+        self.assertEqual(self.client.put(url+"/completion",headers=th,json={"completed":True,"cycle":0}).status_code,409)
+        again=self.client.put(url+"/completion",headers=th,json={"completed":True,"cycle":1}).json()["task"]
+        self.assertFalse(again["rework"])
+        self.assertEqual(self.client.post(url+"/rework",headers=ah,json=payload).status_code,409)
+        payload["expected_completed_at"]=again["completed_at"]
+        self.assertEqual(self.client.post(url+"/rework",headers=ah,json=payload).json()["task"]["cycle"],2)
+        self.assertEqual(self.client.put(url+"/completion",headers=th,json={"completed":True}).status_code,409)
+        self.store.init()
+        self.assertEqual(self.client.get("/api/staff/tasks",headers=th).json()["tasks"][0]["cycle"],2)
+
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")
         for _ in range(5):

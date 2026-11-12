@@ -63,11 +63,13 @@ function taskMarkup(t){
     <p class="task-description">${escapeHTML(t.description)}</p>
     <p class="task-meta">Исполнитель: ${escapeHTML(personName(t.assignee_name,t.assignee_position))} · Автор: ${escapeHTML(personName(t.director_name,t.director_position))}</p>
     <p class="task-meta task-collaborators">${(t.collaborators||[]).length?`Соисполнители: ${(t.collaborators||[]).map(u=>escapeHTML(personName(u.full_name,u.position))).join("; ")}`:""}</p>
+    <p class="task-rework">${t.rework?"🔄 Доделать — задача возвращена на доработку":""}</p>
     <p class="task-progress-summary">${t.partial?'Частично выполнено':""}</p>
     <p class="task-reason">${t.failure_reason?`${t.completed_at?'Ранее указанная причина':'Причина невыполнения'}: ${escapeHTML(t.failure_reason)}`:""}</p>
-    ${t.completed_at?`<p class="task-meta">Отмечено: ${escapeHTML(fmtDate(t.completed_at))}</p>`:""}
-    ${mine?`<label class="task-complete"><input type="checkbox" data-complete="${escapeHTML(t.id)}" ${t.completed_at?"checked disabled":""}> Выполнено</label>`:""}
+    ${t.completed_at?`<p class="task-meta task-completed-at">Отмечено: ${escapeHTML(fmtDate(t.completed_at))}</p>`:""}
+    ${mine?`<label class="task-complete"><input type="checkbox" data-complete="${escapeHTML(t.id)}" data-cycle="${Number.isInteger(t.cycle)?t.cycle:0}" ${t.completed_at?"checked disabled":""}> Выполнено</label>`:""}
     <details class="task-discussion" data-discussion="${escapeHTML(t.id)}"><summary>Ход работы и комментарии</summary>
+      ${t.director_id===staffUser.id&&t.completed_at?`<form data-rework data-completed-at="${escapeHTML(t.completed_at)}"><h3>Вернуть на доработку</h3><div class="field"><label>Комментарий — что нужно доделать<textarea name="comment" maxlength="2000" rows="2" required></textarea></label></div><div class="field"><label>Новый срок<input name="deadline" type="datetime-local" required></label></div><button class="btn secondary" type="submit">Отправить на доработку</button></form>`:""}
       ${t.director_id===staffUser.id&&!t.completed_at?`<form data-invite><label>Добавить соисполнителя<select name="user_id" required><option value="">Загрузка пользователей…</option></select></label><p class="hint">Соисполнитель увидит задачу, историю и сможет писать комментарии. Изменять состояние может основной исполнитель.</p><button class="btn secondary" type="submit">Добавить</button></form>`:""}
       ${mine&&!t.completed_at?`<form data-progress><label class="task-complete"><input type="checkbox" name="partial" ${t.partial?"checked":""}> Частично выполнено</label><div class="field"><label>Причина невыполнения (необязательно)<textarea name="reason" maxlength="2000" rows="2">${escapeHTML(t.failure_reason||"")}</textarea></label></div><button class="btn secondary" type="submit">Сохранить состояние</button></form>`:""}
       <div class="task-comments" aria-live="polite">Загрузка комментариев…</div>
@@ -78,7 +80,7 @@ function taskMarkup(t){
 function taskDraftsOpen(){
   return ["taskList","projectList"].some(id=>Array.from(byId(id).querySelectorAll("[data-discussion]")).some(detail=>{
     if(detail.open)return true;
-    return Array.from(detail.querySelectorAll("textarea,input[type=checkbox]")).some(input=>input.type==="checkbox"?input.checked!==input.defaultChecked:input.value!==input.defaultValue);
+    return Array.from(detail.querySelectorAll("textarea,input[type=checkbox],input[type=datetime-local]")).some(input=>input.type==="checkbox"?input.checked!==input.defaultChecked:input.value!==input.defaultValue);
   }));
 }
 async function refreshComments(detail){
@@ -115,15 +117,17 @@ async function loadNotifications(){
     unreadNotifications=data.notifications||[];
     const box=byId("staffNotifications"),list=byId("staffNotificationList");
     box.classList.toggle("hidden",unreadNotifications.length===0);
-    list.innerHTML=unreadNotifications.map((n,i)=>`<button class="staff-notification" type="button" data-notification-index="${i}"><strong>${n.kind==="completed"?"✅ Задача выполнена":"💬 Новый комментарий"}</strong><span>${escapeHTML(n.description)}</span><small>${escapeHTML(personName(n.actor_name,n.actor_position))} · ${escapeHTML(fmtDate(n.created_at))}</small></button>`).join("");
+    list.innerHTML=unreadNotifications.map((n,i)=>`<button class="staff-notification" type="button" data-notification-index="${i}"><strong>${n.kind==="completed"?"✅ Задача выполнена":n.kind==="rework"?"🔄 Задача возвращена на доработку":"💬 Новый комментарий"}</strong><span>${escapeHTML(n.description)}</span><small>${escapeHTML(personName(n.actor_name,n.actor_position))} · ${escapeHTML(fmtDate(n.created_at))}</small></button>`).join("");
     list.querySelectorAll("[data-notification-index]").forEach(button=>button.onclick=async()=>{
       const n=unreadNotifications[Number(button.dataset.notificationIndex)];if(!n)return;
       const view=n.project_id?"staffProjectsView":"staffTasksView",container=byId(n.project_id?"projectList":"taskList");
       let card=Array.from(container.querySelectorAll("[data-task-card]")).find(c=>c.dataset.taskCard===n.task_id);
-      if(!card&&!taskDraftsOpen()){await loadTasks();card=Array.from(container.querySelectorAll("[data-task-card]")).find(c=>c.dataset.taskCard===n.task_id);}
+      if((!card||n.kind==="rework")&&!taskDraftsOpen()){await loadTasks();card=Array.from(container.querySelectorAll("[data-task-card]")).find(c=>c.dataset.taskCard===n.task_id);}
       if(!card){errorAt("taskListError",new Error("Не удалось открыть задачу. Закройте обсуждения и сохраните черновики, затем обновите список."));return;}
       openStaffView(view);card.scrollIntoView({behavior:"smooth",block:"center"});
       const detail=card.querySelector("[data-discussion]");if(detail.open)refreshComments(detail).catch(e=>errorAtElement(detail.querySelector(".task-action-error"),e));else detail.open=true;
+      const completion=card.querySelector("[data-complete]");
+      if(n.kind==="rework"&&completion&&completion.checked)errorAtElement(detail.querySelector(".task-action-error"),new Error("Чтобы обновить состояние задачи, сохраните черновики, закройте обсуждения и нажмите «Обновить»."));
     });
     paintTaskNotifications();
   }catch(e){if(staffToken===tokenAtStart)errorAt("taskListError",e);}
@@ -137,6 +141,20 @@ function bindTaskCards(id){
       try{const data=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/collaborators`,{method:"POST",body:{user_id:select.value}});
         const out=card.querySelector(".task-collaborators"),label=personName(data.user.full_name,data.user.position||roleNames[data.user.role]);
         out.textContent=out.textContent?`${out.textContent}; ${label}`:`Соисполнители: ${label}`;await loadInviteOptions(invite,tid);
+      }catch(e){errorAtElement(error,e);}finally{button.disabled=false;}
+    };
+    const rework=detail.querySelector("[data-rework]");
+    if(rework)rework.onsubmit=async e=>{e.preventDefault();const button=rework.querySelector("button"),deadline=new Date(rework.elements.deadline.value);error.innerHTML="";
+      if(Number.isNaN(deadline.getTime())){errorAtElement(error,new Error("Укажите новый срок"));return;}
+      if(!confirm("Вернуть задачу исполнителю на доработку?"))return;button.disabled=true;
+      try{const result=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/rework`,{method:"POST",body:{comment:rework.elements.comment.value,deadline:deadline.toISOString(),expected_completed_at:rework.dataset.completedAt}});
+        card.classList.remove("status-completed_on_time","status-completed_late","status-pending","status-overdue");card.classList.add(`status-${result.task.status}`);
+        card.querySelector(".task-status").textContent=statuses[result.task.status]||result.task.status;
+        card.querySelector(".task-deadline").textContent=`Срок: ${fmtDate(result.task.deadline)}`;
+        card.querySelector(".task-rework").textContent="🔄 Доделать — задача возвращена на доработку";
+        card.querySelector(".task-progress-summary").textContent="";card.querySelector(".task-reason").textContent="";
+        const completed=card.querySelector(".task-completed-at");if(completed)completed.remove();rework.remove();
+        if(detail.open)refreshComments(detail).catch(e=>errorAtElement(error,e));
       }catch(e){errorAtElement(error,e);}finally{button.disabled=false;}
     };
     const comment=detail.querySelector("[data-comment]");
@@ -156,9 +174,10 @@ function bindTaskCards(id){
     const box=card.querySelector("[data-complete]");
     if(box)box.onchange=async()=>{if(!box.checked)return;if(!confirm(progress&&(progress.elements.partial.checked!==progress.elements.partial.defaultChecked||progress.elements.reason.value!==progress.elements.reason.defaultValue)?"Подтвердить выполнение? Несохранённое состояние будет потеряно, отменить выполнение нельзя.":"Подтвердить выполнение? Отменить отметку будет нельзя.")){box.checked=false;return;}
       box.disabled=true;error.innerHTML="";
-      try{const result=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/completion`,{method:"PUT",body:{completed:true}});
+      try{const result=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/completion`,{method:"PUT",body:{completed:true,cycle:Number(box.dataset.cycle||0)}});
         card.className=`task-card status-${result.task.status}`;card.querySelector(".task-status").textContent=statuses[result.task.status]||result.task.status;
         card.querySelector(".task-progress-summary").textContent="";
+        card.querySelector(".task-rework").textContent="";
         card.querySelector(".task-reason").textContent=result.task.failure_reason?`Ранее указанная причина: ${result.task.failure_reason}`:"";
         if(progress)progress.remove();if(detail.open)refreshComments(detail).catch(e=>errorAtElement(error,e));if(!taskDraftsOpen())await loadTasks();
       }catch(e){box.checked=false;box.disabled=false;errorAtElement(error,e);detail.open=true;}

@@ -117,6 +117,28 @@ class TaskCreate(BaseModel):
 
 class Complete(BaseModel):
     completed: bool
+    cycle: int = Field(default=0, ge=0)
+
+
+class Rework(BaseModel):
+    comment: str = Field(max_length=2000)
+    deadline: datetime
+    expected_completed_at: str = Field(min_length=1, max_length=64)
+
+    @field_validator("comment")
+    @classmethod
+    def clean_comment(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("Укажите причину доработки")
+        return value
+
+    @field_validator("deadline")
+    @classmethod
+    def deadline_has_zone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("Укажите срок с часовым поясом")
+        return value.astimezone(timezone.utc)
 
 
 class TaskProgress(BaseModel):
@@ -215,6 +237,10 @@ class Store:
                 db.execute("ALTER TABLE tasks ADD COLUMN partial INTEGER NOT NULL DEFAULT 0")
             if "failure_reason" not in task_columns:
                 db.execute("ALTER TABLE tasks ADD COLUMN failure_reason TEXT NOT NULL DEFAULT ''")
+            if "rework" not in task_columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN rework INTEGER NOT NULL DEFAULT 0")
+            if "cycle" not in task_columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN cycle INTEGER NOT NULL DEFAULT 0")
             db.execute("CREATE TABLE IF NOT EXISTS task_comments (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, created_at TEXT NOT NULL)")
             db.execute("CREATE INDEX IF NOT EXISTS task_comments_task ON task_comments(task_id, created_at, id)")
             db.execute("CREATE TABLE IF NOT EXISTS task_events (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, created_at TEXT NOT NULL)")
@@ -284,7 +310,7 @@ def task_json(row, current: datetime | None = None) -> dict:
     completed = datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
     current = current or now()
     status = ("completed_on_time" if completed <= due else "completed_late") if completed else ("overdue" if current > due else "pending")
-    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name", "project_id", "director_id", "assignee_position", "director_position", "failure_reason")} | {"status": status, "partial": bool(row["partial"])}
+    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name", "project_id", "director_id", "assignee_position", "director_position", "failure_reason")} | {"status": status, "partial": bool(row["partial"]), "rework": bool(row["rework"]), "cycle": row["cycle"]}
 
 
 TASK_SELECT = '''SELECT tasks.*, CASE WHEN assignee.active=1 THEN assignee.email ELSE 'Удалённый пользователь' END AS assignee_email,
@@ -587,13 +613,38 @@ def make_router(store: Store, require_admin) -> APIRouter:
             raise HTTPException(400, "Отметку выполнения нельзя отменить")
         with store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            previous = db.execute("SELECT completed_at FROM tasks WHERE id=? AND assignee_id=?", (task_id, user["id"])).fetchone()
+            previous = db.execute("SELECT completed_at,cycle FROM tasks WHERE id=? AND assignee_id=?", (task_id, user["id"])).fetchone()
             if not previous:
                 raise HTTPException(404, "Задача не найдена")
+            if previous["cycle"] != body.cycle:
+                raise HTTPException(409, "Задача была возвращена на доработку. Обновите страницу.")
             if not previous["completed_at"]:
-                db.execute("UPDATE tasks SET completed_at=?, partial=0 WHERE id=?", (iso(now()), task_id))
+                db.execute("UPDATE tasks SET completed_at=?, partial=0,rework=0 WHERE id=?", (iso(now()), task_id))
                 db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], "Задача выполнена", iso(now())))
                 notify_initiator(db, task_id, user["id"], "completed")
+            task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
+        return {"task": task_json(task)}
+
+    @router.post("/api/staff/tasks/{task_id}/rework")
+    def return_for_rework(task_id: str, body: Rework, user: dict = Depends(ready_user)):
+        if body.deadline <= now():
+            raise HTTPException(422, "Новый срок должен быть в будущем")
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT * FROM tasks WHERE id=? AND director_id=?", (task_id, user["id"])).fetchone()
+            if not row:
+                raise HTTPException(404, "Задача не найдена")
+            if not row["completed_at"] or row["completed_at"] != body.expected_completed_at:
+                raise HTTPException(409, "Состояние задачи изменилось. Обновите страницу.")
+            new_deadline = iso(body.deadline)
+            db.execute("UPDATE tasks SET completed_at=NULL,deadline=?,partial=0,failure_reason='',rework=1,cycle=cycle+1 WHERE id=?", (new_deadline, task_id))
+            text = (f"Возвращено на доработку. Причина: {body.comment}\n"
+                    f"Предыдущая отметка выполнения: {row['completed_at']}; прежний срок: {row['deadline']}; новый срок: {new_deadline}"
+                    + (f"\nРанее указанная причина невыполнения: {row['failure_reason']}" if row["failure_reason"] else ""))
+            db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], text, iso(now())))
+            db.execute("""INSERT INTO task_notifications (task_id, recipient_id, actor_id, kind, created_at)
+                SELECT tasks.id,tasks.assignee_id,?,'rework',? FROM tasks JOIN users ON users.id=tasks.assignee_id
+                WHERE tasks.id=? AND tasks.assignee_id<>? AND users.active=1""", (user["id"], iso(now()), task_id, user["id"]))
             task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
         return {"task": task_json(task)}
 

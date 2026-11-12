@@ -4,8 +4,8 @@ function el(id){if(!els.has(id))els.set(id,{innerHTML:'',textContent:'',value:''
 const output={innerHTML:''},error={innerHTML:''},partial={type:'checkbox',checked:false,defaultChecked:false},reason={type:'textarea',value:'',defaultValue:''},text={type:'textarea',value:'',defaultValue:''},button={disabled:false};
 const progress={elements:{partial,reason},querySelector:()=>button,remove(){this.removed=true}},comment={elements:{text},querySelector:()=>button};
 const detail={dataset:{discussion:'task1'},open:false,querySelector(s){return ({'.task-comments':output,'.task-action-error':error,'[data-comment]':comment,'[data-progress]':progress})[s]},querySelectorAll:()=>[partial,reason,text]};
-const box={checked:false,disabled:false},status={textContent:''},summary={textContent:''},reasonOut={textContent:''};
-const card={detail,className:'',querySelector(s){return ({'[data-discussion]':detail,'[data-complete]':box,'.task-status':status,'.task-progress-summary':summary,'.task-reason':reasonOut})[s]}};
+const box={checked:false,disabled:false,dataset:{cycle:"0"}},status={textContent:''},summary={textContent:''},reasonOut={textContent:''};
+const card={detail,className:'',querySelector(s){return ({'[data-discussion]':detail,'[data-complete]':box,'.task-status':status,'.task-progress-summary':summary,'.task-reason':reasonOut,'.task-rework':{textContent:''}})[s]}};
 const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/teacher'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},confirm:()=>true,console,fetch:async(path,opts)=>{calls.push({path,opts});let data=path.endsWith('/comments')?(opts.method==='POST'?{ok:true}:{comments:[{author_name:'<Учитель>',author_position:'Учитель',created_at:'2030-01-01T00:00:00Z',text:'<script>опасно</script>'}]}):path.endsWith('/progress')?{task:{partial:true,failure_reason:'Ждём'}}:{task:{status:'completed_on_time',failure_reason:'Ждём'}};return {ok:true,json:async()=>data}}};
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js','utf8'),context);
 (async()=>{
