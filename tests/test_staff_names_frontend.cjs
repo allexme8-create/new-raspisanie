@@ -4,7 +4,8 @@ const elements=new Map();
 function el(id){if(!elements.has(id))elements.set(id,{textContent:'',innerHTML:'',value:'',classList:{toggle(){},contains(){return false}},querySelectorAll(){return []}});return elements.get(id);}
 const users=[{id:'11111111abcdef',full_name:'Иванов Иван',email:'private@example.com'},{id:'22222222abcdef',full_name:'Иванов Иван',email:'other@example.com'},{id:'333',full_name:'',email:'missing@example.com'}];
 const task={id:'t',status:'pending',description:'Тест',deadline:'2030-01-01T00:00:00Z',assignee_name:'Иванов Иван',assignee_email:'private@example.com'};
-const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/Director'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},fetch:async path=>({ok:true,json:async()=>path.endsWith('/associates')?{users}:{tasks:[task]}}),console};
+const projects=[{id:'p',title:'Проект <тест>',owner_id:'a',owner_name:'Заместитель'}];
+const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/Director'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},fetch:async path=>({ok:true,json:async()=>path.endsWith('/assignees')?{users}:path.endsWith('/projects')?{projects}:{tasks:[task]}}),console};
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js','utf8'),context);
 (async()=>{
  await vm.runInContext('staffToken="token"; showSession({user:{role:"director",full_name:"Петров Пётр",email:"director@example.com"},must_change:false})',context);
@@ -19,5 +20,11 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js'
  assert.match(el('taskList').innerHTML,/Исполнитель: ФИО не указано/);
  task.assignee_name='Удалённый пользователь';await vm.runInContext('loadTasks()',context);
  assert.match(el('taskList').innerHTML,/Исполнитель: Удалённый пользователь/);
+ task.project_id='p';task.assignee_id='u1';task.assignee_name='Иванов Иван';task.completed_at='2029-01-01T00:00:00Z';await vm.runInContext('loadTasks()',context);
+ assert.match(el('projectList').innerHTML,/Проект &lt;тест&gt;/);
+ assert.match(el('projectList').innerHTML,/Выполнено: 1 из 1/);
+ assert.match(el('projectList').innerHTML,/Участники: Иванов Иван — 1\/1/);
+ assert.doesNotMatch(el('taskList').innerHTML,/Иванов Иван/);
+ assert.match(el('taskProject').innerHTML,/Проект &lt;тест&gt;/);
  console.log('Staff name display OK');
 })().catch(e=>{console.error(e);process.exitCode=1});

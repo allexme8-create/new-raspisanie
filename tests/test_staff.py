@@ -160,7 +160,7 @@ class StaffTests(unittest.TestCase):
         deputy, _ = self.ready("deputy@example.com", "associate", deputy_data["password"])
         self.assertEqual(self.client.get("/api/staff/associates", headers=deputy).status_code, 403)
         body = {"assignee_id": deputy_data["user"]["id"], "description": "Отчёт", "deadline": (datetime.now(timezone.utc)+timedelta(hours=1)).isoformat()}
-        self.assertEqual(self.client.post("/api/staff/tasks", headers=deputy, json=body).status_code, 403)
+        self.assertEqual(self.client.post("/api/staff/tasks", headers=deputy, json=body).status_code, 422)
         task = self.client.post("/api/staff/tasks", headers=director, json=body).json()["task"]
         url = f"/api/staff/tasks/{task['id']}/completion"
         self.assertEqual(self.client.put(url, headers=deputy, json={"completed": True}).json()["task"]["status"], "completed_on_time")
@@ -172,6 +172,58 @@ class StaffTests(unittest.TestCase):
         recreated = self.create("deputy@example.com", "associate")
         self.assertNotEqual(recreated["user"]["id"], deputy_data["user"]["id"])
         self.assertEqual(self.client.post("/api/staff/password-reset/request", json={"email": "deputy@example.com", "role": "associate"}).status_code, 404)
+
+    def test_teacher_projects_permissions_and_progress(self):
+        d = self.create("d@example.com", "director")
+        a = self.create("a@example.com", "associate")
+        b = self.create("b@example.com", "associate")
+        t = self.create("t@example.com", "teacher")
+        t2 = self.create("t2@example.com", "teacher")
+        dh, _ = self.ready("d@example.com", "director", d["password"])
+        ah, _ = self.ready("a@example.com", "associate", a["password"])
+        bh, _ = self.ready("b@example.com", "associate", b["password"])
+        th, _ = self.ready("t@example.com", "teacher", t["password"])
+        th2, _ = self.ready("t2@example.com", "teacher", t2["password"])
+        for headers, name in [(dh, "Директор"), (ah, "Заместитель"), (th, "Учитель")]:
+            self.client.put("/api/staff/profile", headers=headers, json={"full_name": name})
+        self.assertEqual(self.client.post("/api/staff/projects", headers=th, json={"title":"Проект"}).status_code, 403)
+        self.assertEqual(self.client.post("/api/staff/projects", headers=ah, json={"title":"  "}).status_code, 422)
+        project = self.client.post("/api/staff/projects", headers=ah, json={"title":"Проект А"}).json()["id"]
+        taskbody = {"assignee_id":t["user"]["id"], "description":"Работа", "deadline":(staff.now()+timedelta(days=1)).isoformat(), "project_id":project}
+        self.assertEqual(self.client.post("/api/staff/tasks", headers=th, json=taskbody).status_code, 403)
+        self.assertEqual(self.client.post("/api/staff/tasks", headers=bh, json=taskbody).status_code, 403)
+        self.assertEqual(self.client.post("/api/staff/tasks", headers=ah, json=taskbody | {"assignee_id":b["user"]["id"]}).status_code, 422)
+        task = self.client.post("/api/staff/tasks", headers=ah, json=taskbody).json()["task"]
+        self.assertEqual(self.client.post("/api/staff/tasks", headers=dh, json=taskbody | {"assignee_id":a["user"]["id"]}).status_code, 201)
+        self.assertEqual(len(self.client.get("/api/staff/tasks", headers=dh).json()["tasks"]), 2)
+        self.assertEqual(len(self.client.get("/api/staff/tasks", headers=ah).json()["tasks"]), 2)
+        self.assertEqual(len(self.client.get("/api/staff/tasks", headers=th).json()["tasks"]), 1)
+        self.assertEqual(self.client.get("/api/staff/projects", headers=th2).json()["projects"], [])
+        self.assertEqual(self.client.get("/api/staff/tasks", headers=bh).json()["tasks"], [])
+        url = f"/api/staff/tasks/{task['id']}/completion"
+        self.assertEqual(self.client.put(url, headers=th2, json={"completed": True}).status_code, 404)
+        self.assertEqual(self.client.put(url, headers=th, json={"completed": True}).status_code, 200)
+        observed = self.client.get("/api/staff/tasks", headers=dh).json()["tasks"]
+        self.assertEqual(next(item for item in observed if item["id"] == task["id"])["status"], "completed_on_time")
+        self.assertEqual(self.client.get("/api/staff/projects", headers=dh).json()["projects"][0]["title"], "Проект А")
+        self.assertEqual(self.client.post("/api/staff/tasks", headers=ah, json=taskbody | {"project_id":None}).status_code, 201)
+
+    def test_role_migration_preserves_references(self):
+        created = self.create("d@example.com", "director")
+        associate = self.create("a@example.com", "associate")
+        dh, _ = self.ready("d@example.com", "director", created["password"])
+        self.client.post("/api/staff/tasks", headers=dh, json={"assignee_id":associate["user"]["id"], "description":"Сохранить", "deadline":(staff.now()+timedelta(days=1)).isoformat()})
+        # Simulate the previous role constraint, keeping the real child tables.
+        with self.store.connect() as db:
+            db.execute("PRAGMA foreign_keys=OFF")
+            db.execute("PRAGMA writable_schema=ON")
+            db.execute("UPDATE sqlite_master SET sql=replace(sql, \",'teacher'\", '') WHERE name='users'")
+            db.execute("PRAGMA writable_schema=OFF")
+        self.store.init()
+        self.assertEqual(len(self.client.get("/api/staff/tasks", headers=dh).json()["tasks"]), 1)
+        self.assertEqual(self.create("teacher@example.com", "teacher")["user"]["role"], "teacher")
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
 
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")

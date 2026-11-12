@@ -44,13 +44,13 @@ def check_password(password: str, stored: str) -> bool:
 
 class NewUser(BaseModel):
     email: EmailStr
-    role: Literal["director", "associate"]
+    role: Literal["director", "associate", "teacher"]
 
 
 class Login(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=256)
-    role: Literal["director", "associate"]
+    role: Literal["director", "associate", "teacher"]
 
 
 class PasswordChange(BaseModel):
@@ -69,8 +69,21 @@ class ProfileUpdate(BaseModel):
         return value
 
 
+class ProjectCreate(BaseModel):
+    title: str = Field(max_length=200)
+
+    @field_validator("title")
+    @classmethod
+    def clean_title(cls, value: str) -> str:
+        value = " ".join(value.split())
+        if not value:
+            raise ValueError("Укажите название проекта")
+        return value
+
+
 class TaskCreate(BaseModel):
     assignee_id: str
+    project_id: str | None = None
     description: str = Field(min_length=1, max_length=5000)
     deadline: datetime
 
@@ -110,7 +123,7 @@ class Store:
             db.executescript('''
                 CREATE TABLE IF NOT EXISTS users (
                     id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE,
-                    role TEXT NOT NULL CHECK (role IN ('director','associate')),
+                    role TEXT NOT NULL CHECK (role IN ('director','associate','teacher')),
                     password_hash TEXT NOT NULL, must_change INTEGER NOT NULL DEFAULT 1,
                     active INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL
                 );
@@ -127,12 +140,33 @@ class Store:
                     key TEXT PRIMARY KEY, failures INTEGER NOT NULL, blocked_until INTEGER NOT NULL
                 );
             ''')
+            # SQLite cannot alter a CHECK constraint. Rebuild users without renaming it,
+            # preserving child-table references, within a single transaction.
+            db.execute("PRAGMA foreign_keys=OFF")
             db.execute("BEGIN IMMEDIATE")
+            schema = db.execute("SELECT sql FROM sqlite_master WHERE name='users'").fetchone()[0]
+            if "'teacher'" not in schema:
+                db.execute("""CREATE TABLE users_new (
+                    id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    role TEXT NOT NULL CHECK (role IN ('director','associate','teacher')),
+                    password_hash TEXT NOT NULL, must_change INTEGER NOT NULL DEFAULT 1,
+                    active INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL,
+                    password_ciphertext TEXT, full_name TEXT NOT NULL DEFAULT '')""")
+                old_columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+                columns_to_copy = [c for c in ("id", "email", "role", "password_hash", "must_change", "active", "created_at", "password_ciphertext", "full_name") if c in old_columns]
+                names = ",".join(columns_to_copy)
+                db.execute(f"INSERT INTO users_new ({names}) SELECT {names} FROM users")
+                db.execute("DROP TABLE users")
+                db.execute("ALTER TABLE users_new RENAME TO users")
             columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
             if "password_ciphertext" not in columns:
                 db.execute("ALTER TABLE users ADD COLUMN password_ciphertext TEXT")
             if "full_name" not in columns:
                 db.execute("ALTER TABLE users ADD COLUMN full_name TEXT NOT NULL DEFAULT ''")
+            db.execute("CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, title TEXT NOT NULL, owner_id TEXT NOT NULL REFERENCES users(id), created_at TEXT NOT NULL)")
+            task_columns = {row["name"] for row in db.execute("PRAGMA table_info(tasks)")}
+            if "project_id" not in task_columns:
+                db.execute("ALTER TABLE tasks ADD COLUMN project_id TEXT REFERENCES projects(id)")
             # Почтовые настройки и коды больше не используются.
             for name in ("mail_oauth", "mail_oauth_pending", "password_resets", "reset_throttle", "reset_ip_throttle"):
                 db.execute(f"DROP TABLE IF EXISTS {name}")
@@ -194,7 +228,7 @@ def task_json(row, current: datetime | None = None) -> dict:
     completed = datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
     current = current or now()
     status = ("completed_on_time" if completed <= due else "completed_late") if completed else ("overdue" if current > due else "pending")
-    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name")} | {"status": status}
+    return {key: row[key] for key in ("id", "description", "deadline", "created_at", "completed_at", "assignee_id", "assignee_email", "director_email", "assignee_name", "director_name", "project_id", "director_id")} | {"status": status}
 
 
 TASK_SELECT = '''SELECT tasks.*, CASE WHEN assignee.active=1 THEN assignee.email ELSE 'Удалённый пользователь' END AS assignee_email,
@@ -365,30 +399,69 @@ def make_router(store: Store, require_admin) -> APIRouter:
             rows = db.execute("SELECT id,email,role,full_name FROM users WHERE role='associate' AND active=1 ORDER BY email").fetchall()
         return {"users": [public_user(row) for row in rows]}
 
+    def manager(user: dict = Depends(ready_user)) -> dict:
+        if user["role"] not in ("director", "associate"):
+            raise HTTPException(403, "Доступ только для руководства")
+        return user
+
+    @router.get("/api/staff/assignees")
+    def assignees(user: dict = Depends(manager)):
+        roles = ("associate", "teacher") if user["role"] == "director" else ("teacher",)
+        with store.connect() as db:
+            rows = db.execute("SELECT id,email,role,full_name FROM users WHERE active=1 AND role IN (%s) ORDER BY full_name, id" % ",".join("?" for _ in roles), roles).fetchall()
+        return {"users": [public_user(row) for row in rows]}
+
+    @router.post("/api/staff/projects", status_code=201)
+    def create_project(body: ProjectCreate, user: dict = Depends(manager)):
+        pid = secrets.token_hex(16)
+        with store.connect() as db:
+            db.execute("INSERT INTO projects VALUES (?,?,?,?)", (pid, body.title, user["id"], iso(now())))
+        return {"id": pid, "title": body.title}
+
+    @router.get("/api/staff/projects")
+    def projects(user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            if user["role"] == "director":
+                rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name FROM projects JOIN users ON users.id=projects.owner_id ORDER BY projects.created_at DESC").fetchall()
+            else:
+                rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name FROM projects JOIN users ON users.id=projects.owner_id WHERE projects.owner_id=? OR EXISTS (SELECT 1 FROM tasks WHERE tasks.project_id=projects.id AND tasks.assignee_id=?) ORDER BY projects.created_at DESC", (user["id"], user["id"])).fetchall()
+        return {"projects": [dict(row) for row in rows]}
+
     @router.post("/api/staff/tasks", status_code=201)
-    def create_task(body: TaskCreate, user: dict = Depends(director)):
+    def create_task(body: TaskCreate, user: dict = Depends(manager)):
         if body.deadline <= now():
             raise HTTPException(422, "Срок должен быть в будущем")
         tid = secrets.token_hex(16)
         with store.connect() as db:
-            assignee = db.execute("SELECT id FROM users WHERE id=? AND role='associate' AND active=1", (body.assignee_id,)).fetchone()
-            if not assignee:
-                raise HTTPException(422, "Заместитель не найден")
-            db.execute("INSERT INTO tasks VALUES (?,?,?,?,?,?,NULL)", (tid, user["id"], body.assignee_id, body.description, iso(body.deadline), iso(now())))
+            db.execute("BEGIN IMMEDIATE")
+            assignee = db.execute("SELECT role FROM users WHERE id=? AND active=1", (body.assignee_id,)).fetchone()
+            allowed = ("associate", "teacher") if user["role"] == "director" else ("teacher",)
+            if not assignee or assignee["role"] not in allowed:
+                raise HTTPException(422, "Исполнитель не найден или недоступен для назначения")
+            if body.project_id:
+                project = db.execute("SELECT owner_id FROM projects WHERE id=?", (body.project_id,)).fetchone()
+                if not project:
+                    raise HTTPException(404, "Проект не найден")
+                if user["role"] != "director" and project["owner_id"] != user["id"]:
+                    raise HTTPException(403, "Добавлять задачи может автор проекта или директор")
+            db.execute("INSERT INTO tasks (id,director_id,assignee_id,description,deadline,created_at,project_id) VALUES (?,?,?,?,?,?,?)", (tid, user["id"], body.assignee_id, body.description, iso(body.deadline), iso(now()), body.project_id))
             row = db.execute(TASK_SELECT + " WHERE tasks.id=?", (tid,)).fetchone()
         return {"task": task_json(row)}
 
     @router.get("/api/staff/tasks")
     def tasks(user: dict = Depends(ready_user)):
-        column = "director_id" if user["role"] == "director" else "assignee_id"
+        if user["role"] == "director":
+            condition, params = "(tasks.director_id=? OR tasks.assignee_id=? OR tasks.project_id IS NOT NULL)", (user["id"], user["id"])
+        elif user["role"] == "associate":
+            condition, params = "(tasks.assignee_id=? OR tasks.director_id=? OR EXISTS (SELECT 1 FROM projects WHERE projects.id=tasks.project_id AND projects.owner_id=?))", (user["id"], user["id"], user["id"])
+        else:
+            condition, params = "tasks.assignee_id=?", (user["id"],)
         with store.connect() as db:
-            rows = db.execute(TASK_SELECT + f" WHERE tasks.{column}=? ORDER BY tasks.deadline ASC, tasks.created_at DESC", (user["id"],)).fetchall()
+            rows = db.execute(TASK_SELECT + f" WHERE {condition} ORDER BY tasks.deadline ASC, tasks.created_at DESC", params).fetchall()
         return {"tasks": [task_json(row) for row in rows]}
 
     @router.put("/api/staff/tasks/{task_id}/completion")
     def complete_task(task_id: str, body: Complete, user: dict = Depends(ready_user)):
-        if user["role"] != "associate":
-            raise HTTPException(403, "Отметить выполнение может только назначенный заместитель")
         if not body.completed:
             raise HTTPException(400, "Отметку выполнения нельзя отменить")
         with store.connect() as db:

@@ -242,3 +242,9 @@ footer a{color:var(--muted)}
 .staff-user-actions{display:flex;gap:6px;flex-wrap:wrap}
 .staff-user-actions .btn{width:auto;padding:7px 10px;font-size:12px}
 .staff-password{margin-top:6px;font-weight:700;color:var(--ink);overflow-wrap:anywhere}
+
+.staff-profile summary{cursor:pointer;font-weight:700;color:var(--ink)}
+.staff-profile[open] summary{margin-bottom:14px}
+.project-card{border:1px solid var(--line);border-radius:12px;padding:14px;margin:10px 0}
+.project-card h3{margin:0 0 6px;overflow-wrap:anywhere}
+.project-card .hint{margin:5px 0}

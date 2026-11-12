@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-profile-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-projects-1">
 </head>
 <body>
 
@@ -42,7 +42,7 @@
       <p class="hint">Доступ к паролям имеют администраторы: используйте HTTPS и надёжный пароль администратора.</p>
       <form id="staffCreateForm" class="planner-form">
         <label>E-mail<input id="staffEmail" type="email" maxlength="254" required autocomplete="off" placeholder="name@example.ru"></label>
-        <label>Роль<select id="staffRole"><option value="associate">Заместитель директора</option><option value="director">Директор</option></select></label>
+        <label>Роль<select id="staffRole"><option value="associate">Заместитель директора</option><option value="director">Директор</option><option value="teacher">Учитель</option></select></label>
         <button class="btn" type="submit">Создать пользователя</button>
       </form>
       <div id="staffAdminResult" aria-live="polite"></div>
@@ -111,8 +111,8 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="/js/admin.js?v=staff-profile-1"></script>
+<script src="/js/admin.js?v=staff-projects-1"></script>
 <script src="/js/planner.js?v=planner-1"></script>
-<script src="/js/staff-admin.js?v=staff-profile-1"></script>
+<script src="/js/staff-admin.js?v=staff-projects-1"></script>
 </body>
 </html>
