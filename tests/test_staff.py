@@ -535,6 +535,40 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(self.client.post(url+"/restore",headers=ah).status_code,200)
         self.assertEqual(len(self.client.get("/api/staff/tasks",headers=ah).json()["tasks"]),1)
 
+    def test_assignee_can_undo_completion_before_final_approval(self):
+        director=self.create("undo-d@example.com", "director")
+        teacher=self.create("undo-t@example.com", "teacher")
+        other=self.create("undo-o@example.com", "teacher")
+        dh,_=self.ready("undo-d@example.com", "director", director["password"])
+        th,_=self.ready("undo-t@example.com", "teacher", teacher["password"])
+        oh,_=self.ready("undo-o@example.com", "teacher", other["password"])
+        body={"assignee_id":teacher["user"]["id"], "description":"Проверить", "deadline":(staff.now()+timedelta(days=1)).isoformat()}
+        task=self.client.post("/api/staff/tasks",headers=dh,json=body).json()["task"]
+        url=f"/api/staff/tasks/{task['id']}"
+        complete=self.client.put(url+"/completion",headers=th,json={"completed":True,"cycle":0}).json()["task"]
+        undo={"completed":False,"cycle":0,"expected_completed_at":complete["completed_at"]}
+        self.assertEqual(self.client.put(url+"/completion",headers=dh,json=undo).status_code,404)
+        self.assertEqual(self.client.put(url+"/completion",headers=oh,json=undo).status_code,404)
+        self.assertEqual(self.client.put(url+"/completion",headers=th,json=undo | {"expected_completed_at":"wrong"}).status_code,409)
+        self.assertEqual(self.client.put(url+"/completion",headers=th,json={"completed":False}).status_code,400)
+        response=self.client.put(url+"/completion",headers=th,json=undo)
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertIsNone(response.json()["task"]["completed_at"])
+        self.assertEqual(response.json()["task"]["cycle"],1)
+        self.assertEqual(response.json()["task"]["status"],"pending")
+        self.assertEqual(self.client.put(url+"/completion",headers=th,json=undo).status_code,409)
+        self.assertEqual(self.client.put(url+"/completion",headers=th,json={"completed":True,"cycle":0}).status_code,409)
+        self.assertEqual(self.client.post(url+"/approve",headers=dh,json={"expected_completed_at":complete["completed_at"]}).status_code,409)
+        notifications=self.client.get("/api/staff/notifications",headers=dh).json()["notifications"]
+        self.assertEqual([n["kind"] for n in notifications], ["completion_undone","completed"])
+        history=self.client.get(url+"/comments",headers=th).json()["events"]
+        self.assertTrue(any("снял отметку" in e["text"] and complete["completed_at"] in e["text"] for e in history))
+        again=self.client.put(url+"/completion",headers=th,json={"completed":True,"cycle":1}).json()["task"]
+        self.assertEqual(self.client.put(url+"/completion",headers=th,json=undo | {"cycle":1}).status_code,409)
+        self.client.post(url+"/approve",headers=dh,json={"expected_completed_at":again["completed_at"]})
+        self.assertEqual(self.client.put(url+"/completion",headers=th,json={"completed":False,"cycle":1,"expected_completed_at":again["completed_at"]}).status_code,409)
+        self.assertIsNotNone(self.client.get("/api/staff/tasks",headers=th).json()["tasks"][0]["approved_at"])
+
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")
         for _ in range(5):

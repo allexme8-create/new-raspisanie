@@ -118,6 +118,7 @@ class TaskCreate(BaseModel):
 class Complete(BaseModel):
     completed: bool
     cycle: int = Field(default=0, ge=0)
+    expected_completed_at: str | None = Field(default=None, max_length=64)
 
 
 class ReworkApproval(BaseModel):
@@ -644,19 +645,29 @@ def make_router(store: Store, require_admin) -> APIRouter:
 
     @router.put("/api/staff/tasks/{task_id}/completion")
     def complete_task(task_id: str, body: Complete, user: dict = Depends(ready_user)):
-        if not body.completed:
-            raise HTTPException(400, "Отметку выполнения нельзя отменить")
+        if not body.completed and not body.expected_completed_at:
+            raise HTTPException(400, "Обновите задачу перед снятием отметки")
         with store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            previous = db.execute("SELECT completed_at,cycle FROM tasks WHERE id=? AND assignee_id=?", (task_id, user["id"])).fetchone()
+            previous = db.execute("SELECT completed_at,cycle,approved_at FROM tasks WHERE id=? AND assignee_id=?", (task_id, user["id"])).fetchone()
             if not previous:
                 raise HTTPException(404, "Задача не найдена")
             if previous["cycle"] != body.cycle:
-                raise HTTPException(409, "Задача была возвращена на доработку. Обновите страницу.")
-            if not previous["completed_at"]:
-                db.execute("UPDATE tasks SET completed_at=?, partial=0,rework=0 WHERE id=?", (iso(now()), task_id))
-                db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], "Задача выполнена", iso(now())))
-                notify_initiator(db, task_id, user["id"], "completed")
+                raise HTTPException(409, "Состояние задачи изменилось. Обновите страницу.")
+            if body.completed:
+                if not previous["completed_at"]:
+                    db.execute("UPDATE tasks SET completed_at=?, partial=0,rework=0 WHERE id=?", (iso(now()), task_id))
+                    db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], "Задача выполнена", iso(now())))
+                    notify_initiator(db, task_id, user["id"], "completed")
+            else:
+                if previous["approved_at"]:
+                    raise HTTPException(409, "Инициатор уже подтвердил полное выполнение задачи")
+                if not previous["completed_at"] or previous["completed_at"] != body.expected_completed_at:
+                    raise HTTPException(409, "Состояние задачи изменилось. Обновите страницу.")
+                db.execute("UPDATE tasks SET completed_at=NULL,cycle=cycle+1 WHERE id=?", (task_id,))
+                text = f"Исполнитель снял отметку выполнения (отмечено ранее: {previous['completed_at']})"
+                db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], text, iso(now())))
+                notify_initiator(db, task_id, user["id"], "completion_undone")
             task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
         return {"task": task_json(task)}
 
