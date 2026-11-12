@@ -237,12 +237,8 @@ footer a{color:var(--muted)}
 .task-complete input{width:19px;height:19px;accent-color:var(--ok)}
 @media(max-width:640px){.staff-main .field input,.staff-main .field select,.staff-main .field textarea{font-size:16px}}
 
-.reset-confirm{margin-top:22px;padding-top:18px;border-top:1px solid var(--line)}
-
-.oauth-guide{border:1px solid #c7cde2;border-radius:12px;background:#f7f8ff;padding:14px 16px;margin:10px 0 16px;font-size:13px;line-height:1.5;overflow-wrap:anywhere}
-.oauth-guide h4{margin:0 0 8px;font-size:14px;color:var(--ink)}
-.oauth-guide ol{margin:0;padding-left:20px}
-.oauth-guide li+li{margin-top:7px}
-.oauth-guide p{margin:10px 0 0;color:var(--muted)}
-.oauth-guide code{font-size:12px;overflow-wrap:anywhere}
-.oauth-guide a{color:var(--acc)}
+.staff-user-list li{flex-wrap:wrap}
+.staff-user-details{flex:1 1 200px;min-width:0}
+.staff-user-actions{display:flex;gap:6px;flex-wrap:wrap}
+.staff-user-actions .btn{width:auto;padding:7px 10px;font-size:12px}
+.staff-password{margin-top:6px;font-weight:700;color:var(--ink);overflow-wrap:anywhere}

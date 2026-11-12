@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=oauth-guide-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-passwords-1">
 </head>
 <body>
 
@@ -38,34 +38,15 @@
   <div id="adminPanel" class="hidden">
     <section class="card">
       <h2>Пользователи руководства</h2>
-      <h3>Почта отправителя</h3>
-      <div class="oauth-guide" aria-labelledby="oauthGuideTitle">
-        <h4 id="oauthGuideTitle">Как подключить почту через OAuth — без SMTP_PASSWORD</h4>
-        <ol>
-          <li>Откройте сайт по постоянному HTTPS-адресу. В настройках хостинга задайте <code>PUBLIC_BASE_URL</code> — адрес сайта без пути, например <code>https://school.example.ru</code>.</li>
-          <li>Создайте веб-приложение у <a href="https://oauth.yandex.ru/" target="_blank" rel="noopener noreferrer">Яндекса</a> или в <a href="https://o2.mail.ru/app/" target="_blank" rel="noopener noreferrer">Mail.ru</a>. Укажите Redirect URI: <code>https://ВАШ-ДОМЕН/mail-oauth/callback</code>, заменив <code>https://ВАШ-ДОМЕН</code> на тот же <code>PUBLIC_BASE_URL</code>. Для Яндекса выберите право <code>mail:smtp</code>; для Mail.ru — <code>userinfo</code> и <code>mail.imap</code>.</li>
-          <li>В секретах хостинга задайте ID и секрет приложения: <code>YANDEX_OAUTH_CLIENT_ID</code> и <code>YANDEX_OAUTH_CLIENT_SECRET</code> либо <code>MAILRU_OAUTH_CLIENT_ID</code> и <code>MAILRU_OAUTH_CLIENT_SECRET</code>. Там же задайте <code>MAIL_OAUTH_ENCRYPTION_KEY</code> — сгенерируйте его на сервере командой <code>python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</code>. Секреты не отправляйте в чат и не сохраняйте в репозитории.</li>
-          <li>Перезапустите сервер. Ниже введите e-mail отправителя, нажмите кнопку нужного провайдера и разрешите доступ в открывшейся вкладке. Дождитесь сообщения об успешном подключении.</li>
-        </ol>
-        <p>Mail.ru запрашивает <code>mail.imap</code>, которое может включать чтение почты и требовать согласования у провайдера. В предпросмотре, если подключение не завершается, откройте админку в отдельной вкладке на том же адресе сайта. Подробнее — в <code>DEPLOY.md</code>.</p>
-      </div>
-      <form id="mailSettingsForm" class="planner-form">
-        <label for="mailSender">E-mail отправителя<input id="mailSender" type="email" maxlength="254" required placeholder="sender@yandex.ru" autocomplete="off"></label>
-        <button class="btn" type="button" data-oauth-provider="yandex">Подключить Яндекс</button>
-        <button class="btn" type="button" data-oauth-provider="mailru">Подключить Mail.ru</button>
-        <button class="btn secondary" type="submit">SMTP по паролю приложения</button>
-        <button class="btn secondary" id="mailUseEnvironment" type="button">Использовать настройки сервера</button>
-      </form>
-      <p class="hint">Для SMTP по паролю потребуется SMTP_PASSWORD в настройках сервера. При переключении на него или настройки сервера OAuth-подключение будет удалено.</p>
-      <div id="mailSettingsStatus" aria-live="polite"></div>
-      <p class="hint">Создайте директора или заместителя. Логин (e-mail) и временный пароль отправляются на указанную почту; при первом входе пароль нужно сменить. При удалении пользователь получает уведомление, доступ прекращается, а история задач сохраняется без его e-mail. Для создания и удаления требуется настроенный SMTP.</p>
+      <p class="hint">Укажите e-mail как логин и выберите роль. Пароль создаётся автоматически; передайте его пользователю безопасным способом. При первом входе пользователь сменит пароль. Администратор может показать текущий пароль или создать новый. Письма не отправляются.</p>
+      <p class="hint">Доступ к паролям имеют администраторы: используйте HTTPS и надёжный пароль администратора.</p>
       <form id="staffCreateForm" class="planner-form">
         <label>E-mail<input id="staffEmail" type="email" maxlength="254" required autocomplete="off" placeholder="name@example.ru"></label>
         <label>Роль<select id="staffRole"><option value="associate">Заместитель директора</option><option value="director">Директор</option></select></label>
-        <button class="btn" type="submit">Создать и отправить письмо</button>
+        <button class="btn" type="submit">Создать пользователя</button>
       </form>
       <div id="staffAdminResult" aria-live="polite"></div>
-      <button id="staffUsersRefresh" class="btn secondary" type="button" style="width:auto">Показать пользователей</button>
+      <button id="staffUsersRefresh" class="btn secondary" type="button" style="width:auto">Обновить список пользователей</button>
       <div id="staffUsersList"></div>
     </section>
     <section class="card">
@@ -130,8 +111,8 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="/js/admin.js?v=mail-oauth-1"></script>
+<script src="/js/admin.js?v=staff-passwords-1"></script>
 <script src="/js/planner.js?v=planner-1"></script>
-<script src="/js/staff-admin.js?v=mail-oauth-1"></script>
+<script src="/js/staff-admin.js?v=staff-passwords-1"></script>
 </body>
 </html>

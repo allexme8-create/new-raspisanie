@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=password-reset-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-passwords-1">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -16,23 +16,7 @@
       <div class="field"><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" autocomplete="current-password" required maxlength="256"></div>
       <button class="btn" type="submit">Войти</button>
     </form>
-    <button class="staff-logout-link" id="forgotPassword" type="button">Забыли пароль?</button>
-  </section>
-  <section class="card auth-box hidden" id="resetPasswordCard">
-    <h2>Восстановление пароля</h2>
-    <p class="hint">Укажите e-mail вашей учётной записи. Если она существует и почта сервиса настроена, на него придёт одноразовый код на 30 минут.</p>
-    <div id="resetMessage" aria-live="polite"></div>
-    <form id="resetRequestForm">
-      <div class="field"><label for="resetEmail">E-mail</label><input id="resetEmail" type="email" required autocomplete="username"></div>
-      <button class="btn secondary" type="submit">Получить код</button>
-    </form>
-    <form id="resetConfirmForm" class="reset-confirm">
-      <div class="field"><label for="resetCode">Код из письма</label><input id="resetCode" type="text" required maxlength="128" autocomplete="one-time-code"></div>
-      <div class="field"><label for="resetNewPassword">Новый пароль</label><input id="resetNewPassword" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></div>
-      <div class="field"><label for="resetRepeatPassword">Повторите пароль</label><input id="resetRepeatPassword" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></div>
-      <button class="btn" type="submit">Сохранить новый пароль</button>
-    </form>
-    <button class="staff-logout-link" id="resetBack" type="button">← Вернуться ко входу</button>
+    <p class="hint">Забыли пароль? Обратитесь к администратору.</p>
   </section>
   <section class="card auth-box hidden" id="changePasswordCard">
     <h2>Смените временный пароль</h2>
@@ -61,6 +45,6 @@
     </section>
   </div>
 </main>
-<script src="/js/staff.js?v=password-reset-1"></script>
+<script src="/js/staff.js?v=staff-passwords-1"></script>
 </body>
 </html>

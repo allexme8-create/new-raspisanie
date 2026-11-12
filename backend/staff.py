@@ -5,23 +5,19 @@ import hashlib
 import hmac
 import os
 import secrets
-import smtplib
 import sqlite3
-import ssl
+import tempfile
 import time
 from datetime import datetime, timezone
-from email.message import EmailMessage
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException
 
-import mail_oauth
+from cryptography.fernet import Fernet, InvalidToken
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 SESSION_TTL = 12 * 60 * 60
-RESET_TTL = 30 * 60
 
 
 def now() -> datetime:
@@ -46,122 +42,15 @@ def check_password(password: str, stored: str) -> bool:
         return False
 
 
-# Только заранее известные серверы: домен получателя на SMTP не влияет.
-SMTP_PROVIDERS = {
-    **{domain: ("smtp.yandex.ru", 465, "ssl") for domain in ("yandex.ru", "yandex.com", "ya.ru", "yandex.by", "yandex.kz")},
-    **{domain: ("smtp.mail.ru", 465, "ssl") for domain in ("mail.ru", "list.ru", "inbox.ru", "bk.ru")},
-    **{domain: ("smtp.gmail.com", 465, "ssl") for domain in ("gmail.com", "googlemail.com")},
-}
-
-
-def smtp_settings(sender_email: str | None) -> dict:
-    secret_present = bool(os.environ.get("SMTP_PASSWORD", ""))
-    if sender_email:
-        domain = sender_email.rsplit("@", 1)[-1].lower()
-        provider = SMTP_PROVIDERS.get(domain)
-        if not provider:
-            raise RuntimeError("Неизвестный почтовый сервис. Поддерживаются Яндекс, Mail.ru и Gmail; для остальных используйте настройки сервера.")
-        host, port, security = provider
-        return {"source": "automatic", "sender": sender_email, "username": sender_email, "host": host, "port": port, "security": security, "password_configured": secret_present}
-    host = os.environ.get("SMTP_HOST", "").strip()
-    sender = os.environ.get("SMTP_FROM", "").strip()
-    username = os.environ.get("SMTP_USER", "").strip()
-    security = os.environ.get("SMTP_SECURITY", "starttls").lower()
-    try:
-        port = int(os.environ.get("SMTP_PORT", "465" if security == "ssl" else "587"))
-    except ValueError as exc:
-        raise RuntimeError("Некорректный SMTP_PORT в настройках сервера.") from exc
-    return {"source": "environment", "sender": sender, "username": username, "host": host, "port": port, "security": security, "password_configured": secret_present}
-
-
-def send_mail(email: str, subject: str, body: str, sender_email: str | None = None, oauth_token: str | None = None) -> None:
-    config = smtp_settings(sender_email)
-    host, sender, username, security, port = (config[k] for k in ("host", "sender", "username", "security", "port"))
-    secret = os.environ.get("SMTP_PASSWORD", "")
-    if not host or not sender or security not in ("ssl", "starttls"):
-        raise RuntimeError("SMTP не настроен: укажите почту отправителя или настройки SMTP на сервере.")
-    if sender_email and not secret and not oauth_token:
-        raise RuntimeError("Для почты отправителя задайте SMTP_PASSWORD в настройках сервера (обычно это пароль приложения).")
-    try:
-        msg = EmailMessage()
-        msg["From"] = sender
-        msg["To"] = email
-        msg["Subject"] = subject
-        msg.set_content(body)
-        context = ssl.create_default_context()
-        if security == "ssl":
-            client = smtplib.SMTP_SSL(host, port, timeout=15, context=context)
-        else:
-            client = smtplib.SMTP(host, port, timeout=15)
-        with client:
-            if security == "starttls":
-                client.starttls(context=context)
-            if oauth_token:
-                mail_oauth.smtp_auth(client, sender, oauth_token)
-            elif username:
-                client.login(username, secret)
-            client.send_message(msg)
-    except Exception as exc:
-        raise RuntimeError("Не удалось отправить письмо через SMTP. Проверьте настройки почты и доступность сервера.") from exc
-
-
-def send_registration(email: str, role: str, password: str, sender_email: str | None = None, oauth_token: str | None = None) -> None:
-    base_url = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
-    if base_url:
-        try:
-            parts = urlsplit(base_url)
-            valid_url = parts.scheme == "https" and parts.hostname and not (parts.path or parts.query or parts.fragment or parts.username or parts.password)
-        except ValueError:
-            valid_url = False
-        if not valid_url:
-            raise RuntimeError("PUBLIC_BASE_URL должен содержать HTTPS-адрес сайта без пути.")
-    path = "/Director" if role == "director" else "/associate"
-    address = base_url + path if base_url else f"откройте сайт сервиса и перейдите на {path}"
-    send_mail(email, "Доступ к сервису расписания", f"Здравствуйте!\n\nДля вас создана учётная запись.\nСтраница входа: {address}\nЛогин: {email}\nВременный пароль: {password}\n\nПри первом входе необходимо сменить пароль. Не пересылайте это письмо и удалите его после смены пароля.\n", sender_email, oauth_token)
-
-
-def send_account_deleted(email: str, sender_email: str | None = None, oauth_token: str | None = None) -> None:
-    send_mail(email, "Учётная запись удалена", "Здравствуйте!\n\nАдминистратор удалил вашу учётную запись в сервисе расписания. Доступ к личному кабинету прекращён. Если у вас возникли вопросы, обратитесь к администратору.\n", sender_email, oauth_token)
-
-
-def send_password_reset(email: str, role: str, code: str, sender_email: str | None = None, oauth_token: str | None = None) -> None:
-    path = "/Director" if role == "director" else "/associate"
-    send_mail(email, "Восстановление доступа к сервису расписания", f"Здравствуйте!\n\nПолучен запрос на восстановление пароля. Откройте сайт сервиса, страницу {path}, и нажмите «Забыли пароль?». Введите ваш e-mail и код ниже. Код действует 30 минут и может быть использован только один раз.\n\nКод: {code}\n\nЕсли вы не запрашивали восстановление, проигнорируйте это письмо. Никому не сообщайте код.\n", sender_email, oauth_token)
-
-
 class NewUser(BaseModel):
     email: EmailStr
     role: Literal["director", "associate"]
-
-
-class MailSettings(BaseModel):
-    sender: EmailStr | None = None
-
-
-class OAuthStart(BaseModel):
-    provider: Literal["yandex", "mailru"]
-    sender: EmailStr
-
-
-class OAuthComplete(BaseModel):
-    state: str = Field(min_length=1, max_length=128)
-    code: str = Field(min_length=1, max_length=2048)
 
 
 class Login(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=256)
     role: Literal["director", "associate"]
-
-
-class ResetRequest(BaseModel):
-    email: EmailStr
-    role: Literal["director", "associate"]
-
-
-class ResetConfirm(ResetRequest):
-    code: str = Field(min_length=1, max_length=128)
-    password: str = Field(min_length=12, max_length=256)
 
 
 class PasswordChange(BaseModel):
@@ -222,39 +111,64 @@ class Store:
                     assignee_id TEXT NOT NULL REFERENCES users(id), description TEXT NOT NULL,
                     deadline TEXT NOT NULL, created_at TEXT NOT NULL, completed_at TEXT
                 );
-                CREATE TABLE IF NOT EXISTS mail_oauth (
-                    id INTEGER PRIMARY KEY CHECK(id=1), provider TEXT NOT NULL, sender TEXT NOT NULL, tokens TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS mail_oauth_pending (
-                    state_hash TEXT PRIMARY KEY, admin_hash TEXT NOT NULL, provider TEXT NOT NULL, sender TEXT NOT NULL, expires INTEGER NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS settings (
-                    key TEXT PRIMARY KEY, value TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS password_resets (
-                    user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-                    token_hash TEXT NOT NULL, expires INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0
-                );
-                CREATE TABLE IF NOT EXISTS reset_throttle (
-                    key TEXT PRIMARY KEY, requested_at INTEGER NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS reset_ip_throttle (
-                    key TEXT PRIMARY KEY, window_start INTEGER NOT NULL, count INTEGER NOT NULL
-                );
                 CREATE TABLE IF NOT EXISTS login_attempts (
                     key TEXT PRIMARY KEY, failures INTEGER NOT NULL, blocked_until INTEGER NOT NULL
                 );
             ''')
+            db.execute("BEGIN IMMEDIATE")
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(users)")}
+            if "password_ciphertext" not in columns:
+                db.execute("ALTER TABLE users ADD COLUMN password_ciphertext TEXT")
+            # Почтовые настройки и коды больше не используются.
+            for name in ("mail_oauth", "mail_oauth_pending", "password_resets", "reset_throttle", "reset_ip_throttle"):
+                db.execute(f"DROP TABLE IF EXISTS {name}")
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='settings'").fetchone():
+                db.execute("DELETE FROM settings WHERE key='smtp_sender'")
         self.path.chmod(0o600)
 
-    def credentials(self) -> tuple[str | None, str | None]:
-        oauth = mail_oauth.access_for_store(self)
-        return oauth if oauth else (self.sender(), None)
+    @property
+    def key_path(self) -> Path:
+        return self.path.with_suffix(".key")
 
-    def sender(self) -> str | None:
-        with self.connect() as db:
-            row = db.execute("SELECT value FROM settings WHERE key='smtp_sender'").fetchone()
-        return row["value"] if row else None
+    def cipher(self) -> Fernet:
+        try:
+            if not self.key_path.exists():
+                with self.connect() as db:
+                    if db.execute("SELECT 1 FROM users WHERE password_ciphertext IS NOT NULL LIMIT 1").fetchone():
+                        raise RuntimeError("Ключ шифрования потерян. Восстановите файл staff.key из резервной копии.")
+                # Атомарная публикация исключает чтение частично записанного ключа.
+                fd, temp = tempfile.mkstemp(prefix=".staff-key-", dir=self.path.parent)
+                try:
+                    os.fchmod(fd, 0o600)
+                    with os.fdopen(fd, "wb") as output:
+                        output.write(Fernet.generate_key())
+                        output.flush()
+                        os.fsync(output.fileno())
+                    try:
+                        os.link(temp, self.key_path)
+                    except FileExistsError:
+                        pass
+                finally:
+                    os.unlink(temp)
+            cipher = Fernet(self.key_path.read_bytes())
+            with self.connect() as db:
+                sample = db.execute("SELECT password_ciphertext FROM users WHERE password_ciphertext IS NOT NULL LIMIT 1").fetchone()
+            if sample:
+                cipher.decrypt(sample["password_ciphertext"].encode("ascii"))
+            return cipher
+        except RuntimeError:
+            raise
+        except (OSError, ValueError, InvalidToken, UnicodeError) as exc:
+            raise RuntimeError("Не удалось открыть ключ шифрования паролей. Проверьте хранение данных сервера.") from exc
+
+    def encrypt_password(self, password: str) -> str:
+        return self.cipher().encrypt(password.encode("utf-8")).decode("ascii")
+
+    def decrypt_password(self, value: str) -> str:
+        try:
+            return self.cipher().decrypt(value.encode("ascii")).decode("utf-8")
+        except (InvalidToken, ValueError, UnicodeError) as exc:
+            raise RuntimeError("Не удалось расшифровать пароль. Проверьте ключ шифрования.") from exc
 
 
 def public_user(user) -> dict:
@@ -305,187 +219,71 @@ def make_router(store: Store, require_admin) -> APIRouter:
             raise HTTPException(403, "Доступ только для директора")
         return user
 
-    @router.get("/api/admin/mail-settings")
-    def get_mail_settings(_: None = Depends(require_admin)):
-        try:
-            with store.connect() as db:
-                row = db.execute("SELECT provider,sender FROM mail_oauth WHERE id=1").fetchone()
-            if row:
-                return smtp_settings(row["sender"]) | {"source": "oauth", "provider": row["provider"]}
-            return smtp_settings(store.sender())
-        except RuntimeError as exc:
-            raise HTTPException(422, str(exc)) from exc
-
-    @router.put("/api/admin/mail-settings")
-    def set_mail_settings(body: MailSettings, _: None = Depends(require_admin)):
-        sender = str(body.sender).strip().lower() if body.sender else None
-        try:
-            settings = smtp_settings(sender)
-        except RuntimeError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        with store.connect() as db:
-            db.execute("DELETE FROM mail_oauth")
-            if sender:
-                db.execute("INSERT INTO settings(key,value) VALUES('smtp_sender',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (sender,))
-            else:
-                db.execute("DELETE FROM settings WHERE key='smtp_sender'")
-        return settings
-
-    def admin_binding(authorization: str, x_admin_token: str) -> str:
-        token = authorization.removeprefix("Bearer ").strip() if authorization.startswith("Bearer ") else x_admin_token.strip()
-        if not token:
-            raise HTTPException(401, "Для подключения войдите в админку заново")
-        return mail_oauth.digest(token)
-
-    @router.post("/api/admin/mail-oauth/start")
-    def oauth_start(body: OAuthStart, _: None = Depends(require_admin), authorization: str = Header(default=""), x_admin_token: str = Header(default="", alias="X-Admin-Token")):
-        binding = admin_binding(authorization, x_admin_token)
-        sender = str(body.sender).strip().lower()
-        nonce = secrets.token_urlsafe(32)
-        try:
-            url = mail_oauth.authorize_url(body.provider, nonce, sender)
-        except RuntimeError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        with store.connect() as db:
-            db.execute("DELETE FROM mail_oauth_pending WHERE expires<=?", (int(time.time()),))
-            db.execute("INSERT INTO mail_oauth_pending VALUES (?,?,?,?,?)", (mail_oauth.digest(nonce), binding, body.provider, sender, int(time.time()) + 600))
-        return {"url": url}
-
-    @router.post("/api/admin/mail-oauth/complete")
-    def oauth_complete(body: OAuthComplete, _: None = Depends(require_admin), authorization: str = Header(default=""), x_admin_token: str = Header(default="", alias="X-Admin-Token")):
-        binding = admin_binding(authorization, x_admin_token)
-        state_hash = mail_oauth.digest(body.state)
-        with store.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM mail_oauth_pending WHERE state_hash=? AND admin_hash=? AND expires>?", (state_hash, binding, int(time.time()))).fetchone()
-            if not row:
-                raise HTTPException(400, "Ссылка авторизации недействительна или истекла. Начните подключение заново.")
-            db.execute("DELETE FROM mail_oauth_pending WHERE state_hash=?", (state_hash,))
-        try:
-            tokens = mail_oauth.tokens_request(row["provider"], {"grant_type": "authorization_code", "code": body.code})
-            if not tokens.get("refresh_token"):
-                raise RuntimeError("Провайдер не выдал refresh token. Проверьте настройки приложения и повторите подключение.")
-            mail_oauth.verify_smtp(row["provider"], row["sender"], tokens["access_token"])
-            sealed = mail_oauth.encrypted(tokens)
-        except RuntimeError as exc:
-            raise HTTPException(502, str(exc)) from exc
-        with store.connect() as db:
-            db.execute("INSERT INTO mail_oauth VALUES (1,?,?,?) ON CONFLICT(id) DO UPDATE SET provider=excluded.provider,sender=excluded.sender,tokens=excluded.tokens", (row["provider"], row["sender"], sealed))
-        return {"sender": row["sender"], "provider": row["provider"]}
+    def explicit_admin(_: None = Depends(require_admin), authorization: str = Header(default=""), x_admin_token: str = Header(default="", alias="X-Admin-Token")) -> None:
+        # Не разрешаем доступ только по cookie: это предотвращает межсайтовые формы.
+        if not (authorization.startswith("Bearer ") and authorization[7:].strip()) and not x_admin_token.strip():
+            raise HTTPException(401, "Для управления пользователями войдите в админку заново")
 
     @router.get("/api/admin/users")
-    def list_users(_: None = Depends(require_admin)):
+    def list_users(_: None = Depends(explicit_admin)):
         with store.connect() as db:
             rows = db.execute("SELECT id,email,role FROM users WHERE active=1 ORDER BY email").fetchall()
         return {"users": [public_user(row) for row in rows]}
 
     @router.post("/api/admin/users", status_code=201)
-    def create_user(body: NewUser, _: None = Depends(require_admin)):
+    def create_user(body: NewUser, _: None = Depends(explicit_admin)):
         email = str(body.email).strip().lower()
         uid, password = secrets.token_hex(16), secrets.token_urlsafe(18)
         try:
+            encrypted = store.encrypt_password(password)
             with store.connect() as db:
-                db.execute("INSERT INTO users (id,email,role,password_hash,created_at) VALUES (?,?,?,?,?)", (uid, email, body.role, hash_password(password), iso(now())))
+                db.execute("INSERT INTO users (id,email,role,password_hash,password_ciphertext,must_change,active,created_at) VALUES (?,?,?,?,?,1,1,?)", (uid, email, body.role, hash_password(password), encrypted, iso(now())))
         except sqlite3.IntegrityError:
             raise HTTPException(409, "Пользователь с таким e-mail уже существует")
-        try:
-            sender, access = store.credentials()
-            if access: send_registration(email, body.role, password, sender, access)
-            else: send_registration(email, body.role, password, sender)
         except RuntimeError as exc:
-            with store.connect() as db:
-                db.execute("DELETE FROM users WHERE id=? AND active=0", (uid,))
-            raise HTTPException(503, str(exc))
-        with store.connect() as db:
-            db.execute("UPDATE users SET active=1 WHERE id=?", (uid,))
-        return {"user": {"id": uid, "email": email, "role": body.role}, "message": "Письмо отправлено"}
+            raise HTTPException(503, str(exc)) from exc
+        return {"user": {"id": uid, "email": email, "role": body.role}, "password": password}
 
-    @router.delete("/api/admin/users/{user_id}")
-    def delete_user(user_id: str, _: None = Depends(require_admin)):
-        try:
-            sender, access = store.credentials()
-        except RuntimeError as exc:
-            raise HTTPException(503, f"Пользователь не удалён. {exc}") from exc
+    @router.post("/api/admin/users/{user_id}/password")
+    def reveal_password(user_id: str, _: None = Depends(explicit_admin)):
         with store.connect() as db:
-            # Сериализуем удаление и отправку, чтобы параллельные запросы не
-            # отправляли несколько уведомлений и не меняли ту же учётную запись.
+            row = db.execute("SELECT password_ciphertext FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Пользователь не найден")
+        if not row["password_ciphertext"]:
+            raise HTTPException(409, "Старый пароль нельзя восстановить. Обновите пароль пользователя.")
+        try:
+            return {"password": store.decrypt_password(row["password_ciphertext"])}
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+
+    @router.post("/api/admin/users/{user_id}/password/reset")
+    def reset_password(user_id: str, _: None = Depends(explicit_admin)):
+        password = secrets.token_urlsafe(18)
+        try:
+            encrypted = store.encrypt_password(password)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        with store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT id,email FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+            row = db.execute("SELECT email FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
             if not row:
                 raise HTTPException(404, "Пользователь не найден")
-            try:
-                if access: send_account_deleted(row["email"], sender, access)
-                else: send_account_deleted(row["email"], sender)
-            except RuntimeError as exc:
-                raise HTTPException(503, f"Пользователь не удалён. {exc}") from exc
+            db.execute("UPDATE users SET password_hash=?,password_ciphertext=?,must_change=1 WHERE id=?", (hash_password(password), encrypted, user_id))
             db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
-            db.execute("DELETE FROM password_resets WHERE user_id=?", (user_id,))
             db.execute("DELETE FROM login_attempts WHERE key=?", (hashlib.sha256(row["email"].encode()).hexdigest(),))
-            # Задачи остаются для истории, но учетная запись и e-mail для входа удаляются.
-            db.execute("UPDATE users SET active=0, email=?, password_hash='', must_change=1 WHERE id=?", (f"__deleted__:{user_id}", user_id))
-        return {"ok": True, "message": "Пользователь удалён, уведомление отправлено"}
+        return {"password": password}
 
-    def deliver_reset(user_id: str, email: str, role: str, code: str, code_hash: str, sender: str | None) -> None:
-        try:
-            active_sender, access = store.credentials()
-            if access: send_password_reset(email, role, code, active_sender, access)
-            else: send_password_reset(email, role, code, active_sender)
-        except Exception:
-            # Ошибка доставки не раскрывается пользователю и не оставляет рабочий код.
-            with store.connect() as db:
-                db.execute("DELETE FROM password_resets WHERE user_id=? AND token_hash=?", (user_id, code_hash))
-
-    @router.post("/api/staff/password-reset/request")
-    def request_reset(body: ResetRequest, request: Request, background: BackgroundTasks):
-        email = str(body.email).strip().lower()
-        current = int(time.time())
-        key = hashlib.sha256((body.role + ":" + email).encode()).hexdigest()
-        peer = request.client.host if request.client else "unknown"
-        ip_key = hashlib.sha256(peer.encode()).hexdigest()
-        delivery = None
+    @router.delete("/api/admin/users/{user_id}")
+    def delete_user(user_id: str, _: None = Depends(explicit_admin)):
         with store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            db.execute("DELETE FROM reset_throttle WHERE requested_at<?", (current - 86400,))
-            db.execute("DELETE FROM reset_ip_throttle WHERE window_start<?", (current - 3600,))
-            db.execute("DELETE FROM password_resets WHERE expires<=?", (current,))
-            ip_limit = db.execute("SELECT * FROM reset_ip_throttle WHERE key=?", (ip_key,)).fetchone()
-            count = ip_limit["count"] if ip_limit and ip_limit["window_start"] > current - 60 else 0
-            window = ip_limit["window_start"] if count else current
-            db.execute("INSERT INTO reset_ip_throttle VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET window_start=excluded.window_start, count=excluded.count", (ip_key, window, count + 1))
-            last = db.execute("SELECT requested_at FROM reset_throttle WHERE key=?", (key,)).fetchone()
-            allowed = count < 20 and (not last or last["requested_at"] <= current - 60)
-            if allowed:
-                db.execute("INSERT INTO reset_throttle VALUES (?,?) ON CONFLICT(key) DO UPDATE SET requested_at=excluded.requested_at", (key, current))
-                user = db.execute("SELECT id FROM users WHERE email=? AND role=? AND active=1", (email, body.role)).fetchone()
-                if user:
-                    code = secrets.token_urlsafe(32)
-                    code_hash = token_hash(code)
-                    db.execute("INSERT INTO password_resets(user_id,token_hash,expires,attempts) VALUES (?,?,?,0) ON CONFLICT(user_id) DO UPDATE SET token_hash=excluded.token_hash, expires=excluded.expires, attempts=0", (user["id"], code_hash, current + RESET_TTL))
-                    sender_row = db.execute("SELECT value FROM settings WHERE key='smtp_sender'").fetchone()
-                    delivery = (user["id"], email, body.role, code, code_hash, sender_row["value"] if sender_row else None)
-        if delivery:
-            background.add_task(deliver_reset, *delivery)
-        return {"message": "Если учётная запись существует и почта настроена, письмо с кодом будет отправлено. Повторный запрос возможен через минуту."}
-
-    @router.post("/api/staff/password-reset/confirm")
-    def confirm_reset(body: ResetConfirm):
-        email = str(body.email).strip().lower()
-        current = int(time.time())
-        success = False
-        with store.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT users.id, password_resets.token_hash, password_resets.expires, password_resets.attempts FROM users JOIN password_resets ON password_resets.user_id=users.id WHERE users.email=? AND users.role=? AND users.active=1", (email, body.role)).fetchone()
-            if row and row["expires"] > current and row["attempts"] < 10:
-                if hmac.compare_digest(row["token_hash"], token_hash(body.code.strip())):
-                    db.execute("UPDATE users SET password_hash=?, must_change=0 WHERE id=?", (hash_password(body.password), row["id"]))
-                    db.execute("DELETE FROM sessions WHERE user_id=?", (row["id"],))
-                    db.execute("DELETE FROM password_resets WHERE user_id=?", (row["id"],))
-                    db.execute("DELETE FROM login_attempts WHERE key=?", (hashlib.sha256(email.encode()).hexdigest(),))
-                    success = True
-                else:
-                    db.execute("UPDATE password_resets SET attempts=attempts+1 WHERE user_id=?", (row["id"],))
-        if not success:
-            raise HTTPException(400, "Неверный или истёкший код. Запросите восстановление ещё раз.")
+            row = db.execute("SELECT email FROM users WHERE id=? AND active=1", (user_id,)).fetchone()
+            if not row:
+                raise HTTPException(404, "Пользователь не найден")
+            db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
+            db.execute("DELETE FROM login_attempts WHERE key=?", (hashlib.sha256(row["email"].encode()).hexdigest(),))
+            db.execute("UPDATE users SET active=0,email=?,password_hash='',password_ciphertext=NULL,must_change=1 WHERE id=?", (f"__deleted__:{user_id}", user_id))
         return {"ok": True}
 
     @router.post("/api/staff/login")
@@ -524,8 +322,15 @@ def make_router(store: Store, require_admin) -> APIRouter:
     def change_password(body: PasswordChange, user: dict = Depends(require_staff)):
         if check_password(body.password, user["password_hash"]):
             raise HTTPException(422, "Новый пароль должен отличаться от текущего")
+        try:
+            encrypted = store.encrypt_password(body.password)
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
         with store.connect() as db:
-            db.execute("UPDATE users SET password_hash=?, must_change=0 WHERE id=?", (hash_password(body.password), user["id"]))
+            db.execute("BEGIN IMMEDIATE")
+            updated = db.execute("UPDATE users SET password_hash=?,password_ciphertext=?,must_change=0 WHERE id=? AND active=1 AND password_hash=? AND EXISTS (SELECT 1 FROM sessions WHERE user_id=? AND token_hash=? AND expires>?)", (hash_password(body.password), encrypted, user["id"], user["password_hash"], user["id"], user["token_hash"], int(time.time())))
+            if not updated.rowcount:
+                raise HTTPException(401, "Сессия истекла — войдите заново")
             db.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?", (user["id"], user["token_hash"]))
         return {"ok": True}
 

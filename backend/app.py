@@ -147,18 +147,25 @@ def require_admin(
         raise HTTPException(status_code=401, detail="Требуется вход администратора")
 
 
+def require_admin_header(
+    authorization: str = Header(default=""),
+    x_admin_token: str = Header(default="", alias="X-Admin-Token"),
+) -> None:
+    # Для работы с паролями cookie недостаточно: обязательный проверенный заголовок защищает от CSRF.
+    tokens = (authorization.removeprefix("Bearer ").strip(), x_admin_token.strip())
+    if not any(_check_token(token) for token in tokens if token):
+        raise HTTPException(status_code=401, detail="Требуется вход администратора")
+
+
 # Персональные данные не включаются в GitHub-бэкап публичного расписания.
 staff_store = staff.Store(DATA_DIR / "staff.sqlite3")
-app.include_router(staff.make_router(staff_store, require_admin))
+app.include_router(staff.make_router(staff_store, require_admin_header))
 
 
 @app.middleware("http")
 async def private_no_cache(request, call_next):
-    # Авторизационный код нужен только браузеру; не передаём query в access log Uvicorn.
-    if request.url.path == "/mail-oauth/callback":
-        request.scope["query_string"] = b""
     response = await call_next(request)
-    if request.url.path.startswith(("/api/staff/", "/api/admin/users", "/api/admin/mail-settings", "/api/admin/mail-oauth/")) or request.url.path in ("/Director", "/associate", "/mail-oauth/callback"):
+    if request.url.path.startswith(("/api/staff/", "/api/admin/users")) or request.url.path in ("/Director", "/associate"):
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
     return response
@@ -537,11 +544,6 @@ def director_page() -> FileResponse:
 @app.get("/associate", include_in_schema=False)
 def associate_page() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "staff.html", headers={"Cache-Control": "no-store"})
-
-
-@app.get("/mail-oauth/callback", include_in_schema=False)
-def mail_oauth_callback_page() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "mail-oauth-callback.html", headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "Content-Security-Policy": "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'"})
 
 
 @app.get("/healthz", include_in_schema=False)
