@@ -9,7 +9,13 @@ const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false}
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js','utf8'),context);
 (async()=>{
  await vm.runInContext('staffToken="token"; showSession({user:{role:"director",full_name:"Петров Пётр",email:"director@example.com"},must_change:false})',context);
- assert.equal(el('staffIdentity').textContent,'Петров Пётр');
+ assert.equal(el('staffIdentity').textContent,'Петров Пётр · Директор');
+ vm.runInContext('showIdentity({full_name:"Иванов Иван",role:"associate"})',context);
+ assert.equal(el('staffIdentity').textContent,'Иванов Иван · Заместитель директора');
+ vm.runInContext('showIdentity({full_name:"Сидорова Анна",role:"teacher"})',context);
+ assert.equal(el('staffIdentity').textContent,'Сидорова Анна · Учитель');
+ vm.runInContext('showIdentity({full_name:"",role:"teacher"})',context);
+ assert.equal(el('staffIdentity').textContent,'ФИО не указано — заполните профиль · Учитель');
  assert.match(el('taskAssignee').innerHTML,/Иванов Иван \(11111111\)/);
  assert.match(el('taskAssignee').innerHTML,/Иванов Иван \(22222222\)/);
  assert.match(el('taskAssignee').innerHTML,/>ФИО не указано \(333\)/);

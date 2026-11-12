@@ -5,6 +5,8 @@ const role=location.pathname==="/Director"?"director":location.pathname==="/teac
 const manager=role!=="teacher", key=`schedule_staff_${role}`;
 let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false;
 byId("pageTitle").textContent=role==="director"?"Кабинет директора":role==="associate"?"Кабинет заместителя директора":"Кабинет учителя";
+const roleNames={director:"Директор",associate:"Заместитель директора",teacher:"Учитель"};
+function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${roleNames[user.role]||"Сотрудник"}`;}
 const statuses={pending:"В работе",overdue:"Просрочено",completed_on_time:"Выполнено в срок",completed_late:"Выполнено с просрочкой"};
 function screen(id){["staffLoginCard","changePasswordCard","staffPanel"].forEach(x=>byId(x).classList.toggle("hidden",x!==id));}
 function errorAt(id,error){byId(id).innerHTML=`<div class="alert err">${escapeHTML(error.message)}</div>`;}
@@ -22,7 +24,7 @@ async function showSession(data){
   staffUser=data.user;
   if(staffUser.role!==role){staffToken="";sessionStorage.removeItem(key);screen("staffLoginCard");throw new Error("Откройте кабинет вашей роли");}
   if(data.must_change){screen("changePasswordCard");return;}
-  screen("staffPanel");byId("staffIdentity").textContent=staffUser.full_name||"ФИО не указано — заполните профиль";
+  screen("staffPanel");showIdentity(staffUser);
   byId("staffFullName").value=staffUser.full_name||"";byId("profileResult").innerHTML="";
   byId("createTaskCard").classList.toggle("hidden",!manager);byId("projectCreateCard").classList.toggle("hidden",!manager);
   if(manager)await loadAssignees();
@@ -89,7 +91,7 @@ byId("staffPasswordForm").onsubmit=async e=>{
 };
 byId("staffProfileForm").onsubmit=async e=>{
   e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("profileResult").innerHTML="";
-  try{const data=await request("/api/staff/profile",{method:"PUT",body:{full_name:byId("staffFullName").value}});staffUser=data.user;byId("staffFullName").value=staffUser.full_name;byId("staffIdentity").textContent=staffUser.full_name;byId("profileResult").innerHTML='<div class="alert ok">ФИО сохранено.</div>';}
+  try{const data=await request("/api/staff/profile",{method:"PUT",body:{full_name:byId("staffFullName").value}});staffUser=data.user;byId("staffFullName").value=staffUser.full_name;showIdentity(staffUser);byId("profileResult").innerHTML='<div class="alert ok">ФИО сохранено.</div>';}
   catch(error){errorAt("profileResult",error);}finally{button.disabled=false;}
 };
 byId("projectForm").onsubmit=async e=>{
