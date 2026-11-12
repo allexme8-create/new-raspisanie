@@ -372,6 +372,12 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/staff/notifications").status_code,401)
         self.client.post(url+"/comments",headers=ah,json={"text":"Автор"})
         self.assertEqual(self.client.get("/api/staff/notifications",headers=ah).json()["notifications"],[])
+        assignee_notifications = self.client.get("/api/staff/notifications",headers=th).json()["notifications"]
+        self.assertEqual(len(assignee_notifications),1)
+        self.assertEqual(assignee_notifications[0]["kind"],"comment")
+        self.assertEqual(assignee_notifications[0]["task_id"],task["id"])
+        seen = self.client.get(url+"/comments",headers=th).json()["notification_through_id"]
+        self.client.post(url+"/notifications/read",headers=th,json={"through_id":seen})
         self.client.post(url+"/comments",headers=th,json={"text":"Выполняю"})
         first=self.client.get("/api/staff/notifications",headers=ah).json()["notifications"]
         self.assertEqual(len(first),1)
@@ -383,6 +389,10 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/staff/notifications",headers=th).json()["notifications"],[])
         snapshot=self.client.get(url+"/comments",headers=ah).json()["notification_through_id"]
         self.client.post(url+"/comments",headers=hh,json={"text":"Помогаю"})
+        helper_notice = self.client.get("/api/staff/notifications",headers=th).json()["notifications"]
+        self.assertEqual(len(helper_notice),1)
+        self.assertEqual(helper_notice[0]["kind"],"comment")
+        self.assertEqual(self.client.get("/api/staff/notifications",headers=hh).json()["notifications"],[])
         self.client.post(url+"/notifications/read",headers=th,json={"through_id":snapshot})
         self.assertEqual(len(self.client.get("/api/staff/notifications",headers=ah).json()["notifications"]),2)
         self.client.post(url+"/notifications/read",headers=ah,json={"through_id":snapshot})
@@ -400,6 +410,29 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/staff/notifications",headers=ah).json()["notifications"],[])
         self.client.post(url+"/comments",headers=th,json={"text":"Ещё"})
         self.assertEqual(len(self.client.get("/api/staff/notifications",headers=ah).json()["notifications"]),1)
+
+    def test_assignee_comment_notifications_for_standalone_task(self):
+        director=self.create("director2@example.com", "director")
+        teacher=self.create("teacher2@example.com", "teacher")
+        dh,_=self.ready("director2@example.com", "director", director["password"])
+        th,_=self.ready("teacher2@example.com", "teacher", teacher["password"])
+        body={"assignee_id":teacher["user"]["id"], "description":"Обычная задача", "deadline":(staff.now()+timedelta(days=1)).isoformat()}
+        task=self.client.post("/api/staff/tasks",headers=dh,json=body).json()["task"]
+        url=f"/api/staff/tasks/{task['id']}"
+        self.client.post(url+"/comments",headers=dh,json={"text":"Комментарий руководителя"})
+        self.client.post(url+"/comments",headers=th,json={"text":"Ответ"})
+        director_notice=self.client.get("/api/staff/notifications",headers=dh).json()["notifications"]
+        teacher_notice=self.client.get("/api/staff/notifications",headers=th).json()["notifications"]
+        self.assertEqual(len(director_notice),1)
+        self.assertEqual(len(teacher_notice),1)
+        self.assertIsNone(teacher_notice[0]["project_id"])
+        snapshot=self.client.get(url+"/comments",headers=th).json()["notification_through_id"]
+        self.client.post(url+"/comments",headers=dh,json={"text":"Новое после просмотра"})
+        self.client.post(url+"/notifications/read",headers=th,json={"through_id":snapshot})
+        self.assertEqual(len(self.client.get("/api/staff/notifications",headers=th).json()["notifications"]),1)
+        self.assertEqual(len(self.client.get("/api/staff/notifications",headers=dh).json()["notifications"]),1)
+        self.store.init()
+        self.assertEqual(len(self.client.get("/api/staff/notifications",headers=th).json()["notifications"]),1)
 
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")

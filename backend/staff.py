@@ -640,6 +640,12 @@ def make_router(store: Store, require_admin) -> APIRouter:
             check_task_access(db, task_id, user)
             db.execute("INSERT INTO task_comments VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], body.text, iso(now())))
             notify_initiator(db, task_id, user["id"], "comment")
+            # Исполнитель тоже получает комментарии от автора и соисполнителей,
+            # но не уведомления о собственных сообщениях.
+            db.execute("""INSERT INTO task_notifications (task_id, recipient_id, actor_id, kind, created_at)
+                SELECT tasks.id, tasks.assignee_id, ?, 'comment', ? FROM tasks JOIN users ON users.id=tasks.assignee_id
+                WHERE tasks.id=? AND tasks.assignee_id<>? AND tasks.assignee_id<>tasks.director_id AND users.active=1""",
+                (user["id"], iso(now()), task_id, user["id"]))
         return {"ok": True}
 
     return router
