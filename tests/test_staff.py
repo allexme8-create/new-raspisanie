@@ -562,12 +562,24 @@ class StaffTests(unittest.TestCase):
         notifications=self.client.get("/api/staff/notifications",headers=dh).json()["notifications"]
         self.assertEqual([n["kind"] for n in notifications], ["completion_undone","completed"])
         history=self.client.get(url+"/comments",headers=th).json()["events"]
-        self.assertTrue(any("снял отметку" in e["text"] and complete["completed_at"] in e["text"] for e in history))
+        self.assertFalse(any("снял отметку" in e["text"] or e["text"] == "Задача выполнена" for e in history))
         again=self.client.put(url+"/completion",headers=th,json={"completed":True,"cycle":1}).json()["task"]
         self.assertEqual(self.client.put(url+"/completion",headers=th,json=undo | {"cycle":1}).status_code,409)
         self.client.post(url+"/approve",headers=dh,json={"expected_completed_at":again["completed_at"]})
         self.assertEqual(self.client.put(url+"/completion",headers=th,json={"completed":False,"cycle":1,"expected_completed_at":again["completed_at"]}).status_code,409)
         self.assertIsNotNone(self.client.get("/api/staff/tasks",headers=th).json()["tasks"][0]["approved_at"])
+        history=self.client.get(url+"/comments",headers=th).json()["events"]
+        self.assertEqual(sum(e["text"] == "Задача выполнена" for e in history),1)
+        self.assertFalse(any("снял отметку" in e["text"] for e in history))
+
+    def test_hidden_accidental_completion_keeps_previous_rework_history(self):
+        events = [{"id":str(i),"text":text} for i,text in enumerate([
+            "Задача создана", "Задача выполнена", "Возвращено на доработку. Причина: исправить",
+            "Исполнитель снял отметку выполнения (отмечено ранее: старый импорт)",
+            "Задача выполнена", "Исполнитель снял отметку выполнения (отмечено ранее: сейчас)",
+            "Задача выполнена", "Инициатор подтвердил: выполнено полностью"])]
+        visible = staff.visible_task_events(events)
+        self.assertEqual([e["text"] for e in visible], ["Задача создана", "Задача выполнена", "Возвращено на доработку. Причина: исправить", "Задача выполнена", "Инициатор подтвердил: выполнено полностью"])
 
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")

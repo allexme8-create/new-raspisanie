@@ -316,6 +316,30 @@ def public_user(user) -> dict:
     return {key: user[key] for key in ("id", "email", "role", "full_name", "position")}
 
 
+def visible_task_events(events) -> list[dict]:
+    """Hide accidental completion and its cancellation from the task history.
+
+    Keep the stored events for audit, and never remove completions from an earlier
+    rework cycle when a legacy completion has no corresponding event.
+    """
+    visible = []
+    last_completion = None
+    for row in events:
+        event = dict(row)
+        text = event["text"]
+        if text.startswith("Исполнитель снял отметку выполнения ("):
+            if last_completion is not None:
+                visible[last_completion] = None
+            last_completion = None
+        else:
+            visible.append(event)
+            if text == "Задача выполнена":
+                last_completion = len(visible) - 1
+            elif text.startswith("Возвращено на доработку.") or text == "Инициатор подтвердил: выполнено полностью":
+                last_completion = None
+    return [event for event in visible if event is not None]
+
+
 def task_json(row, current: datetime | None = None) -> dict:
     due = datetime.fromisoformat(row["deadline"])
     completed = datetime.fromisoformat(row["completed_at"]) if row["completed_at"] else None
@@ -773,7 +797,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS author_position
                 FROM task_events JOIN users ON users.id=task_events.author_id WHERE task_events.task_id=? ORDER BY task_events.created_at,task_events.id""", (task_id,)).fetchall()
             through = db.execute("SELECT MAX(id) FROM task_notifications WHERE task_id=? AND recipient_id=? AND read_at IS NULL", (task_id, user["id"])).fetchone()[0]
-        return {"comments": [dict(row) for row in rows], "events": [dict(row) for row in events], "notification_through_id": through}
+        return {"comments": [dict(row) for row in rows], "events": visible_task_events(events), "notification_through_id": through}
 
     @router.post("/api/staff/tasks/{task_id}/comments", status_code=201)
     def add_comment(task_id: str, body: TaskComment, user: dict = Depends(ready_user)):
