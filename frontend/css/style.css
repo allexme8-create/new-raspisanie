@@ -63,7 +63,23 @@ main{max-width:1100px;margin:0 auto;padding:14px 16px 40px}
 .fav-head .rm-fav{margin-left:auto;border:0;background:none;color:var(--muted);cursor:pointer;font-size:12.5px;text-decoration:underline;padding:4px}
 .search{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px;margin-bottom:10px;background:#fff}
 
-.selection-summary,.mobile-week{display:none}
+.mobile-week{display:none}
+.home-card{padding:24px}
+.home-intro,.picker-hint{color:var(--muted);font-size:14px;margin:0 0 16px}
+.home-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.home-choice{display:flex;align-items:center;gap:14px;text-align:left;padding:18px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);cursor:pointer;font:inherit}
+.home-choice:hover,.home-choice:focus-visible{border-color:var(--acc);background:var(--acc-soft)}
+.home-choice-icon{display:grid;place-items:center;flex:0 0 44px;height:44px;border-radius:12px;background:var(--acc-soft);font-size:22px}
+.home-choice strong,.home-choice small{display:block}
+.home-choice strong{font-size:16px}
+.home-choice small{margin-top:4px;color:var(--muted);font-size:13px}
+.home-choice>span:last-child{margin-left:auto;color:var(--acc);font-size:20px}
+.chips.selection-list{flex-wrap:wrap;max-height:none;overflow:visible;gap:8px}
+.selection-list .chip{min-height:42px;white-space:normal;text-align:left}
+.schedule-heading{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.schedule-heading strong{font-size:17px;overflow-wrap:anywhere}
+.change-selection{min-height:40px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--acc);font-weight:700;padding:8px 12px;cursor:pointer}
+.change-selection:hover{background:var(--acc-soft)}
 .week-scroll{overflow:auto;border:1px solid var(--line);border-radius:12px;margin-top:10px}
 table.week{border-collapse:separate;border-spacing:0;width:100%;min-width:820px;font-size:12.5px}
 .week th,.week td{border-bottom:1px solid var(--line);border-right:1px solid var(--line);padding:7px 8px;vertical-align:top;text-align:left}
@@ -157,15 +173,12 @@ footer a{color:var(--muted)}
   main{padding:10px 12px calc(86px + env(safe-area-inset-bottom))}
   .card{padding:12px}
   .stats{width:100%}
-  .selection-summary{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px}
-  .selection-summary strong{min-width:0;overflow-wrap:anywhere;font-size:16px}
-  .change-selection{flex:none;min-height:40px;border:1px solid var(--line);border-radius:10px;background:#fff;color:var(--acc);font-weight:700;padding:8px 12px;cursor:pointer}
-  .mobile-selection:not(.picker-open) .selection-picker{display:none}
-  #classArea .selection-picker .chips{flex-wrap:wrap;max-height:190px;overflow-y:auto}
-  .mobile-selection .toolbar{align-items:stretch}
-  .mobile-selection .toolbar .pills{min-width:0;flex-basis:100%}
-  .mobile-selection .pill,.mobile-selection .chip{min-height:40px}
-  .mobile-selection .fav-btn{min-height:40px}
+  .home-card{padding:16px}
+  .home-choices{grid-template-columns:1fr}
+  #classArea .toolbar,#teacherArea .toolbar{align-items:stretch}
+  #classArea .toolbar .pills,#teacherArea .toolbar .pills{min-width:0;flex-basis:100%}
+  #classArea .pill,#teacherArea .pill{min-height:40px}
+  #classArea .fav-btn,#teacherArea .fav-btn{min-height:40px}
   #classBody .week-scroll{display:none}
   .mobile-week{display:block}
   .mobile-week-day h3{margin:16px 0 8px}
@@ -179,8 +192,8 @@ footer a{color:var(--muted)}
   body.mobile-nav header.app .tabs-wrap{position:fixed;left:0;right:0;bottom:0;z-index:60;background:#fff;
     border-top:1px solid var(--line);padding:4px 8px calc(4px + env(safe-area-inset-bottom));
     box-shadow:0 -2px 12px rgba(16,24,40,.07)}
-  body.mobile-nav .tabs{background:transparent;display:grid;grid-template-columns:repeat(4,1fr);overflow:visible}
-  body.mobile-nav .tab{padding:7px 2px;font-size:11px;text-align:center;white-space:nowrap}
+  body.mobile-nav .tabs{background:transparent;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));overflow:visible}
+  body.mobile-nav .tab{padding:7px 1px;font-size:10px;text-align:center;white-space:nowrap}
   body.mobile-nav .tab.active{box-shadow:none;background:var(--acc-soft)}
   body.mobile-nav .toast{bottom:calc(76px + env(safe-area-inset-bottom))}
   .search{font-size:16px} /* против авто-зума iOS */

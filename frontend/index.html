@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Расписание уроков</title>
-<link rel="stylesheet" href="/css/style.css?v=room-live-1">
+<link rel="stylesheet" href="/css/style.css?v=schedule-selection-1">
 </head>
 <body>
 
@@ -17,7 +17,8 @@
   </div>
   <div class="app-inner tabs-wrap">
     <nav class="tabs" id="tabs">
-      <button class="tab active" data-view="view-classes">📚 Классы</button>
+      <button class="tab active" data-view="view-home">🏠 Главная</button>
+      <button class="tab" data-view="view-classes">📚 Классы</button>
       <button class="tab" data-view="view-teachers">👩‍🏫 Учителя</button>
       <button class="tab" data-view="view-rooms">🚪 Кабинеты</button>
       <button class="tab" data-view="view-fav">⭐ Избранное</button>
@@ -35,7 +36,18 @@
     <div class="lesson-live hidden" id="currentLesson" aria-live="polite"></div>
   </section>
 
-  <section id="view-classes" class="view">
+  <section id="view-home" class="view">
+    <div class="card home-card">
+      <h2>Чьё расписание посмотреть?</h2>
+      <p class="home-intro">Выберите класс или учителя, чтобы открыть расписание.</p>
+      <div class="home-choices">
+        <button class="home-choice" type="button" data-open-view="view-classes"><span class="home-choice-icon">📚</span><span><strong>Классы</strong><small>Расписание класса по дням и на неделю</small></span><span aria-hidden="true">→</span></button>
+        <button class="home-choice" type="button" data-open-view="view-teachers"><span class="home-choice-icon">👩‍🏫</span><span><strong>Учителя</strong><small>Расписание выбранного учителя</small></span><span aria-hidden="true">→</span></button>
+      </div>
+    </div>
+  </section>
+
+  <section id="view-classes" class="view hidden">
     <div class="card"><h2>Расписание по классам</h2><div id="classArea"></div></div>
   </section>
 
@@ -57,6 +69,6 @@
 </footer>
 <div class="toast" id="toast"></div>
 
-<script src="/js/app.js?v=room-live-1"></script>
+<script src="/js/app.js?v=schedule-selection-1"></script>
 </body>
 </html>

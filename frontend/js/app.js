@@ -13,7 +13,7 @@ const state={
   classes:[], teacherNames:[], rooms:[],
   curClass:null, curTeacher:null, teacherQuery:"",
   classSel:DEF_DAY, teacherSel:DEF_DAY, favDay:DEF_DAY,
-  classPickerOpen:true, teacherPickerOpen:true, roomOnlyFree:false,
+  roomOnlyFree:false,
   bellSchedule:null, secondShiftClasses:[],
   updatedAt:null
 };
@@ -136,6 +136,7 @@ async function loadSchedule(){
     state.secondShiftClasses=Array.isArray(data.second_shift_classes)?data.second_shift_classes:[];
     state.updatedAt=data.updated_at?formatDate(data.updated_at):null;
     if(!state.teachers && !state.subjects){
+      rebuildAll();
       showError("Расписание пока не загружено администратором. Зайдите позже.");
       $("currentLesson").classList.add("hidden");
       return;
@@ -321,19 +322,21 @@ function rebuildAll(){
   const data=state.teachers||state.subjects;
   state.classes=data?[...new Set(data.classes||[])]:[];
   collectTeachers(); collectRooms();
-  if(state.classes.length && !state.curClass) state.curClass=state.classes[0];
+  if(state.curClass && !state.classes.includes(state.curClass)) state.curClass=null;
+  if(state.curTeacher && !state.teacherNames.includes(state.curTeacher)) state.curTeacher=null;
   renderClassArea(); renderTeacherArea(); renderRoomsArea(); renderFavArea();
 }
 function renderClassArea(){
   const box=$("classArea");
   if(!hasData()){ box.innerHTML=noData(); return; }
-  box.innerHTML=`<div class="mobile-selection ${state.classPickerOpen?"picker-open":""}">
-    <div class="selection-summary"><strong>Класс ${esc(state.curClass||"")}</strong><button class="change-selection" id="changeClass" type="button" aria-expanded="${state.classPickerOpen}">Сменить</button></div>
-    <div class="selection-picker"><div class="chips">${state.classes.map(c=>
-    `<button class="chip ${c===state.curClass?'active':''}" data-cls="${esc(c)}">${esc(c)}</button>`).join("")}</div></div>
-    <div id="classPanel"></div></div>`;
-  $("changeClass").onclick=()=>{ state.classPickerOpen=!state.classPickerOpen; renderClassArea(); };
-  box.querySelectorAll("[data-cls]").forEach(b=>b.onclick=()=>{ state.curClass=b.dataset.cls; state.classPickerOpen=false; renderClassArea(); });
+  if(!state.curClass){
+    box.innerHTML=`<p class="picker-hint">Выберите класс</p><div class="chips wrap selection-list">${state.classes.map(c=>
+      `<button class="chip" type="button" data-cls="${esc(c)}">${esc(c)}</button>`).join("")||'<span class="muted">Классы не найдены</span>'}</div>`;
+    box.querySelectorAll("[data-cls]").forEach(b=>b.onclick=()=>{state.curClass=b.dataset.cls;renderClassArea();});
+    return;
+  }
+  box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeClass" type="button">← Все классы</button><strong>Класс ${esc(state.curClass)}</strong></div><div id="classPanel"></div>`;
+  $("changeClass").onclick=()=>{state.curClass=null;renderClassArea();};
   renderClassPanel();
 }
 function renderClassPanel(){
@@ -392,24 +395,26 @@ function renderTeacherArea(){
     box.innerHTML=hasData()?`<div class="nodata">👩‍🏫 Данные расписания учителей пока недоступны.</div>`:noData();
     return;
   }
-  box.innerHTML=`<div class="mobile-selection ${state.teacherPickerOpen?"picker-open":""}">
-    <div class="selection-summary"><strong>${esc(state.curTeacher||"Учитель")}</strong><button class="change-selection" id="changeTeacher" type="button" aria-expanded="${state.teacherPickerOpen}">Сменить</button></div>
-    <div class="selection-picker"><input class="search" id="teacherSearch" placeholder="🔍 Поиск учителя…" value="${esc(state.teacherQuery)}">
-    <div class="chips wrap" id="teacherChips"></div></div>
-    <div id="teacherPanel"></div></div>`;
-  $("changeTeacher").onclick=()=>{ state.teacherPickerOpen=!state.teacherPickerOpen; renderTeacherArea(); if(state.teacherPickerOpen) $("teacherSearch").focus(); };
+  if(state.curTeacher){
+    box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeTeacher" type="button">← Все учителя</button><strong>${esc(state.curTeacher)}</strong></div><div id="teacherPanel"></div>`;
+    $("changeTeacher").onclick=()=>{state.curTeacher=null;state.teacherQuery="";renderTeacherArea();$("teacherSearch").focus();};
+    renderTeacherPanel();
+    return;
+  }
+  box.innerHTML=`<p class="picker-hint">Выберите учителя</p>
+    <input class="search" id="teacherSearch" aria-label="Поиск учителя" placeholder="🔍 Поиск учителя…" value="${esc(state.teacherQuery)}">
+    <div class="chips wrap selection-list" id="teacherChips"></div>`;
   const inp=$("teacherSearch");
   const drawChips=()=>{
     const q=inp.value.trim().toLowerCase();
     $("teacherChips").innerHTML=state.teacherNames
       .filter(n=>!q||n.toLowerCase().includes(q))
-      .map(n=>`<button class="chip ${n===state.curTeacher?'active':''}" data-t="${esc(n)}">${favs.teachers.includes(n)?"★ ":""}${esc(n)}</button>`)
+      .map(n=>`<button class="chip" type="button" data-t="${esc(n)}">${favs.teachers.includes(n)?"★ ":""}${esc(n)}</button>`)
       .join("")||`<span class="muted">Никого не найдено</span>`;
-    $("teacherChips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{ state.curTeacher=b.dataset.t; state.teacherPickerOpen=false; renderTeacherArea(); });
+    $("teacherChips").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{state.curTeacher=b.dataset.t;renderTeacherArea();});
   };
-  inp.oninput=()=>{ state.teacherQuery=inp.value; drawChips(); };
+  inp.oninput=()=>{state.teacherQuery=inp.value;drawChips();};
   drawChips();
-  renderTeacherPanel();
 }
 function renderTeacherPanel(){
   const p=$("teacherPanel"); if(!p) return;
@@ -421,7 +426,7 @@ function renderTeacherPanel(){
   let total=0; DAYS.forEach(d=>total+=teacherDayRows(name,d).length);
   p.innerHTML=`
     <div class="toolbar"><div class="pills">${pills}</div>${favBtn("teachers",name)}</div>
-    <p class="ttotal">${esc(name)}: ${total} уроков в неделю</p>
+    <p class="ttotal">Уроков в неделю: ${total}</p>
     <div id="teacherOut"></div>`;
   p.querySelectorAll("[data-ts]").forEach(b=>b.onclick=()=>{ state.teacherSel=b.dataset.ts==="all"?"all":+b.dataset.ts; renderTeacherPanel(); });
   renderTeacherSchedule();
@@ -560,12 +565,17 @@ function setupMobileNav(){
   apply();
 }
 
-document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>{
-  document.querySelectorAll(".tab").forEach(x=>x.classList.remove("active"));
-  t.classList.add("active");
-  document.querySelectorAll(".view").forEach(v=>v.classList.add("hidden"));
-  $(t.dataset.view).classList.remove("hidden");
-});
+function showView(viewId){
+  document.querySelectorAll(".tab").forEach(tab=>tab.classList.toggle("active",tab.dataset.view===viewId));
+  document.querySelectorAll(".view").forEach(view=>view.classList.toggle("hidden",view.id!==viewId));
+}
+function openPicker(viewId){
+  if(viewId==="view-classes"){state.curClass=null;renderClassArea();}
+  if(viewId==="view-teachers"){state.curTeacher=null;state.teacherQuery="";renderTeacherArea();}
+  showView(viewId);
+}
+document.querySelectorAll(".tab").forEach(tab=>tab.onclick=()=>showView(tab.dataset.view));
+document.querySelectorAll("[data-open-view]").forEach(button=>button.onclick=()=>openPicker(button.dataset.openView));
 
 $("reloadBtn").onclick=()=>loadSchedule();
 

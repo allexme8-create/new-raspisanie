@@ -57,6 +57,12 @@ const context = {
   fetch: async () => ({ ok: true, json: async () => ({}) }),
 };
 vm.createContext(context);
+const page = fs.readFileSync("frontend/index.html", "utf8");
+assert.match(page, /id="view-home" class="view"/);
+assert.match(page, /id="view-classes" class="view hidden"/);
+assert.match(page, /id="view-teachers" class="view hidden"/);
+assert.match(page, /data-open-view="view-classes"/);
+assert.match(page, /data-open-view="view-teachers"/);
 const app = fs.readFileSync("frontend/js/app.js", "utf8");
 vm.runInContext(app, context, { filename: "frontend/js/app.js" });
 
@@ -185,23 +191,42 @@ vm.runInContext(`
 assert.equal(context.localNumberingResult.global, false);
 assert.ok(context.localNumberingResult.teachers.includes("Мария Ивановна"));
 
-// Выбор сворачивает список, а кнопка «Сменить» открывает его снова.
+// В списке нет расписания; выбор показывает отдельную карточку с возвратом.
 const classButton = {dataset: {cls: "6а"}};
 const teacherButton = {dataset: {t: "Иванова ИИ"}};
 element("classArea").querySelectorAll = selector => selector === "[data-cls]" ? [classButton] : [];
 element("teacherChips").querySelectorAll = selector => selector === ".chip" ? [teacherButton] : [];
-vm.runInContext(`state.teacherNames=["Иванова ИИ"]; renderClassArea(); renderTeacherArea();`, context);
+vm.runInContext(`state.curClass=null; state.curTeacher=null; state.teacherNames=["Иванова ИИ"]; renderClassArea(); renderTeacherArea();`, context);
+assert.match(element("classArea").innerHTML, /Выберите класс/);
+assert.doesNotMatch(element("classArea").innerHTML, /classPanel/);
+assert.match(element("teacherArea").innerHTML, /teacherSearch/);
+assert.doesNotMatch(element("teacherArea").innerHTML, /teacherPanel/);
 classButton.onclick();
 teacherButton.onclick();
-assert.match(element("classArea").innerHTML, /mobile-selection "/);
-assert.match(element("teacherArea").innerHTML, /mobile-selection "/);
+assert.match(element("classArea").innerHTML, /Класс 6а/);
+assert.match(element("classArea").innerHTML, /classPanel/);
+assert.doesNotMatch(element("classArea").innerHTML, /data-cls=/);
 assert.match(element("teacherArea").innerHTML, /Иванова ИИ/);
-assert.match(element("classArea").innerHTML, /aria-expanded="false"/);
+assert.match(element("teacherArea").innerHTML, /teacherPanel/);
+assert.doesNotMatch(element("teacherArea").innerHTML, /teacherSearch/);
 element("changeClass").onclick();
 element("changeTeacher").onclick();
-assert.match(element("classArea").innerHTML, /mobile-selection picker-open/);
-assert.match(element("teacherArea").innerHTML, /mobile-selection picker-open/);
-assert.match(element("teacherArea").innerHTML, /aria-expanded="true"/);
+assert.match(element("classArea").innerHTML, /Выберите класс/);
+assert.match(element("teacherArea").innerHTML, /teacherSearch/);
+
+// Главный экран и кнопки навигации переключают вид без смешивания разделов.
+const home = element("view-home"), classesView = element("view-classes"), teachersView = element("view-teachers");
+const homeTab = {...element("tab-home"), dataset: {view:"view-home"}};
+const classesTab = {...element("tab-classes"), dataset: {view:"view-classes"}};
+context.document.querySelectorAll = selector => selector === ".view" ? [home,classesView,teachersView] : selector === ".tab" ? [homeTab,classesTab] : [];
+vm.runInContext(`showView("view-classes")`, context);
+assert.equal(home.classList.contains("hidden"), true);
+assert.equal(classesView.classList.contains("hidden"), false);
+assert.equal(teachersView.classList.contains("hidden"), true);
+assert.equal(classesTab.classList.contains("active"), true);
+vm.runInContext(`showView("view-home")`, context);
+assert.equal(home.classList.contains("hidden"), false);
+assert.equal(classesView.classList.contains("hidden"), true);
 
 // Занятость кабинета зависит от фактического времени обеих смен.
 vm.runInContext(`
