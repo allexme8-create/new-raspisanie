@@ -8,7 +8,7 @@ import secrets
 import sqlite3
 import tempfile
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Literal
@@ -150,6 +150,15 @@ class DutyBooking(BaseModel):
     @classmethod
     def clean_class(cls, value: str) -> str:
         return " ".join(value.split())
+
+
+class DutyWeekTemplate(BaseModel):
+    # Monday to Friday; null leaves the weekday unassigned.
+    deputies: list[str | None] = Field(min_length=5, max_length=5)
+
+
+class DutyAdminOverride(BaseModel):
+    user_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 class Complete(BaseModel):
@@ -301,6 +310,11 @@ class Store:
                 day TEXT NOT NULL, slot INTEGER NOT NULL CHECK(slot IN (0,1,2)),
                 user_id TEXT NOT NULL REFERENCES users(id), class_name TEXT NOT NULL DEFAULT '',
                 PRIMARY KEY(day,slot), UNIQUE(day,user_id))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS duty_weekly_template (
+                effective_day TEXT NOT NULL, weekday INTEGER NOT NULL CHECK(weekday BETWEEN 0 AND 4),
+                user_id TEXT REFERENCES users(id), PRIMARY KEY(effective_day,weekday))""")
+            db.execute("""CREATE TABLE IF NOT EXISTS duty_admin_overrides (
+                day TEXT PRIMARY KEY, user_id TEXT REFERENCES users(id))""")
             # Почтовые настройки и коды больше не используются.
             for name in ("mail_oauth", "mail_oauth_pending", "password_resets", "reset_throttle", "reset_ip_throttle"):
                 db.execute(f"DROP TABLE IF EXISTS {name}")
@@ -560,12 +574,85 @@ def make_router(store: Store, require_admin) -> APIRouter:
             CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''),CASE users.role WHEN 'teacher' THEN 'Учитель' ELSE 'Заместитель директора' END) ELSE '' END AS position
             FROM duty_assignments JOIN users ON users.id=duty_assignments.user_id
             WHERE duty_assignments.day BETWEEN ? AND ? ORDER BY duty_assignments.day,duty_assignments.slot""", (start.isoformat(), end.isoformat())).fetchall()
-        return [{"day": row["day"], "slot": row["slot"], "class_name": row["class_name"] if row["active"] else "", "full_name": row["full_name"], "position": row["position"], "mine": bool(viewer_id and row["user_id"] == viewer_id)} for row in rows]
+        entries = {(row["day"],row["slot"]): {"day": row["day"], "slot": row["slot"], "class_name": row["class_name"] if row["active"] else "", "full_name": row["full_name"], "position": row["position"], "mine": bool(viewer_id and row["user_id"] == viewer_id), "source": "manual"} for row in rows}
+        templates = db.execute("""SELECT t.effective_day,t.weekday,t.user_id,u.active,u.full_name,u.position FROM duty_weekly_template t LEFT JOIN users u ON u.id=t.user_id WHERE t.effective_day<=? ORDER BY t.effective_day""",(end.isoformat(),)).fetchall()
+        overrides = {row["day"]: row for row in db.execute("""SELECT o.day,o.user_id,u.active,u.full_name,u.position FROM duty_admin_overrides o LEFT JOIN users u ON u.id=o.user_id WHERE o.day BETWEEN ? AND ?""",(start.isoformat(),end.isoformat())).fetchall()}
+        current = start
+        while current <= end:
+            day = current.isoformat(); key = (day,0); override = overrides.get(day)
+            source = None; row = None
+            if override is not None:
+                entries.pop(key,None); row=override; source="override"
+            elif key not in entries and current.weekday()<5 and duty_quarter(current)[3]:
+                applicable=[t for t in templates if t["weekday"]==current.weekday() and t["effective_day"]<=day]
+                if applicable: row=applicable[-1]; source="template"
+            if row is not None and row["user_id"] and row["active"]:
+                entries[key]={"day":day,"slot":0,"class_name":"","full_name":row["full_name"],"position":row["position"] or "Заместитель директора","mine":bool(viewer_id and row["user_id"]==viewer_id),"source":source}
+            current += timedelta(days=1)
+        return sorted(entries.values(), key=lambda entry:(entry["day"],entry["slot"]))
 
     def duty_user(user: dict = Depends(ready_user)) -> dict:
         if user["role"] not in ("teacher", "associate"):
             raise HTTPException(403, "Дежурство доступно учителям и заместителям")
         return user
+
+    def duty_deputy(user: dict = Depends(duty_user)) -> dict:
+        if user["role"] != "associate":
+            raise HTTPException(403, "Настройка дежурства доступна заместителям")
+        return user
+
+    def check_duty_session(db, user):
+        if not db.execute("SELECT 1 FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=? AND sessions.expires>? AND users.active=1 AND users.id=? AND users.role='associate'", (user["token_hash"],int(time.time()),user["id"])).fetchone():
+            raise HTTPException(401, "Сессия истекла — войдите заново")
+
+    def validate_deputy(db, user_id):
+        row=db.execute("SELECT full_name FROM users WHERE id=? AND role='associate' AND active=1",(user_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Активный заместитель не найден")
+        if not row["full_name"]:
+            raise HTTPException(422, "У выбранного заместителя не указано ФИО")
+
+    @router.get("/api/staff/duty/week-template")
+    def get_duty_week(user: dict = Depends(duty_deputy)):
+        today=school_today().isoformat()
+        with store.connect() as db:
+            users=db.execute("SELECT id,full_name,position FROM users WHERE active=1 AND role='associate' ORDER BY full_name,id").fetchall()
+            templates=db.execute("SELECT weekday,user_id FROM duty_weekly_template WHERE effective_day=(SELECT MAX(effective_day) FROM duty_weekly_template WHERE effective_day<=?) ORDER BY weekday",(today,)).fetchall()
+        values=[None]*5
+        for row in templates: values[row["weekday"]]=row["user_id"]
+        return {"deputies":[dict(row) for row in users],"week":values,"effective_from":today}
+
+    @router.put("/api/staff/duty/week-template")
+    def set_duty_week(body: DutyWeekTemplate, user: dict = Depends(duty_deputy)):
+        today=school_today().isoformat()
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE"); check_duty_session(db,user)
+            for uid in set(body.deputies):
+                if uid is not None: validate_deputy(db,uid)
+            for weekday,uid in enumerate(body.deputies):
+                db.execute("INSERT INTO duty_weekly_template(effective_day,weekday,user_id) VALUES(?,?,?) ON CONFLICT(effective_day,weekday) DO UPDATE SET user_id=excluded.user_id",(today,weekday,uid))
+        return {"ok":True,"effective_from":today}
+
+    @router.put("/api/staff/duty/admin/{day}")
+    def set_duty_admin(day: date, body: DutyAdminOverride, user: dict = Depends(duty_deputy)):
+        today=school_today(); start,end,_,active=duty_quarter(today)
+        if not active or day<today or not start<=day<=end:
+            raise HTTPException(422,"Выберите сегодняшнюю или будущую дату текущей четверти")
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE"); check_duty_session(db,user)
+            if body.user_id is not None: validate_deputy(db,body.user_id)
+            db.execute("INSERT INTO duty_admin_overrides(day,user_id) VALUES(?,?) ON CONFLICT(day) DO UPDATE SET user_id=excluded.user_id",(day.isoformat(),body.user_id))
+        return {"ok":True}
+
+    @router.delete("/api/staff/duty/admin/{day}")
+    def restore_duty_admin(day: date, user: dict = Depends(duty_deputy)):
+        today=school_today(); start,end,_,active=duty_quarter(today)
+        if not active or day<today or not start<=day<=end:
+            raise HTTPException(422,"Выберите сегодняшнюю или будущую дату текущей четверти")
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE"); check_duty_session(db,user)
+            db.execute("DELETE FROM duty_admin_overrides WHERE day=?",(day.isoformat(),))
+        return {"ok":True}
 
     @router.get("/api/staff/duty")
     def duty_calendar(user: dict = Depends(duty_user)):
@@ -605,13 +692,18 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 # Recheck session and user inside the transaction before reserving a slot.
                 if not db.execute("SELECT 1 FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=? AND sessions.expires>? AND users.active=1 AND users.id=?", (user["token_hash"], int(time.time()), user["id"])).fetchone():
                     raise HTTPException(401, "Сессия истекла — войдите заново")
+                if slot == 0 and any(entry["slot"]==0 for entry in duty_rows(db,body.day,body.day)):
+                    raise HTTPException(409,"Место занято. Обновите карту.")
                 if body.teacher_id is not None:
                     target = db.execute("SELECT full_name FROM users WHERE id=? AND role='teacher' AND active=1", (target_id,)).fetchone()
                     if not target:
                         raise HTTPException(404, "Активный учитель не найден")
                     if not target["full_name"]:
                         raise HTTPException(422, "У выбранного учителя не указано ФИО")
-                db.execute("INSERT INTO duty_assignments (day,slot,user_id,class_name) VALUES (?,?,?,?)", (body.day.isoformat(),slot,target_id,class_name))
+                if slot == 0 and db.execute("SELECT 1 FROM duty_admin_overrides WHERE day=?",(body.day.isoformat(),)).fetchone():
+                    db.execute("UPDATE duty_admin_overrides SET user_id=? WHERE day=?",(target_id,body.day.isoformat()))
+                else:
+                    db.execute("INSERT INTO duty_assignments (day,slot,user_id,class_name) VALUES (?,?,?,?)", (body.day.isoformat(),slot,target_id,class_name))
         except sqlite3.IntegrityError:
             raise HTTPException(409, "Место занято или этот сотрудник уже записан на эту дату. Обновите карту.")
         return {"ok": True}
@@ -621,9 +713,19 @@ def make_router(store: Store, require_admin) -> APIRouter:
         if slot not in (0,1,2) or day < school_today():
             raise HTTPException(422, "Нельзя отменить прошедшее дежурство")
         with store.connect() as db:
-            deleted = db.execute("DELETE FROM duty_assignments WHERE day=? AND slot=? AND user_id=?", (day.isoformat(),slot,user["id"]))
-            if not deleted.rowcount:
-                raise HTTPException(404, "Дежурство не найдено")
+            db.execute("BEGIN IMMEDIATE")
+            if slot == 0:
+                check_duty_session(db,user)
+                entry=next((entry for entry in duty_rows(db,day,day,user["id"]) if entry["slot"]==0),None)
+                if not entry or not entry["mine"]:
+                    raise HTTPException(404,"Дежурство не найдено")
+                if entry["source"]=="manual":
+                    db.execute("DELETE FROM duty_assignments WHERE day=? AND slot=0 AND user_id=?",(day.isoformat(),user["id"]))
+                db.execute("INSERT INTO duty_admin_overrides(day,user_id) VALUES(?,NULL) ON CONFLICT(day) DO UPDATE SET user_id=NULL",(day.isoformat(),))
+            else:
+                deleted = db.execute("DELETE FROM duty_assignments WHERE day=? AND slot=? AND user_id=?", (day.isoformat(),slot,user["id"]))
+                if not deleted.rowcount:
+                    raise HTTPException(404, "Дежурство не найдено")
         return {"ok": True}
 
     @router.get("/api/duties/today")
@@ -633,6 +735,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
             entries = duty_rows(db,today,today)
         for entry in entries:
             entry.pop("mine",None)
+            entry.pop("source",None)
         return {"today":today.isoformat(), "timezone":SCHOOL_TIMEZONE,"entries":entries}
 
     @router.get("/api/staff/associates")

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-duty-3">
+<link rel="stylesheet" href="/css/style.css?v=staff-duty-4">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -44,6 +44,19 @@
     <section id="staffDutyView" class="card hidden">
       <div class="staff-heading"><h2>Дежурство</h2><button class="btn secondary" id="dutyRefresh" type="button">Обновить карту</button></div>
       <p id="dutyPeriod" class="hint">Загрузка карты…</p><div id="dutyError" aria-live="polite"></div>
+      <details id="dutyWeekSection" class="duty-form hidden">
+        <summary><strong>Повторять дежурство заместителей по неделям</strong></summary>
+        <p class="hint">Шаблон действует с сегодняшнего дня и повторяется по будням учебных четвертей. Ранее назначенные и вручную изменённые даты сохраняются.</p>
+        <form id="dutyWeekForm"><div id="dutyWeekFields"></div><button class="btn" id="dutyWeekSave" type="submit">Сохранить недельный шаблон</button></form>
+      </details>
+      <form id="dutyAdminForm" class="duty-form hidden">
+        <p id="dutyAdminSelected"></p>
+        <div class="field"><label for="dutyAdminDeputy">Дежурный администратор</label><select id="dutyAdminDeputy"></select></div>
+        <p class="hint">Выберите заместителя или оставьте дату свободной. Изменение действует только на эту дату.</p>
+        <button class="btn" id="dutyAdminSave" type="submit">Сохранить на эту дату</button>
+        <button class="btn secondary" id="dutyAdminRestore" type="button">Вернуть обычное назначение</button>
+        <button class="btn secondary" id="dutyAdminClose" type="button">Закрыть</button>
+      </form>
       <form id="dutyForm" class="duty-form">
         <p id="dutySelected">Выберите свободное место на карте.</p>
         <div class="field hidden" id="dutyTeacherField"><label for="dutyTeacher">Учитель</label><select id="dutyTeacher"><option value="">Выберите учителя</option></select><p class="hint">Чтобы назначить учителя, в его профиле должно быть указано ФИО.</p></div>
@@ -93,7 +106,7 @@
     <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-duty-3"></script>
-<script src="/js/duty.js?v=staff-duty-3"></script>
+<script src="/js/staff.js?v=staff-duty-4"></script>
+<script src="/js/duty.js?v=staff-duty-4"></script>
 </body>
 </html>

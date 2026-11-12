@@ -720,6 +720,65 @@ class StaffTests(unittest.TestCase):
             self.assertFalse(self.client.get("/api/staff/duty",headers=ah).json()["active"])
             self.assertEqual(self.client.post("/api/staff/duty",headers=ah,json={"day":"2027-09-01"}).status_code,422)
 
+    def test_repeating_deputy_week_and_single_date_override(self):
+        a=self.create("week-a@example.com","associate")
+        b=self.create("week-b@example.com","associate")
+        t=self.create("week-teacher@example.com","teacher")
+        d=self.create("week-director@example.com","director")
+        ah,_=self.ready("week-a@example.com","associate",a["password"])
+        bh,_=self.ready("week-b@example.com","associate",b["password"])
+        th,_=self.ready("week-teacher@example.com","teacher",t["password"])
+        dh,_=self.ready("week-director@example.com","director",d["password"])
+        for headers,name in ((ah,"Анна"),(bh,"Борис"),(th,"Учитель")):
+            self.client.put("/api/staff/profile",headers=headers,json={"full_name":name})
+        aid,bid=a["user"]["id"],b["user"]["id"]
+        week={"deputies":[aid,bid,aid,bid,aid]}
+        url="/api/staff/duty/week-template"
+        with patch.object(staff,"school_today",return_value=date(2026,11,9)):
+            self.assertEqual(self.client.get(url,headers=th).status_code,403)
+            self.assertEqual(self.client.put(url,headers=dh,json=week).status_code,403)
+            self.assertEqual(self.client.put(url,headers=ah,json={"deputies":[aid]}).status_code,422)
+            self.assertEqual(self.client.put(url,headers=ah,json={"deputies":[aid,bid,aid,bid,t["user"]["id"]]}).status_code,404)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=bh,json={"day":"2026-11-16"}).status_code,201)
+            self.assertEqual(self.client.put(url,headers=ah,json=week).status_code,200)
+            self.assertEqual(self.client.get(url,headers=ah).json()["week"],week["deputies"])
+            entries=self.client.get("/api/staff/duty",headers=ah).json()["entries"]
+            admin={e["day"]:e for e in entries if e["slot"]==0}
+            self.assertEqual((admin["2026-11-09"]["full_name"],admin["2026-11-09"]["source"]),("Анна","template"))
+            self.assertEqual(admin["2026-11-10"]["full_name"],"Борис")
+            self.assertEqual((admin["2026-11-16"]["full_name"],admin["2026-11-16"]["source"]),("Борис","manual"))
+            self.assertNotIn("2026-11-14",admin)
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"][0]["full_name"],"Анна")
+            self.assertEqual(self.client.post("/api/staff/duty",headers=bh,json={"day":"2026-11-09"}).status_code,409)
+            override="/api/staff/duty/admin/2026-11-09"
+            self.assertEqual(self.client.put(override,headers=th,json={"user_id":bid}).status_code,403)
+            self.assertEqual(self.client.put(override,headers=ah,json={"user_id":t["user"]["id"]}).status_code,404)
+            self.assertEqual(self.client.put(override,headers=ah,json={"user_id":bid}).status_code,200)
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"][0]["full_name"],"Борис")
+            self.assertEqual(self.client.put(override,headers=ah,json={"user_id":None}).status_code,200)
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"],[])
+            self.assertEqual(self.client.delete(override,headers=ah).status_code,200)
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"][0]["full_name"],"Анна")
+            self.assertEqual(self.client.delete("/api/staff/duty/2026-11-09/0",headers=ah).status_code,200)
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"],[])
+            self.assertEqual(self.client.post("/api/staff/duty",headers=bh,json={"day":"2026-11-09"}).status_code,201)
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"][0]["full_name"],"Борис")
+            self.assertEqual(self.client.put("/api/staff/duty/admin/2026-11-16",headers=ah,json={"user_id":aid}).status_code,200)
+            self.assertEqual(self.client.delete("/api/staff/duty/admin/2026-11-16",headers=ah).status_code,200)
+            self.assertEqual(next(e for e in self.client.get("/api/staff/duty",headers=ah).json()["entries"] if e["day"]=="2026-11-16")["full_name"],"Борис")
+        with patch.object(staff,"school_today",return_value=date(2026,11,17)):
+            self.assertEqual(self.client.put(url,headers=ah,json={"deputies":[bid]*5}).status_code,200)
+            self.assertEqual(self.client.put("/api/staff/duty/admin/2026-11-16",headers=ah,json={"user_id":aid}).status_code,422)
+            entries=self.client.get("/api/staff/duty",headers=ah).json()["entries"]
+            self.assertEqual(next(e for e in entries if e["day"]=="2026-11-11")["full_name"],"Анна")
+            self.assertEqual(next(e for e in entries if e["day"]=="2026-11-18")["full_name"],"Борис")
+        with patch.object(staff,"school_today",return_value=date(2027,1,4)):
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"],[])
+        with patch.object(staff,"school_today",return_value=date(2027,1,11)):
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"][0]["full_name"],"Борис")
+            self.client.delete(f"/api/admin/users/{bid}",headers=self.admin)
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"],[])
+
     def test_deputy_assigns_registered_teachers_to_duty(self):
         deputy=self.create("assign-a@example.com","associate")
         teacher=self.create("assign-t@example.com","teacher")
