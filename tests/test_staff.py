@@ -297,6 +297,63 @@ class StaffTests(unittest.TestCase):
         self.store.init()
         self.assertEqual(len(self.client.get(base+"/comments",headers=dh).json()["comments"]),3)
 
+    def test_collaborators_task_visibility_and_history(self):
+        director = self.create("dir@example.com", "director")
+        deputy = self.create("dep@example.com", "associate")
+        teacher = self.create("teacher@example.com", "teacher")
+        helper = self.create("helper@example.com", "teacher")
+        stranger = self.create("stranger@example.com", "teacher")
+        dh, _ = self.ready("dir@example.com", "director", director["password"])
+        ah, _ = self.ready("dep@example.com", "associate", deputy["password"])
+        th, _ = self.ready("teacher@example.com", "teacher", teacher["password"])
+        hh, _ = self.ready("helper@example.com", "teacher", helper["password"])
+        sh, _ = self.ready("stranger@example.com", "teacher", stranger["password"])
+        self.client.put("/api/staff/profile", headers=hh, json={"full_name":"Помощник", "position":"Учитель истории"})
+        project = self.client.post("/api/staff/projects", headers=ah, json={"title":"Проект"}).json()["id"]
+        body={"assignee_id":teacher["user"]["id"], "description":"Первый", "deadline":(staff.now()+timedelta(days=1)).isoformat(), "project_id":project}
+        task = self.client.post("/api/staff/tasks",headers=ah,json=body).json()["task"]
+        second = self.client.post("/api/staff/tasks",headers=ah,json=body | {"description":"Не для помощника"}).json()["task"]
+        base=f"/api/staff/tasks/{task['id']}"
+        self.client.post(base+"/comments",headers=th,json={"text":"Ранее сделано"})
+        self.client.put(base+"/progress",headers=th,json={"partial":True,"reason":"Нет данных"})
+        self.client.put(base+"/progress",headers=th,json={"partial":True,"reason":"Данные получены"})
+        invite=base+"/collaborators"
+        self.assertEqual(self.client.get(invite+"/candidates",headers=th).status_code,404)
+        self.assertEqual(self.client.post(invite,headers=dh,json={"user_id":helper["user"]["id"]}).status_code,404)
+        self.assertEqual(self.client.post(invite,headers=th,json={"user_id":helper["user"]["id"]}).status_code,404)
+        self.assertEqual(self.client.post(invite,headers=ah,json={"user_id":teacher["user"]["id"]}).status_code,422)
+        self.assertEqual(self.client.post(invite,headers=ah,json={"user_id":"unknown"}).status_code,422)
+        candidates=self.client.get(invite+"/candidates",headers=ah).json()["users"]
+        self.assertIn(helper["user"]["id"],[u["id"] for u in candidates])
+        self.assertTrue(all("email" not in u for u in candidates))
+        self.assertEqual(self.client.post(invite,headers=ah,json={"user_id":helper["user"]["id"]}).status_code,201)
+        self.assertEqual(self.client.post(invite,headers=ah,json={"user_id":helper["user"]["id"]}).status_code,409)
+        tasks=self.client.get("/api/staff/tasks",headers=hh).json()["tasks"]
+        self.assertEqual([t["id"] for t in tasks],[task["id"]])
+        self.assertEqual(tasks[0]["collaborators"][0]["full_name"],"Помощник")
+        self.assertEqual(len(self.client.get("/api/staff/projects",headers=hh).json()["projects"]),1)
+        history=self.client.get(base+"/comments",headers=hh).json()
+        self.assertEqual(history["comments"][0]["text"],"Ранее сделано")
+        self.assertTrue(any("Нет данных" in event["text"] for event in history["events"]))
+        self.assertTrue(any("Данные получены" in event["text"] for event in history["events"]))
+        self.assertEqual(self.client.get(f"/api/staff/tasks/{second['id']}/comments",headers=hh).status_code,404)
+        self.assertEqual(self.client.post(base+"/comments",headers=hh,json={"text":"Помогаю"}).status_code,201)
+        self.assertEqual(self.client.put(base+"/completion",headers=hh,json={"completed":True}).status_code,404)
+        self.assertEqual(self.client.put(base+"/progress",headers=hh,json={"partial":True}).status_code,404)
+        self.assertEqual(self.client.get(base+"/comments",headers=sh).status_code,404)
+        self.assertEqual(self.client.put(base+"/completion",headers=th,json={"completed":True}).status_code,200)
+        self.assertEqual(self.client.post(invite,headers=ah,json={"user_id":stranger["user"]["id"]}).status_code,409)
+        self.assertTrue(any(e["text"]=="Задача выполнена" for e in self.client.get(base+"/comments",headers=hh).json()["events"]))
+        self.assertEqual(self.client.get(base+"/comments",headers=hh).status_code,200)
+        # Standalone task also appears for an invited user.
+        standalone=self.client.post("/api/staff/tasks",headers=ah,json=body | {"project_id":None}).json()["task"]
+        self.assertEqual(self.client.post(f"/api/staff/tasks/{standalone['id']}/collaborators",headers=ah,json={"user_id":helper["user"]["id"]}).status_code,201)
+        self.assertEqual(len(self.client.get("/api/staff/tasks",headers=hh).json()["tasks"]),2)
+        self.client.delete("/api/admin/users/"+helper["user"]["id"],headers=self.admin)
+        rows=self.client.get("/api/staff/tasks",headers=ah).json()["tasks"]
+        self.assertEqual(next(t for t in rows if t["id"]==task["id"])["collaborators"][0]["full_name"],"Удалённый пользователь")
+        self.assertEqual(self.client.get(base+"/comments",headers=hh).status_code,401)
+
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")
         for _ in range(5):

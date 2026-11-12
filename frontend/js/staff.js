@@ -60,11 +60,13 @@ function taskMarkup(t){
   return `<article class="task-card status-${escapeHTML(t.status)}" data-task-card="${escapeHTML(t.id)}"><div class="task-top"><span class="task-status">${escapeHTML(statuses[t.status]||t.status)}</span><span class="task-deadline">Срок: ${escapeHTML(fmtDate(t.deadline))}</span></div>
     <p class="task-description">${escapeHTML(t.description)}</p>
     <p class="task-meta">Исполнитель: ${escapeHTML(personName(t.assignee_name,t.assignee_position))} · Автор: ${escapeHTML(personName(t.director_name,t.director_position))}</p>
+    <p class="task-meta task-collaborators">${(t.collaborators||[]).length?`Соисполнители: ${(t.collaborators||[]).map(u=>escapeHTML(personName(u.full_name,u.position))).join("; ")}`:""}</p>
     <p class="task-progress-summary">${t.partial?'Частично выполнено':""}</p>
     <p class="task-reason">${t.failure_reason?`${t.completed_at?'Ранее указанная причина':'Причина невыполнения'}: ${escapeHTML(t.failure_reason)}`:""}</p>
     ${t.completed_at?`<p class="task-meta">Отмечено: ${escapeHTML(fmtDate(t.completed_at))}</p>`:""}
     ${mine?`<label class="task-complete"><input type="checkbox" data-complete="${escapeHTML(t.id)}" ${t.completed_at?"checked disabled":""}> Выполнено</label>`:""}
     <details class="task-discussion" data-discussion="${escapeHTML(t.id)}"><summary>Ход работы и комментарии</summary>
+      ${t.director_id===staffUser.id&&!t.completed_at?`<form data-invite><label>Добавить соисполнителя<select name="user_id" required><option value="">Загрузка пользователей…</option></select></label><p class="hint">Соисполнитель увидит задачу, историю и сможет писать комментарии. Изменять состояние может основной исполнитель.</p><button class="btn secondary" type="submit">Добавить</button></form>`:""}
       ${mine&&!t.completed_at?`<form data-progress><label class="task-complete"><input type="checkbox" name="partial" ${t.partial?"checked":""}> Частично выполнено</label><div class="field"><label>Причина невыполнения (необязательно)<textarea name="reason" maxlength="2000" rows="2">${escapeHTML(t.failure_reason||"")}</textarea></label></div><button class="btn secondary" type="submit">Сохранить состояние</button></form>`:""}
       <div class="task-comments" aria-live="polite">Загрузка комментариев…</div>
       <form data-comment><label>Комментарий<textarea name="text" maxlength="2000" rows="2" required></textarea></label><button class="btn secondary" type="submit">Отправить комментарий</button></form>
@@ -80,12 +82,29 @@ function taskDraftsOpen(){
 async function refreshComments(detail){
   const out=detail.querySelector(".task-comments");
   const data=await request(`/api/staff/tasks/${encodeURIComponent(detail.dataset.discussion)}/comments`);
-  out.innerHTML=data.comments.length?data.comments.map(c=>`<div class="task-comment"><b>${escapeHTML(personName(c.author_name,c.author_position))}</b> <span class="task-meta">${escapeHTML(fmtDate(c.created_at))}</span><p>${escapeHTML(c.text)}</p></div>`).join(""):'<p class="hint">Комментариев пока нет.</p>';
+  const history=[...(data.comments||[]).map(c=>({...c,event:false})),...(data.events||[]).map(c=>({...c,event:true}))].sort((a,b)=>a.created_at.localeCompare(b.created_at)||a.id.localeCompare(b.id));
+  out.innerHTML=history.length?history.map(c=>`<div class="task-comment"><b>${escapeHTML(personName(c.author_name,c.author_position))}</b> <span class="task-meta">${escapeHTML(fmtDate(c.created_at))}${c.event?" · Событие":""}</span><p>${escapeHTML(c.text)}</p></div>`).join(""):'<p class="hint">Истории пока нет.</p>';
+}
+async function loadInviteOptions(form,tid){
+  const data=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/collaborators/candidates`),select=form.elements.user_id,previous=select.value;
+  const names=new Map();data.users.forEach(u=>{const n=u.full_name||"ФИО не указано";names.set(n,(names.get(n)||0)+1)});
+  select.innerHTML='<option value="">Выберите сотрудника</option>'+data.users.map(u=>{
+    const name=u.full_name||"ФИО не указано",label=name+(names.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"");
+    return `<option value="${escapeHTML(u.id)}">${escapeHTML(personName(label,u.position||roleNames[u.role]))}</option>`;
+  }).join("");
+  if(data.users.some(u=>u.id===previous))select.value=previous;
 }
 function bindTaskCards(id){
   byId(id).querySelectorAll("[data-task-card]").forEach(card=>{
     const detail=card.querySelector("[data-discussion]"),error=detail.querySelector(".task-action-error"),tid=detail.dataset.discussion;
-    detail.ontoggle=()=>{if(detail.open)refreshComments(detail).catch(e=>errorAtElement(error,e));};
+    const invite=detail.querySelector("[data-invite]");
+    detail.ontoggle=()=>{if(detail.open){refreshComments(detail).catch(e=>errorAtElement(error,e));if(invite)loadInviteOptions(invite,tid).catch(e=>errorAtElement(error,e));}};
+    if(invite)invite.onsubmit=async e=>{e.preventDefault();const button=invite.querySelector("button"),select=invite.elements.user_id;button.disabled=true;error.innerHTML="";
+      try{const data=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/collaborators`,{method:"POST",body:{user_id:select.value}});
+        const out=card.querySelector(".task-collaborators"),label=personName(data.user.full_name,data.user.position||roleNames[data.user.role]);
+        out.textContent=out.textContent?`${out.textContent}; ${label}`:`Соисполнители: ${label}`;await loadInviteOptions(invite,tid);
+      }catch(e){errorAtElement(error,e);}finally{button.disabled=false;}
+    };
     const comment=detail.querySelector("[data-comment]");
     comment.onsubmit=async e=>{e.preventDefault();const button=comment.querySelector("button"),text=comment.elements.text;button.disabled=true;error.innerHTML="";
       try{await request(`/api/staff/tasks/${encodeURIComponent(tid)}/comments`,{method:"POST",body:{text:text.value}});text.value="";text.defaultValue="";await refreshComments(detail);}
@@ -97,6 +116,7 @@ function bindTaskCards(id){
         partial.checked=result.task.partial;partial.defaultChecked=partial.checked;reason.value=result.task.failure_reason;reason.defaultValue=reason.value;
         card.querySelector(".task-progress-summary").textContent=partial.checked?"Частично выполнено":"";
         card.querySelector(".task-reason").textContent=reason.value?`Причина невыполнения: ${reason.value}`:"";
+        if(detail.open)refreshComments(detail).catch(e=>errorAtElement(error,e));
       }catch(e){errorAtElement(error,e);}finally{button.disabled=false;}
     };
     const box=card.querySelector("[data-complete]");
@@ -106,7 +126,7 @@ function bindTaskCards(id){
         card.className=`task-card status-${result.task.status}`;card.querySelector(".task-status").textContent=statuses[result.task.status]||result.task.status;
         card.querySelector(".task-progress-summary").textContent="";
         card.querySelector(".task-reason").textContent=result.task.failure_reason?`Ранее указанная причина: ${result.task.failure_reason}`:"";
-        if(progress)progress.remove();if(!taskDraftsOpen())await loadTasks();
+        if(progress)progress.remove();if(detail.open)refreshComments(detail).catch(e=>errorAtElement(error,e));if(!taskDraftsOpen())await loadTasks();
       }catch(e){box.checked=false;box.disabled=false;errorAtElement(error,e);detail.open=true;}
     };
   });
@@ -122,10 +142,10 @@ async function loadTasks(){
     byId("taskList").innerHTML=ordinary.length?ordinary.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>';
     byId("projectList").innerHTML=projectData.projects.length?projectData.projects.map(p=>{
       const tasks=data.tasks.filter(t=>t.project_id===p.id),done=tasks.filter(t=>t.completed_at).length;
-      const mine=tasks.filter(t=>t.assignee_id===staffUser.id),mineDone=mine.filter(t=>t.completed_at).length;
+      const mine=tasks.filter(t=>t.assignee_id===staffUser.id||(t.collaborators||[]).some(u=>u.id===staffUser.id)),mineDone=mine.filter(t=>t.completed_at).length;
       const limited=role!=="director"&&p.owner_id!==staffUser.id;
       const participants=new Map();
-      tasks.forEach(t=>{const item=participants.get(t.assignee_id)||{name:personName(t.assignee_name,t.assignee_position),total:0,done:0};item.total++;if(t.completed_at)item.done++;participants.set(t.assignee_id,item);});
+      tasks.forEach(t=>{const people=[{id:t.assignee_id,full_name:t.assignee_name,position:t.assignee_position},...(t.collaborators||[])];people.forEach(u=>{const item=participants.get(u.id)||{name:personName(u.full_name,u.position),total:0,done:0};item.total++;if(t.completed_at)item.done++;participants.set(u.id,item);});});
       const involvement=!limited&&participants.size?`<p class="hint">Участники: ${Array.from(participants.values()).map(x=>`${escapeHTML(x.name)} — ${x.done}/${x.total}`).join(" · ")}</p>`:"";
       return `<article class="project-card"><h3>${escapeHTML(p.title)}</h3><p class="hint">Автор: ${escapeHTML(personName(p.owner_name,p.owner_position))} · ${limited?"Ваши задачи":"Выполнено"}: ${done} из ${tasks.length}${mine.length?` · Ваше участие: ${mineDone} из ${mine.length}`:""}</p>${involvement}${tasks.length?tasks.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>'}</article>`;
     }).join(""):'<p class="nodata">Проектов пока нет.</p>';

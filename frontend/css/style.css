@@ -258,3 +258,4 @@ footer a{color:var(--muted)}
 .task-comment p,.task-reason{white-space:pre-wrap;overflow-wrap:anywhere;margin:5px 0}
 .task-progress-summary{color:#a15b00;font-weight:700;margin:6px 0}
 .task-reason{font-size:14px;color:var(--muted)}
+.task-discussion select{display:block;width:100%;margin:6px 0 8px}

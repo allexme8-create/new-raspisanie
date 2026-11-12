@@ -129,6 +129,10 @@ class TaskProgress(BaseModel):
         return value.strip()
 
 
+class CollaboratorAdd(BaseModel):
+    user_id: str = Field(min_length=1, max_length=64)
+
+
 class TaskComment(BaseModel):
     text: str = Field(max_length=2000)
 
@@ -209,6 +213,10 @@ class Store:
                 db.execute("ALTER TABLE tasks ADD COLUMN failure_reason TEXT NOT NULL DEFAULT ''")
             db.execute("CREATE TABLE IF NOT EXISTS task_comments (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, created_at TEXT NOT NULL)")
             db.execute("CREATE INDEX IF NOT EXISTS task_comments_task ON task_comments(task_id, created_at, id)")
+            db.execute("CREATE TABLE IF NOT EXISTS task_events (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id), author_id TEXT NOT NULL REFERENCES users(id), text TEXT NOT NULL, created_at TEXT NOT NULL)")
+            db.execute("CREATE INDEX IF NOT EXISTS task_events_task ON task_events(task_id,created_at,id)")
+            db.execute("CREATE TABLE IF NOT EXISTS task_collaborators (task_id TEXT NOT NULL REFERENCES tasks(id), user_id TEXT NOT NULL REFERENCES users(id), added_at TEXT NOT NULL, PRIMARY KEY (task_id, user_id))")
+            db.execute("CREATE INDEX IF NOT EXISTS task_collaborators_user ON task_collaborators(user_id, task_id)")
             # Почтовые настройки и коды больше не используются.
             for name in ("mail_oauth", "mail_oauth_pending", "password_resets", "reset_throttle", "reset_ip_throttle"):
                 db.execute(f"DROP TABLE IF EXISTS {name}")
@@ -468,7 +476,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
             if user["role"] == "director":
                 rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name, CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS owner_position FROM projects JOIN users ON users.id=projects.owner_id ORDER BY projects.created_at DESC").fetchall()
             else:
-                rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name, CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS owner_position FROM projects JOIN users ON users.id=projects.owner_id WHERE projects.owner_id=? OR EXISTS (SELECT 1 FROM tasks WHERE tasks.project_id=projects.id AND tasks.assignee_id=?) ORDER BY projects.created_at DESC", (user["id"], user["id"])).fetchall()
+                rows = db.execute("SELECT projects.*, CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS owner_name, CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS owner_position FROM projects JOIN users ON users.id=projects.owner_id WHERE projects.owner_id=? OR EXISTS (SELECT 1 FROM tasks WHERE tasks.project_id=projects.id AND (tasks.assignee_id=? OR EXISTS (SELECT 1 FROM task_collaborators tc WHERE tc.task_id=tasks.id AND tc.user_id=?))) ORDER BY projects.created_at DESC", (user["id"], user["id"], user["id"])).fetchall()
         return {"projects": [dict(row) for row in rows]}
 
     @router.post("/api/staff/tasks", status_code=201)
@@ -489,6 +497,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 if user["role"] != "director" and project["owner_id"] != user["id"]:
                     raise HTTPException(403, "Добавлять задачи может автор проекта или директор")
             db.execute("INSERT INTO tasks (id,director_id,assignee_id,description,deadline,created_at,project_id) VALUES (?,?,?,?,?,?,?)", (tid, user["id"], body.assignee_id, body.description, iso(body.deadline), iso(now()), body.project_id))
+            db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), tid, user["id"], "Задача создана", iso(now())))
             row = db.execute(TASK_SELECT + " WHERE tasks.id=?", (tid,)).fetchone()
         return {"task": task_json(row)}
 
@@ -499,23 +508,64 @@ def make_router(store: Store, require_admin) -> APIRouter:
             condition, params = "(tasks.assignee_id=? OR tasks.director_id=? OR EXISTS (SELECT 1 FROM projects WHERE projects.id=tasks.project_id AND projects.owner_id=?))", (user["id"], user["id"], user["id"])
         else:
             condition, params = "tasks.assignee_id=?", (user["id"],)
-        return condition, params
+        condition = f"({condition} OR EXISTS (SELECT 1 FROM task_collaborators tc WHERE tc.task_id=tasks.id AND tc.user_id=?))"
+        return condition, (*params, user["id"])
 
     @router.get("/api/staff/tasks")
     def tasks(user: dict = Depends(ready_user)):
         condition, params = task_access(user)
         with store.connect() as db:
             rows = db.execute(TASK_SELECT + f" WHERE {condition} ORDER BY tasks.deadline ASC, tasks.created_at DESC", params).fetchall()
-        return {"tasks": [task_json(row) for row in rows]}
+            collaborators = db.execute("""SELECT tc.task_id, u.id, CASE WHEN u.active=1 THEN u.full_name ELSE 'Удалённый пользователь' END AS full_name,
+                CASE WHEN u.active=1 THEN COALESCE(NULLIF(u.position,''),CASE u.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS position
+                FROM task_collaborators tc JOIN users u ON u.id=tc.user_id JOIN tasks ON tasks.id=tc.task_id WHERE """ + condition + " ORDER BY tc.added_at,tc.user_id", params).fetchall()
+        grouped = {}
+        for row in collaborators:
+            grouped.setdefault(row["task_id"], []).append({key: row[key] for key in ("id", "full_name", "position")})
+        return {"tasks": [task_json(row) | {"collaborators": grouped.get(row["id"], [])} for row in rows]}
+
+    @router.get("/api/staff/tasks/{task_id}/collaborators/candidates")
+    def collaborator_candidates(task_id: str, user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            task = db.execute("SELECT * FROM tasks WHERE id=? AND director_id=?", (task_id, user["id"])).fetchone()
+            if not task:
+                raise HTTPException(404, "Задача не найдена")
+            if task["completed_at"]:
+                raise HTTPException(409, "Задача уже выполнена")
+            rows = db.execute("""SELECT id,full_name,position,role FROM users WHERE active=1 AND id NOT IN (?,?)
+                AND NOT EXISTS (SELECT 1 FROM task_collaborators WHERE task_id=? AND user_id=users.id) ORDER BY full_name,id""", (task["director_id"], task["assignee_id"], task_id)).fetchall()
+        return {"users": [dict(row) for row in rows]}
+
+    @router.post("/api/staff/tasks/{task_id}/collaborators", status_code=201)
+    def add_collaborator(task_id: str, body: CollaboratorAdd, user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            task = db.execute("SELECT * FROM tasks WHERE id=? AND director_id=?", (task_id, user["id"])).fetchone()
+            if not task:
+                raise HTTPException(404, "Задача не найдена")
+            if task["completed_at"]:
+                raise HTTPException(409, "Задача уже выполнена")
+            target = db.execute("SELECT id,full_name,position,role FROM users WHERE id=? AND active=1", (body.user_id,)).fetchone()
+            if not target or body.user_id in (task["director_id"], task["assignee_id"]):
+                raise HTTPException(422, "Пользователь недоступен для добавления")
+            try:
+                db.execute("INSERT INTO task_collaborators VALUES (?,?,?)", (task_id, body.user_id, iso(now())))
+            except sqlite3.IntegrityError:
+                raise HTTPException(409, "Пользователь уже участвует в задаче")
+        return {"user": dict(target)}
 
     @router.put("/api/staff/tasks/{task_id}/completion")
     def complete_task(task_id: str, body: Complete, user: dict = Depends(ready_user)):
         if not body.completed:
             raise HTTPException(400, "Отметку выполнения нельзя отменить")
         with store.connect() as db:
-            updated = db.execute("UPDATE tasks SET completed_at=COALESCE(completed_at, ?), partial=0 WHERE id=? AND assignee_id=?", (iso(now()), task_id, user["id"]))
-            if not updated.rowcount:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute("SELECT completed_at FROM tasks WHERE id=? AND assignee_id=?", (task_id, user["id"])).fetchone()
+            if not previous:
                 raise HTTPException(404, "Задача не найдена")
+            if not previous["completed_at"]:
+                db.execute("UPDATE tasks SET completed_at=?, partial=0 WHERE id=?", (iso(now()), task_id))
+                db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], "Задача выполнена", iso(now())))
             task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
         return {"task": task_json(task)}
 
@@ -529,6 +579,8 @@ def make_router(store: Store, require_admin) -> APIRouter:
             if row["completed_at"]:
                 raise HTTPException(409, "Задача уже выполнена")
             db.execute("UPDATE tasks SET partial=?,failure_reason=? WHERE id=?", (int(body.partial), body.reason, task_id))
+            text = ("Отмечено частичное выполнение" if body.partial else "Частичная отметка снята") + (f". Причина невыполнения: {body.reason}" if body.reason else ". Причина невыполнения не указана")
+            db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], text, iso(now())))
             task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
         return {"task": task_json(task)}
 
@@ -545,7 +597,11 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS author_name,
                 CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS author_position
                 FROM task_comments JOIN users ON users.id=task_comments.author_id WHERE task_comments.task_id=? ORDER BY task_comments.created_at,task_comments.id""", (task_id,)).fetchall()
-        return {"comments": [dict(row) for row in rows]}
+            events = db.execute("""SELECT task_events.id, task_events.text, task_events.created_at,
+                CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS author_name,
+                CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS author_position
+                FROM task_events JOIN users ON users.id=task_events.author_id WHERE task_events.task_id=? ORDER BY task_events.created_at,task_events.id""", (task_id,)).fetchall()
+        return {"comments": [dict(row) for row in rows], "events": [dict(row) for row in events]}
 
     @router.post("/api/staff/tasks/{task_id}/comments", status_code=201)
     def add_comment(task_id: str, body: TaskComment, user: dict = Depends(ready_user)):
