@@ -5,7 +5,7 @@ async function loadStaffUsers(){
     const data=await api("/api/admin/users");
     if(!currentToken||token!==currentToken)return;
     const list=$("staffUsersList");
-    list.innerHTML=data.users.length?`<ul class="staff-user-list">${data.users.map((u,i)=>`<li><div class="staff-user-details"><span>${u.full_name ? `${esc(u.full_name)} · ` : ""}${esc(u.email)} · ${u.role==="director"?"директор":u.role==="teacher"?"учитель":"заместитель директора"}</span><div id="staffPassword${i}" class="staff-password" aria-live="polite"></div></div><div class="staff-user-actions"><button type="button" class="btn secondary" data-show-user="${i}">Показать пароль</button><button type="button" class="btn secondary" data-reset-user="${i}">Обновить пароль</button><button type="button" class="btn danger" data-delete-user="${i}">Удалить</button></div></li>`).join("")}</ul>`:'<p class="muted">Пользователей пока нет.</p>';
+    list.innerHTML=data.users.length?`<ul class="staff-user-list">${data.users.map((u,i)=>`<li><div class="staff-user-details"><span>${u.full_name ? `${esc(u.full_name)} · ` : ""}${esc(u.email)} · ${esc(u.position || (u.role==="director"?"директор":u.role==="teacher"?"учитель":"заместитель директора"))}</span><div id="staffPassword${i}" class="staff-password" aria-live="polite"></div></div><div class="staff-user-actions"><button type="button" class="btn secondary" data-show-user="${i}">Показать пароль</button><button type="button" class="btn secondary" data-reset-user="${i}">Обновить пароль</button><button type="button" class="btn danger" data-delete-user="${i}">Удалить</button></div></li>`).join("")}</ul>`:'<p class="muted">Пользователей пока нет.</p>';
     list.querySelectorAll("[data-show-user]").forEach(button=>button.onclick=async()=>{
       const i=Number(button.dataset.showUser),user=data.users[i],out=$(`staffPassword${i}`);
       if(out.textContent){out.textContent="";button.textContent="Показать пароль";return;}
@@ -45,9 +45,9 @@ $("staffCreateForm").onsubmit=async e=>{
   e.preventDefault();const currentToken=token,button=e.currentTarget.querySelector("button");button.disabled=true;
   $("staffAdminResult").innerHTML="";
   try{
-    const data=await api("/api/admin/users",{method:"POST",body:{email:$("staffEmail").value.trim(),role:$("staffRole").value}});
+    const data=await api("/api/admin/users",{method:"POST",body:{email:$("staffEmail").value.trim(),role:$("staffRole").value,position:$("staffPosition").value.trim()}});
     if(!currentToken||token!==currentToken)return;
-    $("staffEmail").value="";
+    $("staffEmail").value="";$("staffPosition").value="";
     $("staffAdminResult").innerHTML=`<div class="alert ok">Пользователь ${esc(data.user.email)} создан. Пароль: <b>${esc(data.password)}</b><br>Передайте его пользователю безопасным способом.</div>`;
     await loadStaffUsers();
   }catch(error){if(token===currentToken)$("staffAdminResult").innerHTML=`<div class="alert err">${esc(error.message)}</div>`;}

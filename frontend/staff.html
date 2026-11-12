@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-position-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-job-2">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -34,7 +34,8 @@
       <div id="profileResult" aria-live="polite"></div>
       <form id="staffProfileForm">
         <div class="field"><label for="staffFullName">Фамилия, имя и отчество</label><input id="staffFullName" type="text" autocomplete="name" maxlength="200" required></div>
-        <button class="btn" type="submit">Сохранить ФИО</button>
+        <div class="field"><label for="staffPosition">Должность</label><input id="staffPosition" type="text" maxlength="200" placeholder="Например, учитель начальных классов"><p class="hint">Если не указана, будет показана роль пользователя.</p></div>
+        <button class="btn" type="submit">Сохранить профиль</button>
       </form>
     </details>
     <section class="card hidden" id="createTaskCard">
@@ -59,6 +60,6 @@
     <section class="card"><h2>Проекты</h2><p class="hint">Выполнение и участие по назначенным задачам.</p><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-position-1"></script>
+<script src="/js/staff.js?v=staff-job-2"></script>
 </body>
 </html>

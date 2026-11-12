@@ -6,7 +6,7 @@ const manager=role!=="teacher", key=`schedule_staff_${role}`;
 let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false;
 byId("pageTitle").textContent=role==="director"?"Кабинет директора":role==="associate"?"Кабинет заместителя директора":"Кабинет учителя";
 const roleNames={director:"Директор",associate:"Заместитель директора",teacher:"Учитель"};
-function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${roleNames[user.role]||"Сотрудник"}`;}
+function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;}
 const statuses={pending:"В работе",overdue:"Просрочено",completed_on_time:"Выполнено в срок",completed_late:"Выполнено с просрочкой"};
 function screen(id){["staffLoginCard","changePasswordCard","staffPanel"].forEach(x=>byId(x).classList.toggle("hidden",x!==id));}
 function errorAt(id,error){byId(id).innerHTML=`<div class="alert err">${escapeHTML(error.message)}</div>`;}
@@ -25,7 +25,7 @@ async function showSession(data){
   if(staffUser.role!==role){staffToken="";sessionStorage.removeItem(key);screen("staffLoginCard");throw new Error("Откройте кабинет вашей роли");}
   if(data.must_change){screen("changePasswordCard");return;}
   screen("staffPanel");showIdentity(staffUser);
-  byId("staffFullName").value=staffUser.full_name||"";byId("profileResult").innerHTML="";
+  byId("staffFullName").value=staffUser.full_name||"";byId("staffPosition").value=staffUser.position||"";byId("profileResult").innerHTML="";
   byId("createTaskCard").classList.toggle("hidden",!manager);byId("projectCreateCard").classList.toggle("hidden",!manager);
   if(manager)await loadAssignees();
   await loadTasks();
@@ -36,19 +36,20 @@ async function loadAssignees(){
     const names=new Map();data.users.forEach(u=>{if(u.full_name)names.set(u.full_name,(names.get(u.full_name)||0)+1);});
     select.innerHTML='<option value="">Выберите исполнителя</option>'+data.users.map(u=>{
       const label=u.full_name?u.full_name+(names.get(u.full_name)>1?` (${u.id.slice(0,8)})`:""):`ФИО не указано (${u.id.slice(0,8)})`;
-      const roleName=u.role==="teacher"?"учитель":"заместитель";
-      return `<option value="${escapeHTML(u.id)}">${escapeHTML(label)} · ${roleName}</option>`;
+      const roleName=u.position||roleNames[u.role]||"Сотрудник";
+      return `<option value="${escapeHTML(u.id)}">${escapeHTML(label)} · ${escapeHTML(roleName)}</option>`;
     }).join("");
     if(data.users.some(u=>u.id===previous))select.value=previous;
     if(!data.users.length)select.innerHTML='<option value="">Нет доступных исполнителей</option>';
   }catch(e){errorAt("taskCreateError",e);}
 }
 function fmtDate(iso){return new Date(iso).toLocaleString("ru-RU",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"});}
+function personName(name,position){return (name||"ФИО не указано")+(position?` · ${position}`:"");}
 function taskMarkup(t){
   const mine=t.assignee_id===staffUser.id;
   return `<article class="task-card status-${escapeHTML(t.status)}"><div class="task-top"><span class="task-status">${escapeHTML(statuses[t.status]||t.status)}</span><span class="task-deadline">Срок: ${escapeHTML(fmtDate(t.deadline))}</span></div>
     <p class="task-description">${escapeHTML(t.description)}</p>
-    <p class="task-meta">Исполнитель: ${escapeHTML(t.assignee_name||"ФИО не указано")} · Автор: ${escapeHTML(t.director_name||"ФИО не указано")}</p>
+    <p class="task-meta">Исполнитель: ${escapeHTML(personName(t.assignee_name,t.assignee_position))} · Автор: ${escapeHTML(personName(t.director_name,t.director_position))}</p>
     ${t.completed_at?`<p class="task-meta">Отмечено: ${escapeHTML(fmtDate(t.completed_at))}</p>`:""}
     ${mine?`<label class="task-complete"><input type="checkbox" data-complete="${escapeHTML(t.id)}" ${t.completed_at?"checked disabled":""}> Выполнено</label>`:""}</article>`;
 }
@@ -64,9 +65,9 @@ async function loadTasks(){
       const mine=tasks.filter(t=>t.assignee_id===staffUser.id),mineDone=mine.filter(t=>t.completed_at).length;
       const limited=role!=="director"&&p.owner_id!==staffUser.id;
       const participants=new Map();
-      tasks.forEach(t=>{const item=participants.get(t.assignee_id)||{name:t.assignee_name||"ФИО не указано",total:0,done:0};item.total++;if(t.completed_at)item.done++;participants.set(t.assignee_id,item);});
+      tasks.forEach(t=>{const item=participants.get(t.assignee_id)||{name:personName(t.assignee_name,t.assignee_position),total:0,done:0};item.total++;if(t.completed_at)item.done++;participants.set(t.assignee_id,item);});
       const involvement=!limited&&participants.size?`<p class="hint">Участники: ${Array.from(participants.values()).map(x=>`${escapeHTML(x.name)} — ${x.done}/${x.total}`).join(" · ")}</p>`:"";
-      return `<article class="project-card"><h3>${escapeHTML(p.title)}</h3><p class="hint">Автор: ${escapeHTML(p.owner_name||"ФИО не указано")} · ${limited?"Ваши задачи":"Выполнено"}: ${done} из ${tasks.length}${mine.length?` · Ваше участие: ${mineDone} из ${mine.length}`:""}</p>${involvement}${tasks.length?tasks.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>'}</article>`;
+      return `<article class="project-card"><h3>${escapeHTML(p.title)}</h3><p class="hint">Автор: ${escapeHTML(personName(p.owner_name,p.owner_position))} · ${limited?"Ваши задачи":"Выполнено"}: ${done} из ${tasks.length}${mine.length?` · Ваше участие: ${mineDone} из ${mine.length}`:""}</p>${involvement}${tasks.length?tasks.map(taskMarkup).join(""):'<p class="nodata">Задач пока нет.</p>'}</article>`;
     }).join(""):'<p class="nodata">Проектов пока нет.</p>';
     if(manager){const select=byId("taskProject"),previous=select.value,editable=projectData.projects.filter(p=>role==="director"||p.owner_id===staffUser.id);
       select.innerHTML='<option value="">Текущие задачи</option>'+editable.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.title)}</option>`).join("");
@@ -91,7 +92,7 @@ byId("staffPasswordForm").onsubmit=async e=>{
 };
 byId("staffProfileForm").onsubmit=async e=>{
   e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("profileResult").innerHTML="";
-  try{const data=await request("/api/staff/profile",{method:"PUT",body:{full_name:byId("staffFullName").value}});staffUser=data.user;byId("staffFullName").value=staffUser.full_name;showIdentity(staffUser);byId("profileResult").innerHTML='<div class="alert ok">ФИО сохранено.</div>';}
+  try{const data=await request("/api/staff/profile",{method:"PUT",body:{full_name:byId("staffFullName").value,position:byId("staffPosition").value}});staffUser=data.user;byId("staffFullName").value=staffUser.full_name;byId("staffPosition").value=staffUser.position||"";showIdentity(staffUser);byId("profileResult").innerHTML='<div class="alert ok">Профиль сохранён.</div>';}
   catch(error){errorAt("profileResult",error);}finally{button.disabled=false;}
 };
 byId("projectForm").onsubmit=async e=>{

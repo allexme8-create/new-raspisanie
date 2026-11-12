@@ -22,9 +22,10 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff-adm
  await buttons.show.onclick();assert.equal(element('staffPassword0').textContent,'');
  await buttons.reset.onclick();
  assert.equal(element('staffPassword0').textContent,'Новый пароль: new-secret');
- element('staffEmail').value='teacher@example.com';element('staffRole').value='associate';
+ element('staffEmail').value='teacher@example.com';element('staffRole').value='associate';element('staffPosition').value='Заместитель директора по УВР';
  await element('staffCreateForm').onsubmit({preventDefault(){},currentTarget:{querySelector:()=>({disabled:false})}});
  assert.match(element('staffAdminResult').innerHTML,/initial-secret/);
+ assert.equal(calls.find(c=>c.path==='/api/admin/users' && c.opts.method==='POST').opts.body.position,'Заместитель директора по УВР');
  handlers['admin-panel-close']();assert.equal(element('staffAdminResult').innerHTML,'');assert.equal(element('staffUsersList').innerHTML,'');
  assert.ok(calls.some(c=>c.path==='/api/admin/users/u1/password/reset'));
  console.log('Staff admin password UI OK');

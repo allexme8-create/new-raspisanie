@@ -2,9 +2,9 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm');
 const elements=new Map();
 function el(id){if(!elements.has(id))elements.set(id,{textContent:'',innerHTML:'',value:'',classList:{toggle(){},contains(){return false}},querySelectorAll(){return []}});return elements.get(id);}
-const users=[{id:'11111111abcdef',full_name:'Иванов Иван',email:'private@example.com'},{id:'22222222abcdef',full_name:'Иванов Иван',email:'other@example.com'},{id:'333',full_name:'',email:'missing@example.com'}];
-const task={id:'t',status:'pending',description:'Тест',deadline:'2030-01-01T00:00:00Z',assignee_name:'Иванов Иван',assignee_email:'private@example.com'};
-const projects=[{id:'p',title:'Проект <тест>',owner_id:'a',owner_name:'Заместитель'}];
+const users=[{id:'11111111abcdef',full_name:'Иванов Иван',position:'Учитель <физики>',email:'private@example.com'},{id:'22222222abcdef',full_name:'Иванов Иван',email:'other@example.com'},{id:'333',full_name:'',email:'missing@example.com'}];
+const task={id:'t',status:'pending',description:'Тест',deadline:'2030-01-01T00:00:00Z',assignee_name:'Иванов Иван',assignee_position:'Учитель <физики>',director_name:'Петров',director_position:'Директор школы',assignee_email:'private@example.com'};
+const projects=[{id:'p',title:'Проект <тест>',owner_id:'a',owner_name:'Заместитель',owner_position:'Заместитель по УВР'}];
 const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/Director'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},fetch:async path=>({ok:true,json:async()=>path.endsWith('/assignees')?{users}:path.endsWith('/projects')?{projects}:{tasks:[task]}}),console};
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js','utf8'),context);
 (async()=>{
@@ -17,6 +17,11 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js'
  vm.runInContext('showIdentity({full_name:"",role:"teacher"})',context);
  assert.equal(el('staffIdentity').textContent,'ФИО не указано — заполните профиль · Учитель');
  assert.match(el('taskAssignee').innerHTML,/Иванов Иван \(11111111\)/);
+ assert.match(el('taskAssignee').innerHTML,/Учитель &lt;физики&gt;/);
+ assert.match(el('taskList').innerHTML,/Иванов Иван · Учитель &lt;физики&gt;/);
+ assert.match(el('taskList').innerHTML,/Петров · Директор школы/);
+ vm.runInContext('showIdentity({full_name:"Иванов",role:"teacher",position:"Учитель физики"})',context);
+ assert.equal(el('staffIdentity').textContent,'Иванов · Учитель физики');
  assert.match(el('taskAssignee').innerHTML,/Иванов Иван \(22222222\)/);
  assert.match(el('taskAssignee').innerHTML,/>ФИО не указано \(333\)/);
  assert.doesNotMatch(el('taskAssignee').innerHTML,/@example.com/);
@@ -29,7 +34,7 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js'
  task.project_id='p';task.assignee_id='u1';task.assignee_name='Иванов Иван';task.completed_at='2029-01-01T00:00:00Z';await vm.runInContext('loadTasks()',context);
  assert.match(el('projectList').innerHTML,/Проект &lt;тест&gt;/);
  assert.match(el('projectList').innerHTML,/Выполнено: 1 из 1/);
- assert.match(el('projectList').innerHTML,/Участники: Иванов Иван — 1\/1/);
+ assert.match(el('projectList').innerHTML,/Участники: Иванов Иван · Учитель &lt;физики&gt; — 1\/1/);
  assert.doesNotMatch(el('taskList').innerHTML,/Иванов Иван/);
  assert.match(el('taskProject').innerHTML,/Проект &lt;тест&gt;/);
  console.log('Staff name display OK');

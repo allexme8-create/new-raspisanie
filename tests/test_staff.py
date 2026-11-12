@@ -75,6 +75,32 @@ class StaffTests(unittest.TestCase):
         with self.store.connect() as db:
             self.assertEqual(db.execute("SELECT full_name FROM users WHERE id=?", (associate["user"]["id"],)).fetchone()[0], "")
 
+    def test_positions_create_update_and_tasks(self):
+        director = self.create("dir@example.com", "director")
+        created = self.client.post("/api/admin/users", headers=self.admin, json={"email":"teach@example.com", "role":"teacher", "position":"  Учитель   начальных классов  "})
+        self.assertEqual(created.status_code, 201, created.text)
+        teacher = created.json()
+        self.assertEqual(teacher["user"]["position"], "Учитель начальных классов")
+        dh, _ = self.ready("dir@example.com", "director", director["password"])
+        th, _ = self.ready("teach@example.com", "teacher", teacher["password"])
+        self.client.put("/api/staff/profile", headers=dh, json={"full_name":"Директор", "position":"Директор школы"})
+        self.client.put("/api/staff/profile", headers=th, json={"full_name":"Иванова"})
+        self.assertEqual(self.client.get("/api/staff/me", headers=th).json()["user"]["position"], "Учитель начальных классов")
+        self.assertEqual(self.client.get("/api/staff/assignees", headers=dh).json()["users"][0]["position"], "Учитель начальных классов")
+        self.assertEqual(self.client.put("/api/staff/profile", headers=th, json={"full_name":"Иванова", "position":"x"*201}).status_code, 422)
+        body={"assignee_id":teacher["user"]["id"],"description":"Задача", "deadline":(staff.now()+timedelta(days=1)).isoformat()}
+        task=self.client.post("/api/staff/tasks",headers=dh,json=body).json()["task"]
+        self.assertEqual(task["assignee_position"], "Учитель начальных классов")
+        self.assertEqual(task["director_position"], "Директор школы")
+        self.client.put("/api/staff/profile", headers=th, json={"full_name":"Иванова", "position":" Учитель математики "})
+        self.assertEqual(self.client.get("/api/staff/tasks", headers=dh).json()["tasks"][0]["assignee_position"], "Учитель математики")
+        self.client.put("/api/staff/profile", headers=th, json={"full_name":"Иванова", "position":""})
+        self.assertEqual(self.client.get("/api/staff/tasks", headers=dh).json()["tasks"][0]["assignee_position"], "Учитель")
+        self.client.delete("/api/admin/users/"+teacher["user"]["id"], headers=self.admin)
+        self.assertEqual(self.client.get("/api/staff/tasks", headers=dh).json()["tasks"][0]["assignee_position"], "")
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT position FROM users WHERE id=?", (teacher["user"]["id"],)).fetchone()[0], "")
+
     def test_create_reveal_and_change_password(self):
         self.assertEqual(self.client.post("/api/admin/users", json={"email": "a@example.com", "role": "director"}).status_code, 401)
         created = self.create("a@example.com", "director")
@@ -150,6 +176,7 @@ class StaffTests(unittest.TestCase):
         old.init()
         with old.connect() as db:
             self.assertIsNone(db.execute("SELECT password_ciphertext FROM users WHERE id='u'").fetchone()[0])
+            self.assertEqual(db.execute("SELECT position FROM users WHERE id='u'").fetchone()[0], "")
             self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='mail_oauth'").fetchone())
             self.assertIsNone(db.execute("SELECT name FROM sqlite_master WHERE name='password_resets'").fetchone())
 

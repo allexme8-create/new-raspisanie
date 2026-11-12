@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-projects-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-job-2">
 </head>
 <body>
 
@@ -37,12 +37,13 @@
   <!-- Панель -->
   <div id="adminPanel" class="hidden">
     <section class="card">
-      <h2>Пользователи руководства</h2>
+      <h2>Пользователи</h2>
       <p class="hint">Укажите e-mail как логин и выберите роль. Пароль создаётся автоматически; передайте его пользователю безопасным способом. При первом входе пользователь сменит пароль. Администратор может показать текущий пароль или создать новый. Письма не отправляются.</p>
       <p class="hint">Доступ к паролям имеют администраторы: используйте HTTPS и надёжный пароль администратора.</p>
       <form id="staffCreateForm" class="planner-form">
         <label>E-mail<input id="staffEmail" type="email" maxlength="254" required autocomplete="off" placeholder="name@example.ru"></label>
         <label>Роль<select id="staffRole"><option value="associate">Заместитель директора</option><option value="director">Директор</option><option value="teacher">Учитель</option></select></label>
+        <label>Должность (необязательно)<input id="staffPosition" type="text" maxlength="200" placeholder="Например, учитель начальных классов"></label>
         <button class="btn" type="submit">Создать пользователя</button>
       </form>
       <div id="staffAdminResult" aria-live="polite"></div>
@@ -111,8 +112,8 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="/js/admin.js?v=staff-projects-1"></script>
+<script src="/js/admin.js?v=staff-job-2"></script>
 <script src="/js/planner.js?v=planner-1"></script>
-<script src="/js/staff-admin.js?v=staff-projects-1"></script>
+<script src="/js/staff-admin.js?v=staff-job-2"></script>
 </body>
 </html>
