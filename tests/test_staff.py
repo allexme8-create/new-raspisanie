@@ -52,6 +52,25 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/staff/password", headers=headers, json={"password": new_password}).status_code, 200)
         return headers, new_password
 
+    def test_unified_login_all_roles_and_password_change(self):
+        for role in ("director", "associate", "teacher"):
+            email = role + "@example.com"
+            created = self.create(email, role)
+            result = self.client.post("/api/staff/login", json={"email": email, "password": created["password"]})
+            self.assertEqual(result.status_code, 200, result.text)
+            self.assertEqual(result.json()["user"]["role"], role)
+            self.assertTrue(result.json()["must_change"])
+            headers = {"Authorization": "Bearer " + result.json()["token"]}
+            self.assertEqual(self.client.get("/api/staff/tasks", headers=headers).status_code, 403)
+            self.assertEqual(self.client.post("/api/staff/password", headers=headers, json={"password": "новый надёжный пароль"}).status_code, 200)
+            me = self.client.get("/api/staff/me", headers=headers)
+            self.assertEqual(me.json()["user"]["role"], role)
+            self.assertFalse(me.json()["must_change"])
+            self.assertEqual(self.client.get("/api/staff/deadline-stats", headers=headers).status_code, 403 if role == "teacher" else 200)
+            self.assertEqual(self.client.post("/api/staff/logout", headers=headers).status_code, 200)
+            self.assertEqual(self.client.get("/api/staff/me", headers=headers).status_code, 401)
+            self.assertEqual(self.client.post("/api/staff/login", json={"email": email, "password": "новый надёжный пароль"}).status_code, 200)
+
     def test_profile_name_and_task_visibility(self):
         director = self.create("director@example.com", "director")
         associate = self.create("associate@example.com", "associate")

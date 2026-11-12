@@ -1,10 +1,19 @@
 "use strict";
 const byId=id=>document.getElementById(id);
 const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const role=location.pathname==="/Director"?"director":location.pathname==="/teacher"?"teacher":"associate";
-const manager=role!=="teacher", key=`schedule_staff_${role}`;
+const key="schedule_staff_user", oldKeys=["schedule_staff_director","schedule_staff_associate","schedule_staff_teacher"];
+let role=null,manager=false;
 let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false, unreadNotifications=[], showHidden=false, deadlineStatsUsers=[], profileRefreshVersion=0;
-byId("pageTitle").textContent=role==="director"?"Кабинет директора":role==="associate"?"Кабинет заместителя директора":"Кабинет учителя";
+if(!staffToken){
+  const old=[...new Set(oldKeys.map(k=>sessionStorage.getItem(k)).filter(Boolean))];
+  if(old.length===1){staffToken=old[0];sessionStorage.setItem(key,staffToken);}
+}
+oldKeys.forEach(k=>sessionStorage.removeItem(k));
+function setStaffRole(value){
+  role=value;manager=role==="director"||role==="associate";
+  byId("pageTitle").textContent=role==="director"?"Кабинет директора":role==="associate"?"Кабинет заместителя директора":role==="teacher"?"Кабинет учителя":"Личный кабинет";
+}
+setStaffRole(null);
 const roleNames={director:"Директор",associate:"Заместитель директора",teacher:"Учитель"};
 function roleClass(role){return ["teacher","associate","director"].includes(role)?`person-${role}`:"";}
 function personHTML(name,position,role){
@@ -43,19 +52,19 @@ document.querySelectorAll("[data-staff-view]").forEach(button=>button.onclick=()
 byId("staffBack").onclick=()=>openStaffView("staffHome");
 function errorAt(id,error){byId(id).innerHTML=`<div class="alert err">${escapeHTML(error.message)}</div>`;}
 async function request(path,{method="GET",body,anonymous=false}={}){
-  const headers={};
+  const headers={},tokenAtStart=staffToken;
   if(!anonymous&&staffToken){headers.Authorization=`Bearer ${staffToken}`;headers["X-Staff-Token"]=staffToken;}
   if(body!==undefined)headers["Content-Type"]="application/json";
   const response=await fetch(path,{method,headers,body:body===undefined?undefined:JSON.stringify(body),cache:"no-store"});
   let data={};try{data=await response.json();}catch(e){}
-  if(response.status===401&&!anonymous){staffToken="";staffUser=null;sessionStorage.removeItem(key);screen("staffLoginCard");}
+  if(response.status===401&&!anonymous&&staffToken===tokenAtStart){staffToken="";staffUser=null;setStaffRole(null);sessionStorage.removeItem(key);screen("staffLoginCard");}
   if(!response.ok)throw new Error(typeof data.detail==="string"?data.detail:Array.isArray(data.detail)?data.detail.map(x=>x.msg).join("; "):`Ошибка ${response.status}`);
   return data;
 }
 async function showSession(data){
-  staffUser=data.user;
+  if(!data.user||!["director","associate","teacher"].includes(data.user.role)){staffToken="";staffUser=null;setStaffRole(null);sessionStorage.removeItem(key);screen("staffLoginCard");throw new Error("Неизвестная роль пользователя");}
+  staffUser=data.user;setStaffRole(staffUser.role);
   if(typeof resetDuty==="function")resetDuty();
-  if(staffUser.role!==role){staffToken="";sessionStorage.removeItem(key);screen("staffLoginCard");throw new Error("Откройте кабинет вашей роли");}
   if(data.must_change){screen("changePasswordCard");return;}
   screen("staffPanel");showIdentity(staffUser);
   byId("staffFullName").value=staffUser.full_name||"";byId("staffPosition").value=staffUser.position||"";byId("profileResult").innerHTML="";
@@ -291,7 +300,7 @@ async function loadTasks(){
 }
 byId("staffLoginForm").onsubmit=async e=>{
   e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("staffLoginError").innerHTML="";
-  try{const data=await request("/api/staff/login",{method:"POST",anonymous:true,body:{email:byId("loginEmail").value.trim(),password:byId("loginPassword").value,role}});staffToken=data.token;sessionStorage.setItem(key,staffToken);byId("loginPassword").value="";await showSession(data);}
+  try{const data=await request("/api/staff/login",{method:"POST",anonymous:true,body:{email:byId("loginEmail").value.trim(),password:byId("loginPassword").value}});staffToken=data.token;sessionStorage.setItem(key,staffToken);byId("loginPassword").value="";await showSession(data);}
   catch(error){errorAt("staffLoginError",error);}finally{button.disabled=false;}
 };
 byId("staffPasswordForm").onsubmit=async e=>{
@@ -317,7 +326,7 @@ byId("taskForm").onsubmit=async e=>{
   }catch(error){errorAt("taskCreateError",error);}finally{button.disabled=false;}
 };
 document.querySelectorAll("[data-logout]").forEach(button=>button.onclick=async()=>{
-  try{await request("/api/staff/logout",{method:"POST"});}catch(e){}staffToken="";staffUser=null;if(typeof resetDuty==="function")resetDuty();unreadNotifications=[];byId("staffNotifications").classList.add("hidden");byId("staffNotificationList").innerHTML="";sessionStorage.removeItem(key);screen("staffLoginCard");
+  try{await request("/api/staff/logout",{method:"POST"});}catch(e){}staffToken="";staffUser=null;setStaffRole(null);if(typeof resetDuty==="function")resetDuty();unreadNotifications=[];byId("staffNotifications").classList.add("hidden");byId("staffNotificationList").innerHTML="";sessionStorage.removeItem(key);screen("staffLoginCard");
 });
 function updateHiddenButtons(){document.querySelectorAll("[data-toggle-hidden]").forEach(button=>button.textContent=showHidden?"Скрыть удалённые мной":"Показать удалённые мной");}
 document.querySelectorAll("[data-toggle-hidden]").forEach(button=>button.onclick=()=>{

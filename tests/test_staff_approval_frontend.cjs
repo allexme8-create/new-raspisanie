@@ -4,7 +4,7 @@ function el(id){if(!els.has(id))els.set(id,{innerHTML:'',textContent:'',value:''
 const approve={dataset:{completedAt:'2030-01-01T00:00:00Z'},disabled:false},hide={disabled:false},error={innerHTML:''},comment={elements:{text:{}},querySelector:()=>({})};
 const detail={dataset:{discussion:'t1'},open:false,querySelector(s){return ({'.task-action-error':error,'[data-comment]':comment})[s]},querySelectorAll(){return []}};
 const card={querySelector(s){return ({'[data-discussion]':detail,'[data-approve]':approve,'[data-hide]':hide})[s]}};
-const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/associate'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},confirm:()=>true,console,fetch:async(path,opts)=>{calls.push({path,opts});return {ok:true,json:async()=>({ok:true})}}};
+const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/users'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},confirm:()=>true,console,fetch:async(path,opts)=>{calls.push({path,opts});return {ok:true,json:async()=>({ok:true})}}};
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js','utf8'),context);
 (async()=>{
  vm.runInContext('staffToken="token";staffUser={id:"author"};loadTasks=async()=>{};loadNotifications=async()=>{}',context);

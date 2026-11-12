@@ -6,7 +6,7 @@ const form={dataset:{completedAt:'2030-01-01T00:00:00+00:00'},elements:{deadline
 const comment={elements:{text:{value:'',defaultValue:''}},querySelector:()=>button};
 const detail={dataset:{discussion:'t1'},open:false,querySelector(s){return ({'[data-rework]':form,'[data-comment]':comment,'.task-action-error':error})[s]},querySelectorAll(){return []}};
 const card={classList:{add(){},remove(){}},querySelector(s){return ({'[data-discussion]':detail,'[data-complete]':null,'.task-status':status,'.task-deadline':deadline,'.task-rework':reworkLabel,'.task-progress-summary':summary,'.task-reason':reason,'.task-completed-at':completed})[s]}};
-const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/associate'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},confirm:()=>true,console,fetch:async(path,opts)=>{calls.push({path,opts});return {ok:true,json:async()=>({task:{status:'pending',deadline:'2031-01-01T09:00:00Z'}})}}};
+const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/users'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},confirm:()=>true,console,fetch:async(path,opts)=>{calls.push({path,opts});return {ok:true,json:async()=>({task:{status:'pending',deadline:'2031-01-01T09:00:00Z'}})}}};
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js','utf8'),context);
 (async()=>{
  vm.runInContext('staffToken="token";staffUser={id:"author"}',context);

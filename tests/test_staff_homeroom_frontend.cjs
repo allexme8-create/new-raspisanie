@@ -5,7 +5,7 @@ async function run(role,path){
  function el(id){if(!elements.has(id)){const classes=new Set();elements.set(id,{textContent:'',innerHTML:'',value:'',classList:{toggle(n,on){on?classes.add(n):classes.delete(n)},contains:n=>classes.has(n)},querySelectorAll(){return []}})}return elements.get(id)}
  const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:path},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},fetch:async()=>({ok:true,json:async()=>response}),console};
  vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js','utf8'),context);
- vm.runInContext(`staffToken='token';staffUser={id:'u',role:'${role}',full_name:'Иван',homeroom_class:'<5А>'};showIdentity(staffUser)`,context);
+ vm.runInContext(`staffToken='token';setStaffRole('${role}');staffUser={id:'u',role:'${role}',full_name:'Иван',homeroom_class:'<5А>'};showIdentity(staffUser)`,context);
  assert.equal(el('profileHomeroom').classList.contains('hidden'),role!=='teacher');
  if(role==='teacher'){
    assert.equal(el('profileHomeroomStatus').textContent,'Назначено · <5А>');
@@ -14,4 +14,4 @@ async function run(role,path){
    response={user:{role,homeroom_class:''}};await vm.runInContext('refreshProfileHomeroom()',context);assert.equal(el('profileHomeroomStatus').textContent,'Не назначено');
  }
 }
-(async()=>{await run('teacher','/teacher');await run('associate','/associate');await run('director','/Director');console.log('Teacher homeroom profile OK')})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{await run('teacher','/users');await run('associate','/users');await run('director','/users');console.log('Teacher homeroom profile OK')})().catch(e=>{console.error(e);process.exitCode=1});

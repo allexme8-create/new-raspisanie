@@ -9,6 +9,7 @@ async function run(path,role){
   const context={document:{getElementById:el,querySelectorAll:s=>s==='[data-staff-view]'?buttons:[],hidden:false},location:{pathname:path},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},fetch:async path=>({ok:true,json:async()=>path.endsWith('/assignees')?{users:[]}:path.endsWith('/projects')?{projects:[]}:{tasks:[]}}),console};
   vm.createContext(context);vm.runInContext(code,context);
   await vm.runInContext(`staffToken='token';showSession({user:{id:'u',role:'${role}',full_name:'Тест'},must_change:false})`,context);
+  assert.equal(vm.runInContext('role',context),role);
   const hidden=id=>el(id).classList.contains('hidden');
   assert.equal(hidden('staffHome'),false);assert.equal(hidden('staffBack'),true);
   assert.equal(hidden('staffDutyChoice'),role==='director');assert.equal(hidden('staffCreateChoice'),role==='teacher');assert.equal(hidden('staffStatsChoice'),role==='teacher');
@@ -19,5 +20,9 @@ async function run(path,role){
     el('staffBack').onclick();assert.equal(hidden('staffHome'),false);assert.equal(hidden('staffBack'),true);
   }
   assert.equal(typeof el('projectRefresh').onclick,'function');
+  await vm.runInContext(`showSession({user:{id:'other',role:'teacher',full_name:'Другой'},must_change:true})`,context);
+  assert.equal(vm.runInContext('role',context),'teacher');assert.equal(hidden('changePasswordCard'),false);
+  await vm.runInContext(`showSession({user:{id:'other',role:'teacher',full_name:'Другой'},must_change:false})`,context);
+  assert.equal(hidden('staffCreateChoice'),true);assert.equal(hidden('staffDutyChoice'),false);
 }
-(async()=>{await run('/Director','director');await run('/associate','associate');await run('/teacher','teacher');console.log('Staff navigation OK')})().catch(e=>{console.error(e);process.exitCode=1});
+(async()=>{await run('/users','director');await run('/users','associate');await run('/users','teacher');console.log('Staff navigation OK')})().catch(e=>{console.error(e);process.exitCode=1});

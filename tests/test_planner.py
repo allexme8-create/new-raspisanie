@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 import app as backend
 import planner
 import staff
+from fastapi.testclient import TestClient
 
 
 def bells():
@@ -34,6 +35,16 @@ def project():
 
 
 class PlannerTests(unittest.TestCase):
+    def test_unified_staff_page_and_admin_routes(self):
+        with TestClient(backend.app) as client:
+            response = client.get("/users")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("no-store", response.headers["cache-control"])
+            self.assertIn('id="staffLoginCard"', response.text)
+            self.assertEqual(client.get("/admin").status_code, 200)
+            for old_path in ("/teacher", "/Director", "/associate"):
+                self.assertEqual(client.get(old_path).status_code, 404)
+
     def test_migrate_schedule_classes_and_preserve_planner(self):
         original=copy.deepcopy(backend.state)
         try:

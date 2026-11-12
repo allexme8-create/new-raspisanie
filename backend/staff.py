@@ -131,7 +131,7 @@ class HomeroomUpdate(BaseModel):
 class Login(BaseModel):
     email: EmailStr
     password: str = Field(min_length=1, max_length=256)
-    role: Literal["director", "associate", "teacher"]
+    role: Literal["director", "associate", "teacher"] | None = None
 
 
 class PasswordChange(BaseModel):
@@ -637,11 +637,11 @@ def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=No
                 raise HTTPException(429, "Слишком много попыток. Повторите через 15 минут.")
             row = db.execute("SELECT * FROM users WHERE email=? AND active=1", (email,)).fetchone()
             valid = check_password(body.password, row["password_hash"] if row else dummy_hash)
-            if not valid or not row or row["role"] != body.role:
+            if not valid or not row or (body.role is not None and row["role"] != body.role):
                 failures = (attempt["failures"] if attempt and attempt["blocked_until"] == 0 else 0) + 1
                 db.execute("INSERT INTO login_attempts VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET failures=excluded.failures, blocked_until=excluded.blocked_until", (key, failures, current + 900 if failures >= 5 else 0))
                 db.commit()
-                raise HTTPException(401, "Неверный логин, пароль или раздел входа")
+                raise HTTPException(401, "Неверный логин или пароль")
             db.execute("DELETE FROM login_attempts WHERE key=?", (key,))
             db.execute("DELETE FROM sessions WHERE expires<=?", (current,))
             token = secrets.token_urlsafe(32)

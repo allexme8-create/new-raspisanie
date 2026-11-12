@@ -169,7 +169,7 @@ app.include_router(staff.make_router(staff_store, require_admin_header,
 @app.middleware("http")
 async def private_no_cache(request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith(("/api/staff/", "/api/admin/users", "/api/duties/")) or request.url.path in ("/Director", "/associate", "/teacher"):
+    if request.url.path.startswith(("/api/staff/", "/api/admin/users", "/api/duties/")) or request.url.path == "/users":
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
     return response
@@ -597,18 +597,8 @@ def admin_page() -> FileResponse:
     )
 
 
-@app.get("/Director", include_in_schema=False)
-def director_page() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "staff.html", headers={"Cache-Control": "no-store"})
-
-
-@app.get("/teacher", include_in_schema=False)
-def teacher_page() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "staff.html", headers={"Cache-Control": "no-store"})
-
-
-@app.get("/associate", include_in_schema=False)
-def associate_page() -> FileResponse:
+@app.get("/users", include_in_schema=False)
+def users_page() -> FileResponse:
     return FileResponse(FRONTEND_DIR / "staff.html", headers={"Cache-Control": "no-store"})
 
 

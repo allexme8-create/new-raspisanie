@@ -66,7 +66,7 @@ main{max-width:1100px;margin:0 auto;padding:14px 16px 40px}
 .mobile-week{display:none}
 .picker-hint{color:var(--muted);font-size:14px;margin:0 0 16px}
 .home-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
-.home-choice{display:flex;align-items:center;gap:14px;text-align:left;padding:18px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);cursor:pointer;font:inherit}
+.home-choice{text-decoration:none;display:flex;align-items:center;gap:14px;text-align:left;padding:18px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--ink);cursor:pointer;font:inherit}
 .home-choice:hover,.home-choice:focus-visible{border-color:var(--acc);background:var(--acc-soft)}
 .home-choice-icon{display:grid;place-items:center;flex:0 0 44px;height:44px;border-radius:12px;background:var(--acc-soft);font-size:22px}
 .home-choice strong{display:block;font-size:16px}

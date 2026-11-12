@@ -5,7 +5,7 @@ function el(id){if(!elements.has(id))elements.set(id,{textContent:'',innerHTML:'
 const users=[{id:'11111111abcdef',full_name:'Иванов Иван',position:'Учитель <физики>',email:'private@example.com'},{id:'22222222abcdef',full_name:'Иванов Иван',email:'other@example.com'},{id:'333',full_name:'',email:'missing@example.com'}];
 const task={id:'t',status:'pending',description:'Тест',deadline:'2030-01-01T00:00:00Z',assignee_name:'Иванов Иван',assignee_position:'Учитель <физики>',director_name:'Петров',director_position:'Директор школы',assignee_email:'private@example.com'};
 const projects=[{id:'p',title:'Проект <тест>',owner_id:'a',owner_name:'Заместитель',owner_position:'Заместитель по УВР'}];
-const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/Director'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},fetch:async path=>({ok:true,json:async()=>path.endsWith('/assignees')?{users}:path.endsWith('/projects')?{projects}:{tasks:[task]}}),console};
+const context={document:{getElementById:el,querySelectorAll:()=>[],hidden:false},location:{pathname:'/users'},sessionStorage:{getItem:()=>null,setItem(){},removeItem(){}},setInterval(){},fetch:async path=>({ok:true,json:async()=>path.endsWith('/assignees')?{users}:path.endsWith('/projects')?{projects}:{tasks:[task]}}),console};
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js','utf8'),context);
 (async()=>{
  await vm.runInContext('staffToken="token"; showSession({user:{role:"director",full_name:"Петров Пётр",email:"director@example.com"},must_change:false})',context);
