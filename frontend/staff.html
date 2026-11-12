@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-passwords-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-profile-1">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -29,6 +29,14 @@
   </section>
   <div id="staffPanel" class="hidden">
     <div class="staff-heading"><span id="staffIdentity"></span><button class="btn secondary" type="button" data-logout>Выйти</button></div>
+    <section class="card">
+      <h2>Мой профиль</h2>
+      <div id="profileResult" aria-live="polite"></div>
+      <form id="staffProfileForm">
+        <div class="field"><label for="staffFullName">Фамилия, имя и отчество</label><input id="staffFullName" type="text" autocomplete="name" maxlength="200" required></div>
+        <button class="btn" type="submit">Сохранить ФИО</button>
+      </form>
+    </section>
     <section class="card hidden" id="createTaskCard">
       <h2>Поставить задачу</h2><div id="taskCreateError" aria-live="polite"></div>
       <form id="taskForm">
@@ -45,6 +53,6 @@
     </section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-passwords-1"></script>
+<script src="/js/staff.js?v=staff-profile-1"></script>
 </body>
 </html>

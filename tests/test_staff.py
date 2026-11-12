@@ -50,6 +50,31 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/staff/password", headers=headers, json={"password": new_password}).status_code, 200)
         return headers, new_password
 
+    def test_profile_name_and_task_visibility(self):
+        director = self.create("director@example.com", "director")
+        associate = self.create("associate@example.com", "associate")
+        login = self.login("associate@example.com", "associate", associate["password"])
+        temporary = {"Authorization": "Bearer " + login.json()["token"]}
+        self.assertEqual(self.client.put("/api/staff/profile", headers=temporary, json={"full_name": "Тест"}).status_code, 403)
+        self.assertEqual(self.client.put("/api/staff/profile", json={"full_name": "Тест"}).status_code, 401)
+        associate_headers, _ = self.ready("associate@example.com", "associate", associate["password"])
+        director_headers, _ = self.ready("director@example.com", "director", director["password"])
+        self.assertEqual(self.client.put("/api/staff/profile", headers=associate_headers, json={"full_name": "   "}).status_code, 422)
+        self.assertEqual(self.client.put("/api/staff/profile", headers=associate_headers, json={"full_name": "x" * 201}).status_code, 422)
+        result = self.client.put("/api/staff/profile", headers=associate_headers, json={"full_name": "  Иванов  Иван Иванович  "})
+        self.assertEqual(result.json()["user"]["full_name"], "Иванов Иван Иванович")
+        self.assertEqual(self.client.get("/api/staff/me", headers=associate_headers).json()["user"]["full_name"], "Иванов Иван Иванович")
+        self.assertEqual(self.client.get("/api/staff/associates", headers=director_headers).json()["users"][0]["full_name"], "Иванов Иван Иванович")
+        users = self.client.get("/api/admin/users", headers=self.admin).json()["users"]
+        self.assertEqual(next(u for u in users if u["id"] == associate["user"]["id"])["full_name"], "Иванов Иван Иванович")
+        task = self.client.post("/api/staff/tasks", headers=director_headers, json={"assignee_id": associate["user"]["id"], "description": "Задача", "deadline": (staff.now() + timedelta(days=1)).isoformat()})
+        self.assertEqual(task.status_code, 201, task.text)
+        self.assertEqual(task.json()["task"]["assignee_name"], "Иванов Иван Иванович")
+        self.client.delete(f"/api/admin/users/{associate['user']['id']}", headers=self.admin)
+        self.assertEqual(self.client.get("/api/staff/tasks", headers=director_headers).json()["tasks"][0]["assignee_name"], "")
+        with self.store.connect() as db:
+            self.assertEqual(db.execute("SELECT full_name FROM users WHERE id=?", (associate["user"]["id"],)).fetchone()[0], "")
+
     def test_create_reveal_and_change_password(self):
         self.assertEqual(self.client.post("/api/admin/users", json={"email": "a@example.com", "role": "director"}).status_code, 401)
         created = self.create("a@example.com", "director")

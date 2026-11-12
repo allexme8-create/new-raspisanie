@@ -23,7 +23,8 @@ async function showSession(data){
   staffUser=data.user;
   if(staffUser.role!==role){staffToken="";sessionStorage.removeItem(key);screen("staffLoginCard");return;}
   if(data.must_change){screen("changePasswordCard");return;}
-  screen("staffPanel");byId("staffIdentity").textContent=staffUser.email;
+  screen("staffPanel");byId("staffIdentity").textContent=staffUser.full_name ? `${staffUser.full_name} · ${staffUser.email}` : staffUser.email;
+  byId("staffFullName").value=staffUser.full_name||""; byId("profileResult").innerHTML="";
   byId("createTaskCard").classList.toggle("hidden",role!=="director");
   if(role==="director")await loadAssignees();
   await loadTasks();
@@ -31,7 +32,7 @@ async function showSession(data){
 async function loadAssignees(){
   try{
     const data=await request("/api/staff/associates"),select=byId("taskAssignee"),previous=select.value;
-    select.innerHTML='<option value="">Выберите заместителя</option>'+data.users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.email)}</option>`).join("");
+    select.innerHTML='<option value="">Выберите заместителя</option>'+data.users.map(u=>`<option value="${escapeHTML(u.id)}">${escapeHTML(u.full_name ? `${u.full_name} · ${u.email}` : u.email)}</option>`).join("");
     if(data.users.some(u=>u.id===previous))select.value=previous;
     if(!data.users.length)select.innerHTML='<option value="">Администратор ещё не создал заместителей</option>';
   }catch(e){errorAt("taskCreateError",e);}
@@ -46,7 +47,7 @@ async function loadTasks(){
     byId("taskList").innerHTML=data.tasks.length?data.tasks.map(t=>`<article class="task-card status-${escapeHTML(t.status)}">
       <div class="task-top"><span class="task-status">${escapeHTML(statuses[t.status]||t.status)}</span><span class="task-deadline">Срок: ${escapeHTML(fmtDate(t.deadline))}</span></div>
       <p class="task-description">${escapeHTML(t.description)}</p>
-      <p class="task-meta">${role==="director"?"Исполнитель":"Директор"}: ${escapeHTML(role==="director"?t.assignee_email:t.director_email)}</p>
+      <p class="task-meta">${role==="director"?"Исполнитель":"Директор"}: ${escapeHTML(role==="director"?(t.assignee_name || t.assignee_email):(t.director_name || t.director_email))}</p>
       ${t.completed_at?`<p class="task-meta">Отмечено: ${escapeHTML(fmtDate(t.completed_at))}</p>`:""}
       ${role==="associate"?`<label class="task-complete"><input type="checkbox" data-complete="${escapeHTML(t.id)}" ${t.completed_at?"checked disabled":""}> Выполнено</label>`:""}
     </article>`).join(""):'<p class="nodata">Задач пока нет.</p>';
@@ -70,6 +71,14 @@ byId("staffPasswordForm").onsubmit=async e=>{
   e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("passwordError").innerHTML="";
   try{await request("/api/staff/password",{method:"POST",body:{password:byId("newPassword").value}});byId("newPassword").value="";await showSession(await request("/api/staff/me"));}
   catch(error){errorAt("passwordError",error);}finally{button.disabled=false;}
+};
+byId("staffProfileForm").onsubmit=async e=>{
+  e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("profileResult").innerHTML="";
+  try{const data=await request("/api/staff/profile",{method:"PUT",body:{full_name:byId("staffFullName").value}});
+    staffUser=data.user;byId("staffFullName").value=staffUser.full_name;
+    byId("staffIdentity").textContent=`${staffUser.full_name} · ${staffUser.email}`;
+    byId("profileResult").innerHTML='<div class="alert ok">ФИО сохранено.</div>';
+  }catch(error){errorAt("profileResult",error);}finally{button.disabled=false;}
 };
 byId("taskForm").onsubmit=async e=>{
   e.preventDefault();const button=e.currentTarget.querySelector("button");button.disabled=true;byId("taskCreateError").innerHTML="";
