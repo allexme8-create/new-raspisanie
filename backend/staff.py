@@ -141,6 +141,7 @@ class TaskCreate(BaseModel):
 
 
 class DutyBooking(BaseModel):
+    teacher_id: str | None = Field(default=None, min_length=1, max_length=128)
     day: date
     shift: Literal[1, 2] | None = None
     class_name: str = Field(default="", max_length=40)
@@ -580,25 +581,39 @@ def make_router(store: Store, require_admin) -> APIRouter:
         start, end, _, active = duty_quarter(today)
         if not active or not start <= body.day <= end or body.day < today:
             raise HTTPException(422, "Выберите сегодняшнюю или будущую дату текущей четверти")
-        if not user["full_name"]:
-            raise HTTPException(422, "Сначала укажите ФИО в профиле")
         if user["role"] == "teacher":
+            if body.teacher_id is not None:
+                raise HTTPException(403, "Назначать других учителей может только заместитель")
             if body.shift is None or not body.class_name:
                 raise HTTPException(422, "Укажите смену и класс")
-            slot, class_name = body.shift, body.class_name
+            if not user["full_name"]:
+                raise HTTPException(422, "Сначала укажите ФИО в профиле")
+            slot, class_name, target_id = body.shift, body.class_name, user["id"]
+        elif body.teacher_id is not None:
+            if body.shift is None or not body.class_name:
+                raise HTTPException(422, "Укажите смену и класс учителя")
+            slot, class_name, target_id = body.shift, body.class_name, body.teacher_id
         else:
             if body.shift is not None or body.class_name:
-                raise HTTPException(422, "Заместитель выбирает дежурство администратора")
-            slot, class_name = 0, ""
+                raise HTTPException(422, "Выберите учителя для дежурства в смене")
+            if not user["full_name"]:
+                raise HTTPException(422, "Сначала укажите ФИО в профиле")
+            slot, class_name, target_id = 0, "", user["id"]
         try:
             with store.connect() as db:
                 db.execute("BEGIN IMMEDIATE")
                 # Recheck session and user inside the transaction before reserving a slot.
                 if not db.execute("SELECT 1 FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=? AND sessions.expires>? AND users.active=1 AND users.id=?", (user["token_hash"], int(time.time()), user["id"])).fetchone():
                     raise HTTPException(401, "Сессия истекла — войдите заново")
-                db.execute("INSERT INTO duty_assignments (day,slot,user_id,class_name) VALUES (?,?,?,?)", (body.day.isoformat(),slot,user["id"],class_name))
+                if body.teacher_id is not None:
+                    target = db.execute("SELECT full_name FROM users WHERE id=? AND role='teacher' AND active=1", (target_id,)).fetchone()
+                    if not target:
+                        raise HTTPException(404, "Активный учитель не найден")
+                    if not target["full_name"]:
+                        raise HTTPException(422, "У выбранного учителя не указано ФИО")
+                db.execute("INSERT INTO duty_assignments (day,slot,user_id,class_name) VALUES (?,?,?,?)", (body.day.isoformat(),slot,target_id,class_name))
         except sqlite3.IntegrityError:
-            raise HTTPException(409, "Место занято или вы уже записаны на эту дату. Обновите карту.")
+            raise HTTPException(409, "Место занято или этот сотрудник уже записан на эту дату. Обновите карту.")
         return {"ok": True}
 
     @router.delete("/api/staff/duty/{day}/{slot}")

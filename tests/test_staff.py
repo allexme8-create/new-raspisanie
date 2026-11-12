@@ -720,6 +720,59 @@ class StaffTests(unittest.TestCase):
             self.assertFalse(self.client.get("/api/staff/duty",headers=ah).json()["active"])
             self.assertEqual(self.client.post("/api/staff/duty",headers=ah,json={"day":"2027-09-01"}).status_code,422)
 
+    def test_deputy_assigns_registered_teachers_to_duty(self):
+        deputy=self.create("assign-a@example.com","associate")
+        teacher=self.create("assign-t@example.com","teacher")
+        teacher2=self.create("assign-t2@example.com","teacher")
+        no_name=self.create("assign-blank@example.com","teacher")
+        director=self.create("assign-d@example.com","director")
+        ah,_=self.ready("assign-a@example.com","associate",deputy["password"])
+        th,_=self.ready("assign-t@example.com","teacher",teacher["password"])
+        dh,_=self.ready("assign-d@example.com","director",director["password"])
+        for headers,name in [(th,"Учитель Иван"),(ah,"Завуч")]:
+            self.client.put("/api/staff/profile",headers=headers,json={"full_name":name})
+        tid=teacher["user"]["id"]
+        data={"day":"2026-11-09","shift":1,"class_name":" 5А ","teacher_id":tid}
+        with patch.object(staff,"school_today",return_value=date(2026,11,9)):
+            post=lambda headers, body:self.client.post("/api/staff/duty",headers=headers,json=body)
+            self.assertEqual(post(dh,data).status_code,403)
+            self.assertEqual(post(th,data).status_code,403)
+            self.assertEqual(post(ah,{**data,"teacher_id":deputy["user"]["id"]}).status_code,404)
+            self.assertEqual(post(ah,{**data,"teacher_id":director["user"]["id"]}).status_code,404)
+            self.assertEqual(post(ah,{**data,"teacher_id":"unknown"}).status_code,404)
+            self.assertEqual(post(ah,{**data,"teacher_id":no_name["user"]["id"]}).status_code,422)
+            self.assertEqual(post(ah,{**data,"class_name":" "}).status_code,422)
+            self.assertEqual(post(ah,{**data,"shift":None}).status_code,422)
+            self.assertEqual(post(ah,{**data,"day":"2026-11-08"}).status_code,422)
+            self.assertEqual(post(ah,data).status_code,201)
+            self.assertEqual(post(ah,{**data,"shift":2}).status_code,409)
+            entry=self.client.get("/api/staff/duty",headers=th).json()["entries"][0]
+            self.assertTrue(entry["mine"])
+            self.assertEqual((entry["full_name"],entry["class_name"]),("Учитель Иван","5А"))
+            self.assertEqual(self.client.get("/api/duties/today").json()["entries"][0]["full_name"],"Учитель Иван")
+            self.assertEqual(self.client.delete("/api/staff/duty/2026-11-09/1",headers=ah).status_code,404)
+            self.assertEqual(self.client.delete("/api/staff/duty/2026-11-09/1",headers=th).status_code,200)
+            self.client.delete(f"/api/admin/users/{teacher2['user']['id']}",headers=self.admin)
+            self.assertEqual(post(ah,{**data,"teacher_id":teacher2["user"]["id"]}).status_code,404)
+
+    def test_deputy_assignment_races_teacher_reservation(self):
+        deputy=self.create("race-deputy@example.com","associate")
+        t1=self.create("race-assign1@example.com","teacher")
+        t2=self.create("race-assign2@example.com","teacher")
+        ah,_=self.ready("race-deputy@example.com","associate",deputy["password"])
+        h1,_=self.ready("race-assign1@example.com","teacher",t1["password"])
+        h2,_=self.ready("race-assign2@example.com","teacher",t2["password"])
+        for headers in (h1,h2):self.client.put("/api/staff/profile",headers=headers,json={"full_name":"Учитель"})
+        day="2026-09-02"
+        with patch.object(staff,"school_today",return_value=date(2026,9,1)):
+            def reserve(request):
+                headers,body=request
+                return self.client.post("/api/staff/duty",headers=headers,json=body).status_code
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results=list(executor.map(reserve,[(ah,{"day":day,"shift":1,"class_name":"5А","teacher_id":t1["user"]["id"]}),(h2,{"day":day,"shift":1,"class_name":"6А"})]))
+            self.assertEqual(sorted(results),[201,409])
+            self.assertEqual(len(self.client.get("/api/staff/duty",headers=h1).json()["entries"]),1)
+
     def test_duty_competing_reservations_are_atomic(self):
         t1=self.create("race1@example.com","teacher")
         t2=self.create("race2@example.com","teacher")
