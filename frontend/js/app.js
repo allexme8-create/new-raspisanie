@@ -129,7 +129,7 @@ function renderCurrentLesson(){
   }
 }
 
-let publicDuty=null;
+let publicDuty=null, publicDutyError=false;
 function activeDutyShifts(timezone){
   if(!state.bellSchedule?.shifts)return [];
   try{
@@ -144,7 +144,9 @@ function activeDutyShifts(timezone){
   }catch(e){return [];}
 }
 function renderDutyBanner(){
-  const box=$("scheduleDuty");if(!box||!publicDuty)return;
+  const boxes=["classDuty","teacherDuty"].map(id=>$(id)).filter(Boolean);
+  if(!boxes.length)return;
+  if(!publicDuty){for(const box of boxes)box.textContent=publicDutyError?"Не удалось загрузить данные о дежурстве.":"Загрузка дежурства…";return;}
   const active=activeDutyShifts(publicDuty.timezone),entries=publicDuty.entries||[];
   const describe=entry=>entry?`${entry.full_name||"ФИО не указано"}${entry.position?` · ${entry.position}`:""}${entry.class_name?` · ${entry.class_name}`:""}`:"Не назначен";
   const formatDay=value=>{
@@ -152,13 +154,14 @@ function renderDutyBanner(){
     return `${day.toLocaleDateString("ru-RU",{timeZone:"UTC",day:"numeric",month:"long"})} ${day.getUTCFullYear()} года`;
   };
   const line=(label,entry,isActive)=>`<p class="${isActive?'duty-active':''}">${esc(label)}: ${entry?`<strong>${esc(describe(entry))}</strong>`:esc(describe(entry))}</p>`;
-  box.innerHTML=`<p class="muted">${esc(formatDay(publicDuty.today))}${!active.length?' · текущая смена не определяется':''}</p>`+
+  const html=`<p class="muted">${esc(formatDay(publicDuty.today))}${!active.length?' · текущая смена не определяется':''}</p>`+
     line("Дежурный администратор",entries.find(e=>e.slot===0),active.length>0)+[1,2].map(shift=>line(`${shift}-я смена · дежурный учитель`,entries.find(e=>e.slot===shift),active.includes(shift))).join("");
+  for(const box of boxes)box.innerHTML=html;
 }
 async function loadPublicDuty(){
   try{const response=await fetch("/api/duties/today",{cache:"no-store"});if(!response.ok)throw new Error("ошибка сервера");
-    const data=await response.json();if(!data.today||!data.timezone||!Array.isArray(data.entries))throw new Error("нет данных");publicDuty=data;renderDutyBanner();
-  }catch(e){publicDuty=null;$("scheduleDuty").textContent="Не удалось загрузить данные о дежурстве.";}
+    const data=await response.json();if(!data.today||!data.timezone||!Array.isArray(data.entries))throw new Error("нет данных");publicDuty=data;publicDutyError=false;renderDutyBanner();
+  }catch(e){publicDuty=null;publicDutyError=true;renderDutyBanner();}
 }
 
 async function loadSchedule(){
@@ -373,7 +376,8 @@ function renderClassArea(){
     box.querySelectorAll("[data-cls]").forEach(b=>b.onclick=()=>{state.curClass=b.dataset.cls;renderClassArea();});
     return;
   }
-  box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeClass" type="button">← Все классы</button><strong>Класс ${esc(state.curClass)}</strong></div><div id="classPanel"></div>`;
+  box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeClass" type="button">← Все классы</button><strong>Класс ${esc(state.curClass)}</strong></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="classDuty" aria-live="polite"></div></section><div id="classPanel"></div>`;
+  renderDutyBanner();
   $("changeClass").onclick=()=>{state.curClass=null;renderClassArea();};
   renderClassPanel();
 }
@@ -434,7 +438,8 @@ function renderTeacherArea(){
     return;
   }
   if(state.curTeacher){
-    box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeTeacher" type="button">← Все учителя</button><strong>${esc(state.curTeacher)}</strong></div><div id="teacherPanel"></div>`;
+    box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeTeacher" type="button">← Все учителя</button><strong>${esc(state.curTeacher)}</strong></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="teacherDuty" aria-live="polite"></div></section><div id="teacherPanel"></div>`;
+    renderDutyBanner();
     $("changeTeacher").onclick=()=>{state.curTeacher=null;state.teacherQuery="";renderTeacherArea();$("teacherSearch").focus();};
     renderTeacherPanel();
     return;
