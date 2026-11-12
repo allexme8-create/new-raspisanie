@@ -592,7 +592,7 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/staff/deadline-stats").status_code,401)
         self.assertEqual(self.client.get("/api/staff/deadline-stats",headers=th).status_code,403)
         empty=self.client.get("/api/staff/deadline-stats",headers=dh).json()
-        self.assertEqual(empty,{"total":0,"in_progress":0,"overdue":0,"completed_on_time":0,"completed_late":0})
+        self.assertEqual(empty,{"users":[]})
         project=self.client.post("/api/staff/projects",headers=ah,json={"title":"Проект заместителя"}).json()["id"]
         body={"assignee_id":teacher["user"]["id"],"description":"Задача","deadline":(staff.now()+timedelta(days=1)).isoformat()}
         ids=[self.client.post("/api/staff/tasks",headers=dh,json=body | ({"project_id":project} if i==0 else {})).json()["task"]["id"] for i in range(4)]
@@ -607,12 +607,47 @@ class StaffTests(unittest.TestCase):
         self.client.post(f"/api/staff/tasks/{ids[3]}/hide",headers=dh)
         with patch.object(staff,"now",return_value=current):
             result=self.client.get("/api/staff/deadline-stats",headers=dh).json()
-            self.assertEqual(result,{"total":4,"in_progress":1,"overdue":1,"completed_on_time":1,"completed_late":1})
-            self.assertEqual(self.client.get("/api/staff/deadline-stats",headers=ah).json()["total"],1)
+            self.assertEqual(len(result["users"]),1)
+            person=result["users"][0]
+            self.assertEqual(person["id"],teacher["user"]["id"])
+            self.assertEqual((person["completed_on_time"],person["overdue"]),(1,2))
+            self.assertNotIn("email",person)
+            self.assertEqual(len(self.client.get("/api/staff/deadline-stats",headers=ah).json()["users"]),1)
             with self.store.connect() as db:
                 db.execute("UPDATE tasks SET completed_at=NULL,deadline=?,rework=1 WHERE id=?",(after,ids[3]))
             result=self.client.get("/api/staff/deadline-stats",headers=dh).json()
-            self.assertEqual((result["in_progress"],result["completed_late"]),(2,0))
+            self.assertEqual((result["users"][0]["completed_on_time"],result["users"][0]["overdue"]),(1,1))
+
+    def test_deadline_stats_by_assignee_and_deleted_user(self):
+        director=self.create("stat2-d@example.com", "director")
+        other_director=self.create("stat2-a@example.com", "associate")
+        first=self.create("stat2-t1@example.com", "teacher")
+        second=self.create("stat2-t2@example.com", "teacher")
+        dh,_=self.ready("stat2-d@example.com", "director", director["password"])
+        ah,_=self.ready("stat2-a@example.com", "associate", other_director["password"])
+        first_h,_=self.ready("stat2-t1@example.com", "teacher", first["password"])
+        second_h,_=self.ready("stat2-t2@example.com", "teacher", second["password"])
+        for headers in (first_h,second_h):
+            self.client.put("/api/staff/profile",headers=headers,json={"full_name":"Иванов Иван", "position":"Учитель"})
+        deadline=(staff.now()+timedelta(days=1)).isoformat()
+        def create_for(headers, uid):
+            return self.client.post("/api/staff/tasks",headers=headers,json={"assignee_id":uid,"description":"Задача","deadline":deadline}).json()["task"]
+        first_task=create_for(dh,first["user"]["id"])
+        second_task=create_for(dh,second["user"]["id"])
+        create_for(ah,first["user"]["id"])
+        self.client.put(f"/api/staff/tasks/{first_task['id']}/completion",headers=first_h,json={"completed":True})
+        result=self.client.get("/api/staff/deadline-stats",headers=dh).json()["users"]
+        self.assertEqual(len(result),2)
+        by_id={p["id"]:p for p in result}
+        self.assertEqual(by_id[first["user"]["id"]]["completed_on_time"],1)
+        self.assertEqual(by_id[second["user"]["id"]]["completed_on_time"],0)
+        self.assertTrue(all(p["full_name"]=="Иванов Иван" for p in result))
+        self.client.delete("/api/admin/users/"+first["user"]["id"],headers=self.admin)
+        result=self.client.get("/api/staff/deadline-stats",headers=dh).json()["users"]
+        removed=next(p for p in result if p["id"]==first["user"]["id"])
+        self.assertEqual(removed["full_name"],"Удалённый пользователь")
+        self.assertEqual(removed["position"],"")
+        self.assertEqual(removed["completed_on_time"],1)
 
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")

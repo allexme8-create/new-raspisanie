@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-stats-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-person-stats-1">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -69,7 +69,8 @@
     <div id="taskListError" aria-live="polite"></div>
     <section id="staffStatsView" class="card hidden">
       <div class="staff-heading"><h2>Статистика сроков</h2><button class="btn secondary" id="statsRefresh" type="button">Обновить</button></div>
-      <p class="hint">Все задачи, поставленные вами, включая проектные и удалённые из вашего списка. Выполнение считается по отметке исполнителя; для возвращённых задач учитывается новый срок.</p>
+      <p class="hint">Ваши задачи основного исполнителя, включая проектные и удалённые из списка. Просроченные — не выполненные в срок и выполненные с опозданием по действующему сроку; согласование вне системы не учитывается.</p>
+      <div class="field"><label for="statsAssignee">ФИО исполнителя</label><select id="statsAssignee"><option value="">Выберите исполнителя</option></select></div>
       <div id="statsError" aria-live="polite"></div><div id="deadlineStats" aria-live="polite"><p class="muted">Загрузка…</p></div>
     </section>
     <section id="staffTasksView" class="card hidden">
@@ -80,6 +81,6 @@
     <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-stats-1"></script>
+<script src="/js/staff.js?v=staff-person-stats-1"></script>
 </body>
 </html>

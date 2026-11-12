@@ -525,20 +525,30 @@ def make_router(store: Store, require_admin) -> APIRouter:
 
     @router.get("/api/staff/deadline-stats")
     def deadline_stats(user: dict = Depends(manager)):
-        # All tasks authored by this user, including personal hidden copies and
-        # project tasks. A returned task is measured against its current deadline.
+        # Statistics follow the primary assignee and the current agreed deadline;
+        # hidden tasks and project tasks still count for their initiator.
         with store.connect() as db:
-            rows = db.execute("SELECT deadline,completed_at FROM tasks WHERE director_id=?", (user["id"],)).fetchall()
+            rows = db.execute("""SELECT tasks.deadline,tasks.completed_at,users.id,users.active,users.role,
+                users.full_name,users.position FROM tasks JOIN users ON users.id=tasks.assignee_id
+                WHERE tasks.director_id=? ORDER BY users.full_name,users.id""", (user["id"],)).fetchall()
         current = now()
-        stats = {"total": len(rows), "in_progress": 0, "overdue": 0, "completed_on_time": 0, "completed_late": 0}
+        people = {}
         for row in rows:
+            person = people.setdefault(row["id"], {
+                "id": row["id"],
+                "full_name": row["full_name"] if row["active"] else "Удалённый пользователь",
+                "position": row["position"] if row["active"] else "",
+                "role": row["role"] if row["active"] else "",
+                "completed_on_time": 0,
+                "overdue": 0,
+            })
             deadline = datetime.fromisoformat(row["deadline"])
             if row["completed_at"]:
                 completed = datetime.fromisoformat(row["completed_at"])
-                stats["completed_on_time" if completed <= deadline else "completed_late"] += 1
-            else:
-                stats["overdue" if current > deadline else "in_progress"] += 1
-        return stats
+                person["completed_on_time" if completed <= deadline else "overdue"] += 1
+            elif current > deadline:
+                person["overdue"] += 1
+        return {"users": list(people.values())}
 
     @router.get("/api/staff/assignees")
     def assignees(user: dict = Depends(manager)):

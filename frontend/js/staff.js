@@ -3,7 +3,7 @@ const byId=id=>document.getElementById(id);
 const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const role=location.pathname==="/Director"?"director":location.pathname==="/teacher"?"teacher":"associate";
 const manager=role!=="teacher", key=`schedule_staff_${role}`;
-let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false, unreadNotifications=[], showHidden=false;
+let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false, unreadNotifications=[], showHidden=false, deadlineStatsUsers=[];
 byId("pageTitle").textContent=role==="director"?"Кабинет директора":role==="associate"?"Кабинет заместителя директора":"Кабинет учителя";
 const roleNames={director:"Директор",associate:"Заместитель директора",teacher:"Учитель"};
 function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;}
@@ -43,17 +43,30 @@ async function showSession(data){
   await loadNotifications();
   if(manager)await loadDeadlineStats();
 }
+function renderDeadlineStats(){
+  const person=deadlineStatsUsers.find(u=>u.id===byId("statsAssignee").value);
+  if(!person){byId("deadlineStats").innerHTML='<p class="muted">Выберите исполнителя.</p>';return;}
+  const number=value=>Number.isSafeInteger(value)&&value>=0?value:0;
+  byId("deadlineStats").innerHTML=`<div class="deadline-stats"><div class="deadline-stat-ok"><strong>${number(person.completed_on_time)}</strong><span>Выполнено в срок</span></div><div class="deadline-stat-warn"><strong>${number(person.overdue)}</strong><span>Просрочено по сроку</span></div></div>`;
+}
 async function loadDeadlineStats(){
   if(!manager||!staffToken||!staffUser)return;
   const tokenAtStart=staffToken;
   try{
     const stats=await request("/api/staff/deadline-stats");if(staffToken!==tokenAtStart)return;
-    const number=value=>Number.isSafeInteger(value)&&value>=0?value:0;
-    const total=number(stats.total),onTime=number(stats.completed_on_time),late=number(stats.completed_late),done=onTime+late;
+    deadlineStatsUsers=stats.users||[];const select=byId("statsAssignee"),previous=select.value,counts=new Map();
+    deadlineStatsUsers.forEach(u=>{const name=u.full_name||"ФИО не указано";counts.set(name,(counts.get(name)||0)+1);});
+    select.innerHTML='<option value="">Выберите исполнителя</option>'+deadlineStatsUsers.map(u=>{
+      const name=u.full_name||"ФИО не указано", label=name+(counts.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"");
+      return `<option value="${escapeHTML(u.id)}">${escapeHTML(personName(label,u.position||roleNames[u.role]||""))}</option>`;
+    }).join("");
+    if(deadlineStatsUsers.some(u=>u.id===previous))select.value=previous;
+    if(!deadlineStatsUsers.length){select.innerHTML='<option value="">Назначенных вами задач пока нет</option>';byId("deadlineStats").innerHTML='<p class="muted">Данных пока нет.</p>';}
+    else renderDeadlineStats();
     byId("statsError").innerHTML="";
-    byId("deadlineStats").innerHTML=`<div class="deadline-stats"><div><strong>${total}</strong><span>Всего задач</span></div><div><strong>${number(stats.in_progress)}</strong><span>В работе, срок не истёк</span></div><div class="deadline-stat-warn"><strong>${number(stats.overdue)}</strong><span>Просрочено</span></div><div class="deadline-stat-ok"><strong>${onTime}</strong><span>Выполнено в срок</span></div><div class="deadline-stat-warn"><strong>${late}</strong><span>Выполнено с опозданием</span></div><div><strong>${done?`${Math.round(onTime/done*100)}%`:"—"}</strong><span>В срок среди выполненных</span></div></div>`;
   }catch(e){if(staffToken===tokenAtStart)errorAt("statsError",e);}
 }
+byId("statsAssignee").onchange=renderDeadlineStats;
 byId("statsRefresh").onclick=loadDeadlineStats;
 async function loadAssignees(){
   try{
