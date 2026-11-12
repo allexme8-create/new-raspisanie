@@ -16,7 +16,7 @@ const context={token:'admin-token',$:element,esc:s=>String(s).replace(/[&<>"']/g
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff-admin.js','utf8'),context);
 (async()=>{
  await handlers['admin-panel-open']();
- assert.match(element('staffUsersList').innerHTML,/Показать пароль/);assert.match(element('staffUsersList').innerHTML,/<span class="person-teacher">&lt;Иван&gt;<\/span>/);assert.match(element('staffHomeroom').innerHTML,/5А/);
+ assert.match(element('staffUsersList').innerHTML,/Показать пароль/);assert.match(element('staffUsersList').innerHTML,/<strong><span class="person-teacher">&lt;Иван&gt;<\/span><\/strong>/);assert.match(element('staffUsersList').innerHTML,/<strong>учитель<\/strong>/);assert.match(element('staffHomeroom').innerHTML,/5А/);
  assert.doesNotMatch(element('staffUsersList').innerHTML,/current-secret/);assert.match(element('staffUsersList').innerHTML,/Классное руководство/);element('staffEditName0').value='Иванова';element('staffEditEmail0').value='teacher@example.com';element('staffEditPosition0').value='Учитель';element('staffEditClass0').value='6Б';await buttons.edit.onsubmit({preventDefault(){}});assert.ok(calls.some(c=>c.path==='/api/admin/users/u1'&&c.opts.body.homeroom_class==='6Б'&&c.opts.body.full_name==='Иванова'));
  await buttons.show.onclick();
  assert.equal(element('staffPassword0').textContent,'Пароль: current-secret');

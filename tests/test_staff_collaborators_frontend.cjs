@@ -12,11 +12,11 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff.js'
  vm.runInContext('staffToken="token";staffUser={id:"author"}',context);
  const task='{id:"task1",director_id:"author",assignee_id:"u",status:"pending",deadline:"2030-01-01T00:00:00Z",description:"Тест",collaborators:[{full_name:"<Имя>",position:"Учитель"}]}';
  const markup=vm.runInContext(`taskMarkup(${task})`,context);
- assert.match(markup,/data-invite/);assert.match(markup,/Соисполнители: &lt;Имя&gt; · Учитель/);
+ assert.match(markup,/data-invite/);assert.match(markup,/Соисполнители: <strong>&lt;Имя&gt; · Учитель<\/strong>/);
  assert.doesNotMatch(vm.runInContext(`taskMarkup({...${task},completed_at:"2030-01-01"})`,context),/data-invite/);
  assert.doesNotMatch(vm.runInContext(`taskMarkup({...${task},director_id:"someone"})`,context),/data-invite/);
  cards=[card];vm.runInContext('bindTaskCards("taskList")',context);detail.open=true;detail.ontoggle();await new Promise(r=>setImmediate(r));
  assert.match(select.innerHTML,/&lt;Иван&gt; · Учитель/);assert.match(output.innerHTML,/&lt;история&gt;/);assert.ok(output.innerHTML.indexOf('история')<output.innerHTML.indexOf('Комментарий'));
- await invite.onsubmit({preventDefault(){}});assert.equal(names.innerHTML,'Соисполнители: <span class="person-teacher">&lt;Иван&gt;</span> · Учитель');assert.ok(calls.some(c=>c.path.endsWith('/collaborators')&&JSON.parse(c.opts.body).user_id==='u2'));
+ await invite.onsubmit({preventDefault(){}});assert.equal(names.innerHTML,'Соисполнители: <strong><span class="person-teacher">&lt;Иван&gt;</span> · Учитель</strong>');assert.ok(calls.some(c=>c.path.endsWith('/collaborators')&&JSON.parse(c.opts.body).user_id==='u2'));
  console.log('Staff collaborators UI OK');
 })().catch(e=>{console.error(e);process.exitCode=1});

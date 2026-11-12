@@ -1,5 +1,5 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const html=fs.readFileSync('frontend/staff.html','utf8');assert.match(html,/<div id="profileHomeroom"/);assert.match(html,/Классное руководство назначает и изменяет администратор/);
+const html=fs.readFileSync('frontend/staff.html','utf8');assert.match(html,/<div id="profileHomeroom"/);assert.match(html,/<strong id="staffIdentity">/);assert.match(html,/Классное руководство назначает и изменяет администратор/);
 async function run(role,path){
  const elements=new Map();let response={user:{role,homeroom_class:'6Б'}};
  function el(id){if(!elements.has(id)){const classes=new Set();elements.set(id,{textContent:'',innerHTML:'',value:'',classList:{toggle(n,on){on?classes.add(n):classes.delete(n)},contains:n=>classes.has(n)},querySelectorAll(){return []}})}return elements.get(id)}

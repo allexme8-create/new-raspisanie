@@ -17,7 +17,7 @@ async function loadStaffUsers(){
     const selected=$("staffHomeroom").value;$("staffHomeroom").innerHTML=classOptions(selected);if(staffClassCatalog.includes(selected))$("staffHomeroom").value=selected;
     updateCreateClassVisibility();
     const list=$("staffUsersList");
-    list.innerHTML=data.users.length?`<ul class="staff-user-list">${data.users.map((u,i)=>`<li><div class="staff-user-details"><span>${u.full_name ? `<span class="${staffRoleClass(u.role)}">${esc(u.full_name)}</span> · ` : ""}${esc(u.email)} · ${esc(u.position || (u.role==="director"?"директор":u.role==="teacher"?"учитель":"заместитель директора"))}</span><details class="staff-user-edit"><summary>Редактировать пользователя</summary><form class="planner-form" data-edit-user="${i}">
+    list.innerHTML=data.users.length?`<ul class="staff-user-list">${data.users.map((u,i)=>`<li><div class="staff-user-details"><span>${u.full_name ? `<strong><span class="${staffRoleClass(u.role)}">${esc(u.full_name)}</span></strong> · ` : ""}${esc(u.email)} · <strong>${esc(u.position || (u.role==="director"?"директор":u.role==="teacher"?"учитель":"заместитель директора"))}</strong></span><details class="staff-user-edit"><summary>Редактировать пользователя</summary><form class="planner-form" data-edit-user="${i}">
       <label>ФИО<input id="staffEditName${i}" maxlength="200" value="${esc(u.full_name||"")}"></label>
       <label>E-mail<input id="staffEditEmail${i}" type="email" maxlength="254" value="${esc(u.email)}" required></label>
       <label>Должность<input id="staffEditPosition${i}" maxlength="200" value="${esc(u.position||"")}"></label>

@@ -9,7 +9,7 @@ const roleNames={director:"Директор",associate:"Заместитель �
 function roleClass(role){return ["teacher","associate","director"].includes(role)?`person-${role}`:"";}
 function personHTML(name,position,role){
   const title=escapeHTML(name||"ФИО не указано"),css=name?roleClass(role):"";
-  return (css?`<span class="${css}">${title}</span>`:title)+(position?` · ${escapeHTML(position)}`:"");
+  return `<strong>${css?`<span class="${css}">${title}</span>`:title}${position?` · ${escapeHTML(position)}`:""}</strong>`;
 }
 function showIdentity(user){
   const name=byId("staffIdentityName");name.textContent=user.full_name||"ФИО не указано — заполните профиль";
