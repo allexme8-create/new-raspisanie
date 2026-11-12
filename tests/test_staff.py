@@ -6,7 +6,8 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException
@@ -648,6 +649,76 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(removed["full_name"],"Удалённый пользователь")
         self.assertEqual(removed["position"],"")
         self.assertEqual(removed["completed_on_time"],1)
+
+    def test_duty_quarter_boundaries(self):
+        cases=[(date(2026,9,1),date(2026,9,1),date(2026,10,31),1,True),
+               (date(2026,10,31),date(2026,9,1),date(2026,10,31),1,True),
+               (date(2026,11,1),date(2026,11,1),date(2026,12,31),2,True),
+               (date(2027,1,9),date(2027,1,10),date(2027,3,31),3,False),
+               (date(2027,1,10),date(2027,1,10),date(2027,3,31),3,True),
+               (date(2027,3,31),date(2027,1,10),date(2027,3,31),3,True),
+               (date(2027,4,1),date(2027,4,1),date(2027,5,31),4,True),
+               (date(2027,6,1),date(2027,9,1),date(2027,10,31),1,False)]
+        for today,start,end,quarter,active in cases:
+            self.assertEqual(staff.duty_quarter(today),(start,end,quarter,active))
+
+    def test_duty_booking_permissions_and_public_schedule(self):
+        director=self.create("duty-d@example.com","director")
+        deputy=self.create("duty-a@example.com","associate")
+        teacher=self.create("duty-t@example.com","teacher")
+        teacher2=self.create("duty-t2@example.com","teacher")
+        dh,_=self.ready("duty-d@example.com","director",director["password"])
+        ah,_=self.ready("duty-a@example.com","associate",deputy["password"])
+        th,_=self.ready("duty-t@example.com","teacher",teacher["password"])
+        th2,_=self.ready("duty-t2@example.com","teacher",teacher2["password"])
+        for headers,name in [(ah,"Петрова Анна"),(th,"Иванов Иван"),(th2,"Сидорова Анна")]:
+            self.client.put("/api/staff/profile",headers=headers,json={"full_name":name,"position":"Должность"})
+        day="2026-11-09"
+        with patch.object(staff,"school_today",return_value=date(2026,11,9)):
+            self.assertEqual(self.client.get("/api/staff/duty").status_code,401)
+            self.assertEqual(self.client.get("/api/staff/duty",headers=dh).status_code,403)
+            calendar=self.client.get("/api/staff/duty",headers=th).json()
+            self.assertEqual((calendar["quarter"],calendar["start"],calendar["end"]),(2,"2026-11-01","2026-12-31"))
+            self.assertEqual(self.client.post("/api/staff/duty",headers=dh,json={"day":day,"shift":1,"class_name":"5А"}).status_code,403)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":day,"shift":1,"class_name":" "}).status_code,422)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":"2026-11-08","shift":1,"class_name":"5А"}).status_code,422)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":"2027-01-10","shift":1,"class_name":"5А"}).status_code,422)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=ah,json={"day":day,"shift":1,"class_name":"5А"}).status_code,422)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=ah,json={"day":day}).status_code,201)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":day,"shift":1,"class_name":" 5А "}).status_code,201)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th2,json={"day":day,"shift":1,"class_name":"6А"}).status_code,409)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th,json={"day":day,"shift":2,"class_name":"5А"}).status_code,409)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th2,json={"day":day,"shift":2,"class_name":"6А"}).status_code,201)
+            public=self.client.get("/api/duties/today").json()
+            self.assertEqual([e["slot"] for e in public["entries"]],[0,1,2])
+            self.assertEqual(public["entries"][1]["full_name"],"Иванов Иван")
+            self.assertEqual(public["entries"][1]["class_name"],"5А")
+            self.assertNotIn("email",str(public));self.assertNotIn("user_id",str(public))
+            self.assertEqual(self.client.delete(f"/api/staff/duty/{day}/1",headers=th2).status_code,404)
+            self.assertEqual(self.client.delete(f"/api/staff/duty/{day}/1",headers=th).status_code,200)
+            self.assertEqual(self.client.post("/api/staff/duty",headers=th2,json={"day":day,"shift":1,"class_name":"6А"}).status_code,409)
+            # Password resets do not delete duty records; user deletion releases future slots.
+            self.client.post(f"/api/admin/users/{teacher2['user']['id']}/password/reset",headers=self.admin)
+            self.assertEqual(len(self.client.get("/api/duties/today").json()["entries"]),2)
+            self.client.delete(f"/api/admin/users/{teacher2['user']['id']}",headers=self.admin)
+            self.assertEqual(len(self.client.get("/api/duties/today").json()["entries"]),1)
+        with patch.object(staff,"school_today",return_value=date(2027,6,1)):
+            self.assertFalse(self.client.get("/api/staff/duty",headers=ah).json()["active"])
+            self.assertEqual(self.client.post("/api/staff/duty",headers=ah,json={"day":"2027-09-01"}).status_code,422)
+
+    def test_duty_competing_reservations_are_atomic(self):
+        t1=self.create("race1@example.com","teacher")
+        t2=self.create("race2@example.com","teacher")
+        h1,_=self.ready("race1@example.com","teacher",t1["password"])
+        h2,_=self.ready("race2@example.com","teacher",t2["password"])
+        for headers in (h1,h2):self.client.put("/api/staff/profile",headers=headers,json={"full_name":"Учитель"})
+        with patch.object(staff,"school_today",return_value=date(2026,9,1)):
+            def reserve(headers):
+                return self.client.post("/api/staff/duty",headers=headers,json={"day":"2026-09-02","shift":1,"class_name":"5А"}).status_code
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                results=list(executor.map(reserve,(h1,h2)))
+            self.assertEqual(sorted(results),[201,409])
+            self.assertEqual(len(self.client.get("/api/staff/duty",headers=h1).json()["entries"]),1)
 
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")

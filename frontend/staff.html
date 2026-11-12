@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-person-stats-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-duty-1">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -33,6 +33,7 @@
       <h2>🔔 Новые события по вашим задачам</h2><p>Откройте задачу, чтобы посмотреть историю.</p><div id="staffNotificationList"></div>
     </section>
     <nav id="staffHome" class="home-choices" aria-label="Разделы личного кабинета">
+      <button class="home-choice hidden" id="staffDutyChoice" type="button" data-staff-view="staffDutyView"><span class="home-choice-icon" aria-hidden="true">🗓️</span><strong>Дежурство</strong><span aria-hidden="true">→</span></button>
       <button class="home-choice" type="button" data-staff-view="staffProfileView"><span class="home-choice-icon" aria-hidden="true">👤</span><strong>Мой профиль</strong><span aria-hidden="true">→</span></button>
       <button class="home-choice" id="staffCreateChoice" type="button" data-staff-view="staffCreateView"><span class="home-choice-icon" aria-hidden="true">✏️</span><strong>Поставить задачу или создать проект</strong><span aria-hidden="true">→</span></button>
       <button class="home-choice" id="staffStatsChoice" type="button" data-staff-view="staffStatsView"><span class="home-choice-icon" aria-hidden="true">📊</span><strong>Статистика сроков</strong><span aria-hidden="true">→</span></button>
@@ -40,6 +41,16 @@
       <button class="home-choice" type="button" data-staff-view="staffProjectsView"><span class="home-choice-icon" aria-hidden="true">📁</span><strong>Состояние проектов</strong><span aria-hidden="true">→</span></button>
     </nav>
     <button class="change-selection home-back hidden" id="staffBack" type="button">← В меню кабинета</button>
+    <section id="staffDutyView" class="card hidden">
+      <div class="staff-heading"><h2>Дежурство</h2><button class="btn secondary" id="dutyRefresh" type="button">Обновить карту</button></div>
+      <p id="dutyPeriod" class="hint">Загрузка карты…</p><div id="dutyError" aria-live="polite"></div>
+      <form id="dutyForm" class="duty-form">
+        <p id="dutySelected">Выберите свободное место на карте.</p>
+        <div class="field" id="dutyClassField"><label for="dutyClass">Ваш класс</label><input id="dutyClass" maxlength="40" placeholder="Например, 5А"></div>
+        <button class="btn" id="dutySubmit" type="submit" disabled>Записаться</button>
+      </form>
+      <div id="dutyMap"></div>
+    </section>
     <section id="staffProfileView" class="card hidden">
       <h2>Мой профиль</h2>
       <div id="profileResult" aria-live="polite"></div>
@@ -81,6 +92,7 @@
     <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-person-stats-1"></script>
+<script src="/js/staff.js?v=staff-duty-1"></script>
+<script src="/js/duty.js?v=staff-duty-1"></script>
 </body>
 </html>

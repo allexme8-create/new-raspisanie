@@ -9,14 +9,16 @@ const roleNames={director:"Директор",associate:"Заместитель �
 function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;}
 const statuses={pending:"В работе",overdue:"Просрочено",completed_on_time:"Выполнено в срок",completed_late:"Выполнено с просрочкой"};
 function screen(id){["staffLoginCard","changePasswordCard","staffPanel"].forEach(x=>byId(x).classList.toggle("hidden",x!==id));}
-const staffViews=["staffProfileView","staffCreateView","staffStatsView","staffTasksView","staffProjectsView"];
+const staffViews=["staffProfileView","staffDutyView","staffCreateView","staffStatsView","staffTasksView","staffProjectsView"];
 function openStaffView(id){
   if((id==="staffCreateView"||id==="staffStatsView")&&!manager)return;
+  if(id==="staffDutyView"&&role==="director")return;
   if(id!=="staffHome"&&!staffViews.includes(id))return;
   byId("staffHome").classList.toggle("hidden",id!=="staffHome");
   byId("staffBack").classList.toggle("hidden",id==="staffHome");
   staffViews.forEach(view=>byId(view).classList.toggle("hidden",view!==id));
   if(id==="staffStatsView")loadDeadlineStats();
+  if(id==="staffDutyView"&&typeof loadDutyCalendar==="function")loadDutyCalendar();
 }
 document.querySelectorAll("[data-staff-view]").forEach(button=>button.onclick=()=>openStaffView(button.dataset.staffView));
 byId("staffBack").onclick=()=>openStaffView("staffHome");
@@ -33,10 +35,12 @@ async function request(path,{method="GET",body,anonymous=false}={}){
 }
 async function showSession(data){
   staffUser=data.user;
+  if(typeof resetDuty==="function")resetDuty();
   if(staffUser.role!==role){staffToken="";sessionStorage.removeItem(key);screen("staffLoginCard");throw new Error("Откройте кабинет вашей роли");}
   if(data.must_change){screen("changePasswordCard");return;}
   screen("staffPanel");showIdentity(staffUser);
   byId("staffFullName").value=staffUser.full_name||"";byId("staffPosition").value=staffUser.position||"";byId("profileResult").innerHTML="";
+  byId("staffDutyChoice").classList.toggle("hidden",role==="director");
   byId("staffCreateChoice").classList.toggle("hidden",!manager);byId("staffStatsChoice").classList.toggle("hidden",!manager);openStaffView("staffHome");
   if(manager)await loadAssignees();
   await loadTasks();
@@ -294,7 +298,7 @@ byId("taskForm").onsubmit=async e=>{
   }catch(error){errorAt("taskCreateError",error);}finally{button.disabled=false;}
 };
 document.querySelectorAll("[data-logout]").forEach(button=>button.onclick=async()=>{
-  try{await request("/api/staff/logout",{method:"POST"});}catch(e){}staffToken="";staffUser=null;unreadNotifications=[];byId("staffNotifications").classList.add("hidden");byId("staffNotificationList").innerHTML="";sessionStorage.removeItem(key);screen("staffLoginCard");
+  try{await request("/api/staff/logout",{method:"POST"});}catch(e){}staffToken="";staffUser=null;if(typeof resetDuty==="function")resetDuty();unreadNotifications=[];byId("staffNotifications").classList.add("hidden");byId("staffNotificationList").innerHTML="";sessionStorage.removeItem(key);screen("staffLoginCard");
 });
 function updateHiddenButtons(){document.querySelectorAll("[data-toggle-hidden]").forEach(button=>button.textContent=showHidden?"Скрыть удалённые мной":"Показать удалённые мной");}
 document.querySelectorAll("[data-toggle-hidden]").forEach(button=>button.onclick=()=>{

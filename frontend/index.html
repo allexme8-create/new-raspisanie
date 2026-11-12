@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Расписание уроков</title>
-<link rel="stylesheet" href="/css/style.css?v=home-sections-1">
+<link rel="stylesheet" href="/css/style.css?v=schedule-duty-1">
 </head>
 <body>
 
@@ -18,6 +18,9 @@
     <div class="lesson-live hidden" id="currentLesson" aria-live="polite"></div>
   </section>
 
+  <section class="card duty-public" aria-label="Дежурство сегодня">
+    <h2>Дежурство сегодня</h2><div id="scheduleDuty" aria-live="polite">Загрузка дежурства…</div>
+  </section>
   <section id="view-home" class="view">
     <nav class="home-choices" aria-label="Разделы">
       <button class="home-choice home-current" type="button" data-open-view="view-home" aria-current="page"><span class="home-choice-icon" aria-hidden="true">🏠</span><strong>Главная</strong></button>
@@ -49,6 +52,6 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="/js/app.js?v=home-sections-1"></script>
+<script src="/js/app.js?v=schedule-duty-1"></script>
 </body>
 </html>

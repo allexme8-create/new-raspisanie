@@ -1,0 +1,9 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const elements=new Map();function el(id){if(!elements.has(id))elements.set(id,{innerHTML:'',textContent:'',value:'',classList:{add(){},remove(){},toggle(){},contains(){return false}},querySelectorAll(){return []}});return elements.get(id)}
+class FixedDate extends Date{constructor(...args){super(...(args.length?args:['2026-11-09T01:30:00Z']))}static now(){return new FixedDate().getTime()}}
+const ctx={Date:FixedDate,Intl,console,localStorage:{getItem:()=>null,setItem(){}},document:{hidden:false,body:{classList:{toggle(){}}},getElementById:el,querySelectorAll:()=>[],addEventListener(){}},matchMedia:()=>({matches:false,addEventListener(){},addListener(){}}),setInterval(){},clearTimeout(){},fetch:async()=>({ok:true,json:async()=>({})})};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync('frontend/js/app.js','utf8'),ctx);
+vm.runInContext(`state.bellSchedule={shifts:{'1':{'Пн':{'1':{start:'08:00',end:'09:00'},'2':{start:'09:20',end:'10:00'}}},'2':{'Пн':{'1':{start:'13:00',end:'14:00'}}}}};publicDuty={today:'2026-11-09',timezone:'Asia/Krasnoyarsk',entries:[{slot:0,full_name:'Админ',position:'Завуч'},{slot:1,full_name:'<Учитель>',position:'Учитель',class_name:'5А'},{slot:2,full_name:'Другой',position:'Учитель',class_name:'6Б'}]};renderDutyBanner();`,ctx);
+const html=el('scheduleDuty').innerHTML;assert.match(html,/<strong>Дежурный администратор: Админ · Завуч<\/strong>/);assert.match(html,/<strong>1-я смена · дежурный учитель: &lt;Учитель&gt; · Учитель · 5А<\/strong>/);assert.match(html,/<p class="">2-я смена · дежурный учитель: Другой · Учитель · 6Б<\/p>/);
+vm.runInContext('state.bellSchedule=null;renderDutyBanner()',ctx);assert.match(el('scheduleDuty').innerHTML,/текущая смена не определяется/);assert.doesNotMatch(el('scheduleDuty').innerHTML,/<strong>/);
+console.log('Schedule duty banner OK');

@@ -8,7 +8,8 @@ import secrets
 import sqlite3
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import Literal
 
@@ -18,6 +19,24 @@ from cryptography.fernet import Fernet, InvalidToken
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
 SESSION_TTL = 12 * 60 * 60
+SCHOOL_TIMEZONE = os.environ.get("SCHOOL_TIMEZONE", "Asia/Krasnoyarsk")
+
+
+def school_today() -> date:
+    return datetime.now(ZoneInfo(SCHOOL_TIMEZONE)).date()
+
+
+def duty_quarter(today: date) -> tuple[date, date, int, bool]:
+    year = today.year
+    periods = [(date(year, 1, 10), date(year, 3, 31), 3),
+               (date(year, 4, 1), date(year, 5, 31), 4),
+               (date(year, 9, 1), date(year, 10, 31), 1),
+               (date(year, 11, 1), date(year, 12, 31), 2),
+               (date(year + 1, 1, 10), date(year + 1, 3, 31), 3)]
+    for start, end, quarter in periods:
+        if today <= end:
+            return start, end, quarter, start <= today
+    raise RuntimeError("Не удалось определить четверть")
 
 
 def now() -> datetime:
@@ -113,6 +132,17 @@ class TaskCreate(BaseModel):
         if value.tzinfo is None or value.utcoffset() is None:
             raise ValueError("Укажите срок с часовым поясом")
         return value.astimezone(timezone.utc)
+
+
+class DutyBooking(BaseModel):
+    day: date
+    shift: Literal[1, 2] | None = None
+    class_name: str = Field(default="", max_length=40)
+
+    @field_validator("class_name")
+    @classmethod
+    def clean_class(cls, value: str) -> str:
+        return " ".join(value.split())
 
 
 class Complete(BaseModel):
@@ -260,6 +290,10 @@ class Store:
             db.execute("CREATE INDEX IF NOT EXISTS task_collaborators_user ON task_collaborators(user_id, task_id)")
             db.execute("CREATE TABLE IF NOT EXISTS task_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), recipient_id TEXT NOT NULL REFERENCES users(id), actor_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL, created_at TEXT NOT NULL, read_at TEXT)")
             db.execute("CREATE INDEX IF NOT EXISTS task_notifications_unread ON task_notifications(recipient_id,read_at,task_id,id)")
+            db.execute("""CREATE TABLE IF NOT EXISTS duty_assignments (
+                day TEXT NOT NULL, slot INTEGER NOT NULL CHECK(slot IN (0,1,2)),
+                user_id TEXT NOT NULL REFERENCES users(id), class_name TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY(day,slot), UNIQUE(day,user_id))""")
             # Почтовые настройки и коды больше не используются.
             for name in ("mail_oauth", "mail_oauth_pending", "password_resets", "reset_throttle", "reset_ip_throttle"):
                 db.execute(f"DROP TABLE IF EXISTS {name}")
@@ -452,6 +486,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 raise HTTPException(404, "Пользователь не найден")
             db.execute("DELETE FROM sessions WHERE user_id=?", (user_id,))
             db.execute("DELETE FROM login_attempts WHERE key=?", (hashlib.sha256(row["email"].encode()).hexdigest(),))
+            db.execute("DELETE FROM duty_assignments WHERE user_id=? AND day>=?", (user_id,school_today().isoformat()))
             db.execute("UPDATE users SET active=0,email=?,password_hash='',password_ciphertext=NULL,full_name='',position='',must_change=1 WHERE id=?", (f"__deleted__:{user_id}", user_id))
         return {"ok": True}
 
@@ -511,6 +546,73 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 raise HTTPException(401, "Сессия истекла — войдите заново")
             db.execute("DELETE FROM sessions WHERE user_id=? AND token_hash<>?", (user["id"], user["token_hash"]))
         return {"ok": True}
+
+    def duty_rows(db, start: date, end: date, viewer_id: str | None = None):
+        rows = db.execute("""SELECT duty_assignments.day,duty_assignments.slot,duty_assignments.user_id,duty_assignments.class_name,users.active,
+            CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS full_name,
+            CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''),CASE users.role WHEN 'teacher' THEN 'Учитель' ELSE 'Заместитель директора' END) ELSE '' END AS position
+            FROM duty_assignments JOIN users ON users.id=duty_assignments.user_id
+            WHERE duty_assignments.day BETWEEN ? AND ? ORDER BY duty_assignments.day,duty_assignments.slot""", (start.isoformat(), end.isoformat())).fetchall()
+        return [{"day": row["day"], "slot": row["slot"], "class_name": row["class_name"] if row["active"] else "", "full_name": row["full_name"], "position": row["position"], "mine": bool(viewer_id and row["user_id"] == viewer_id)} for row in rows]
+
+    def duty_user(user: dict = Depends(ready_user)) -> dict:
+        if user["role"] not in ("teacher", "associate"):
+            raise HTTPException(403, "Дежурство доступно учителям и заместителям")
+        return user
+
+    @router.get("/api/staff/duty")
+    def duty_calendar(user: dict = Depends(duty_user)):
+        today = school_today()
+        start, end, quarter, active = duty_quarter(today)
+        with store.connect() as db:
+            entries = duty_rows(db, start, end, user["id"])
+        return {"today": today.isoformat(), "start": start.isoformat(), "end": end.isoformat(), "quarter": quarter, "active": active, "timezone": SCHOOL_TIMEZONE, "entries": entries}
+
+    @router.post("/api/staff/duty", status_code=201)
+    def book_duty(body: DutyBooking, user: dict = Depends(duty_user)):
+        today = school_today()
+        start, end, _, active = duty_quarter(today)
+        if not active or not start <= body.day <= end or body.day < today:
+            raise HTTPException(422, "Выберите сегодняшнюю или будущую дату текущей четверти")
+        if not user["full_name"]:
+            raise HTTPException(422, "Сначала укажите ФИО в профиле")
+        if user["role"] == "teacher":
+            if body.shift is None or not body.class_name:
+                raise HTTPException(422, "Укажите смену и класс")
+            slot, class_name = body.shift, body.class_name
+        else:
+            if body.shift is not None or body.class_name:
+                raise HTTPException(422, "Заместитель выбирает дежурство администратора")
+            slot, class_name = 0, ""
+        try:
+            with store.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                # Recheck session and user inside the transaction before reserving a slot.
+                if not db.execute("SELECT 1 FROM sessions JOIN users ON users.id=sessions.user_id WHERE sessions.token_hash=? AND sessions.expires>? AND users.active=1 AND users.id=?", (user["token_hash"], int(time.time()), user["id"])).fetchone():
+                    raise HTTPException(401, "Сессия истекла — войдите заново")
+                db.execute("INSERT INTO duty_assignments (day,slot,user_id,class_name) VALUES (?,?,?,?)", (body.day.isoformat(),slot,user["id"],class_name))
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Место занято или вы уже записаны на эту дату. Обновите карту.")
+        return {"ok": True}
+
+    @router.delete("/api/staff/duty/{day}/{slot}")
+    def cancel_duty(day: date, slot: int, user: dict = Depends(duty_user)):
+        if slot not in (0,1,2) or day < school_today():
+            raise HTTPException(422, "Нельзя отменить прошедшее дежурство")
+        with store.connect() as db:
+            deleted = db.execute("DELETE FROM duty_assignments WHERE day=? AND slot=? AND user_id=?", (day.isoformat(),slot,user["id"]))
+            if not deleted.rowcount:
+                raise HTTPException(404, "Дежурство не найдено")
+        return {"ok": True}
+
+    @router.get("/api/duties/today")
+    def public_today_duties():
+        today = school_today()
+        with store.connect() as db:
+            entries = duty_rows(db,today,today)
+        for entry in entries:
+            entry.pop("mine",None)
+        return {"today":today.isoformat(), "timezone":SCHOOL_TIMEZONE,"entries":entries}
 
     @router.get("/api/staff/associates")
     def associates(_: dict = Depends(director)):

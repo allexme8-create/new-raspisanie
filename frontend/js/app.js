@@ -129,6 +129,35 @@ function renderCurrentLesson(){
   }
 }
 
+let publicDuty=null;
+function activeDutyShifts(timezone){
+  if(!state.bellSchedule?.shifts)return [];
+  try{
+    const parts=new Intl.DateTimeFormat("en-US",{timeZone:timezone,weekday:"short",hour:"2-digit",minute:"2-digit",hourCycle:"h23"}).formatToParts(new Date());
+    const values=Object.fromEntries(parts.map(p=>[p.type,p.value])),day=({Mon:"Пн",Tue:"Вт",Wed:"Ср",Thu:"Чт",Fri:"Пт",Sat:"Сб"})[values.weekday];
+    if(!day)return [];
+    const minute=Number(values.hour)*60+Number(values.minute);
+    return [1,2].filter(shift=>{
+      const periods=Object.values(state.bellSchedule.shifts[String(shift)]?.[day]||{}).map(p=>({start:clockMinutes(p.start),end:clockMinutes(p.end)})).filter(p=>p.start!==null&&p.end!==null&&p.start<p.end);
+      return periods.length&&minute>=Math.min(...periods.map(p=>p.start))&&minute<Math.max(...periods.map(p=>p.end));
+    });
+  }catch(e){return [];}
+}
+function renderDutyBanner(){
+  const box=$("scheduleDuty");if(!box||!publicDuty)return;
+  const active=activeDutyShifts(publicDuty.timezone),entries=publicDuty.entries||[];
+  const describe=entry=>entry?`${entry.full_name||"ФИО не указано"}${entry.position?` · ${entry.position}`:""}${entry.class_name?` · ${entry.class_name}`:""}`:"Не назначен";
+  const admin=describe(entries.find(e=>e.slot===0));
+  const line=(label,text,isActive)=>`<p class="${isActive?'duty-active':''}">${isActive?`<strong>${esc(label)}: ${esc(text)}</strong>`:`${esc(label)}: ${esc(text)}`}</p>`;
+  box.innerHTML=`<p class="muted">${esc(publicDuty.today)} · ${esc(publicDuty.timezone)}${!active.length?' · текущая смена не определяется':''}</p>`+
+    line("Дежурный администратор",admin,active.length>0)+[1,2].map(shift=>line(`${shift}-я смена · дежурный учитель`,describe(entries.find(e=>e.slot===shift)),active.includes(shift))).join("");
+}
+async function loadPublicDuty(){
+  try{const response=await fetch("/api/duties/today",{cache:"no-store"});if(!response.ok)throw new Error("ошибка сервера");
+    const data=await response.json();if(!data.today||!data.timezone||!Array.isArray(data.entries))throw new Error("нет данных");publicDuty=data;renderDutyBanner();
+  }catch(e){publicDuty=null;$("scheduleDuty").textContent="Не удалось загрузить данные о дежурстве.";}
+}
+
 async function loadSchedule(){
   showLoading();
   try{
@@ -139,6 +168,7 @@ async function loadSchedule(){
     state.subjects=data.subjects||null;
     state.bellSchedule=data.bell_schedule||null;
     state.secondShiftClasses=Array.isArray(data.second_shift_classes)?data.second_shift_classes:[];
+    renderDutyBanner();
     state.updatedAt=data.updated_at?formatDate(data.updated_at):null;
     if(!state.teachers && !state.subjects){
       rebuildAll();
@@ -578,8 +608,10 @@ $("reloadBtn").onclick=()=>loadSchedule();
 
 /* Обновляем сетку каждые 5 минут, а таймер урока — каждые 30 секунд. */
 setInterval(()=>{ if(!document.hidden) loadSchedule(); }, 5*60*1000);
-setInterval(()=>{ if(!document.hidden){renderCurrentLesson();renderRooms();} }, 30*1000);
-document.addEventListener("visibilitychange",()=>{ if(!document.hidden){loadSchedule();renderCurrentLesson();renderRooms();} });
+setInterval(()=>{ if(!document.hidden){renderCurrentLesson();renderRooms();renderDutyBanner();} }, 30*1000);
+setInterval(()=>{if(!document.hidden)loadPublicDuty();},60*1000);
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden){loadSchedule();loadPublicDuty();renderCurrentLesson();renderRooms();} });
 
 /* Запуск */
 loadSchedule();
+loadPublicDuty();
