@@ -5,14 +5,14 @@ function resetDuty(){
   byId("dutyError").innerHTML="";byId("dutySelected").textContent="Выберите свободное место на карте.";byId("dutySubmit").disabled=true;
 }
 const dutySlotLabel=slot=>slot===0?"Дежурный администратор":`${slot}-я смена · учитель`;
-function dutyDateText(value){return new Date(value+"T00:00:00Z").toLocaleDateString("ru-RU",{timeZone:"UTC",day:"numeric",month:"long",weekday:"short"});}
+function dutyDateText(value){const date=new Date(value+"T00:00:00Z");return `${date.toLocaleDateString("ru-RU",{timeZone:"UTC",day:"numeric",month:"long"})} ${date.getUTCFullYear()} года`;}
 function dutyDays(start,end){
   const result=[];for(let d=new Date(start+"T00:00:00Z"),last=new Date(end+"T00:00:00Z");d<=last;d.setUTCDate(d.getUTCDate()+1))result.push(d.toISOString().slice(0,10));return result;
 }
 function renderDuty(){
   if(!dutyCalendar)return;
   const data=dutyCalendar,map=new Map(data.entries.map(e=>[`${e.day}:${e.slot}`,e]));
-  byId("dutyPeriod").textContent=`${data.quarter}-я четверть: ${dutyDateText(data.start)} — ${dutyDateText(data.end)}. Часовой пояс: ${data.timezone}.`+(data.active?"":" Сейчас каникулы: показана следующая четверть, запись откроется с её начала.");
+  byId("dutyPeriod").textContent=`${data.quarter}-я четверть: ${dutyDateText(data.start)} — ${dutyDateText(data.end)}.`+(data.active?"":" Сейчас каникулы: показана следующая четверть, запись откроется с её начала.");
   byId("dutyClassField").classList.toggle("hidden",role!=="teacher");
   byId("dutyClass").required=role==="teacher";
   const chosen=dutySelected&&map.get(`${dutySelected.day}:${dutySelected.slot}`);

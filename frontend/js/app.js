@@ -147,10 +147,13 @@ function renderDutyBanner(){
   const box=$("scheduleDuty");if(!box||!publicDuty)return;
   const active=activeDutyShifts(publicDuty.timezone),entries=publicDuty.entries||[];
   const describe=entry=>entry?`${entry.full_name||"ФИО не указано"}${entry.position?` · ${entry.position}`:""}${entry.class_name?` · ${entry.class_name}`:""}`:"Не назначен";
-  const admin=describe(entries.find(e=>e.slot===0));
-  const line=(label,text,isActive)=>`<p class="${isActive?'duty-active':''}">${isActive?`<strong>${esc(label)}: ${esc(text)}</strong>`:`${esc(label)}: ${esc(text)}`}</p>`;
-  box.innerHTML=`<p class="muted">${esc(publicDuty.today)} · ${esc(publicDuty.timezone)}${!active.length?' · текущая смена не определяется':''}</p>`+
-    line("Дежурный администратор",admin,active.length>0)+[1,2].map(shift=>line(`${shift}-я смена · дежурный учитель`,describe(entries.find(e=>e.slot===shift)),active.includes(shift))).join("");
+  const formatDay=value=>{
+    const day=new Date(value+"T00:00:00Z");
+    return `${day.toLocaleDateString("ru-RU",{timeZone:"UTC",day:"numeric",month:"long"})} ${day.getUTCFullYear()} года`;
+  };
+  const line=(label,entry,isActive)=>`<p class="${isActive?'duty-active':''}">${esc(label)}: ${entry?`<strong>${esc(describe(entry))}</strong>`:esc(describe(entry))}</p>`;
+  box.innerHTML=`<p class="muted">${esc(formatDay(publicDuty.today))}${!active.length?' · текущая смена не определяется':''}</p>`+
+    line("Дежурный администратор",entries.find(e=>e.slot===0),active.length>0)+[1,2].map(shift=>line(`${shift}-я смена · дежурный учитель`,entries.find(e=>e.slot===shift),active.includes(shift))).join("");
 }
 async function loadPublicDuty(){
   try{const response=await fetch("/api/duties/today",{cache:"no-store"});if(!response.ok)throw new Error("ошибка сервера");
