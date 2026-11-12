@@ -259,3 +259,12 @@ footer a{color:var(--muted)}
 .task-progress-summary{color:#a15b00;font-weight:700;margin:6px 0}
 .task-reason{font-size:14px;color:var(--muted)}
 .task-discussion select{display:block;width:100%;margin:6px 0 8px}
+
+.staff-notifications{border:2px solid #e54825;background:#fff0df;border-radius:14px;padding:14px;margin:0 0 14px;color:#80310e;box-shadow:0 4px 16px rgba(190,55,20,.16)}
+.staff-notifications h2{margin:0 0 5px;color:#a3230a}
+.staff-notifications p{font-size:13px;margin:0 0 10px}
+.staff-notification{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;width:100%;text-align:left;border:1px solid #f4b698;border-radius:9px;padding:10px;margin-top:7px;background:white;color:#6c260e;font:inherit;cursor:pointer}
+.staff-notification:hover,.staff-notification:focus-visible{outline:2px solid #d63510;background:#fff8ef}
+.staff-notification span{flex:1 1 200px;white-space:pre-wrap;overflow-wrap:anywhere}.staff-notification small{color:#754c3b}
+.task-card.task-has-notification{outline:3px solid #f05227;outline-offset:2px}
+.task-notice{display:inline-block;border-radius:7px;background:#c63012;color:#fff;font-size:13px;font-weight:750;padding:5px 9px;margin:10px 0 0}

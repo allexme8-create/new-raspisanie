@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Задачи руководства</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-collaboration-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-alerts-1">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -29,6 +29,9 @@
   </section>
   <div id="staffPanel" class="hidden">
     <div class="staff-heading"><span id="staffIdentity"></span><button class="btn secondary" type="button" data-logout>Выйти</button></div>
+    <section id="staffNotifications" class="staff-notifications hidden" aria-live="polite" aria-label="Уведомления по задачам">
+      <h2>🔔 Новые события по вашим задачам</h2><p>Откройте задачу, чтобы посмотреть историю.</p><div id="staffNotificationList"></div>
+    </section>
     <nav id="staffHome" class="home-choices" aria-label="Разделы личного кабинета">
       <button class="home-choice" type="button" data-staff-view="staffProfileView"><span class="home-choice-icon" aria-hidden="true">👤</span><strong>Мой профиль</strong><span aria-hidden="true">→</span></button>
       <button class="home-choice" id="staffCreateChoice" type="button" data-staff-view="staffCreateView"><span class="home-choice-icon" aria-hidden="true">✏️</span><strong>Поставить задачу или создать проект</strong><span aria-hidden="true">→</span></button>
@@ -70,6 +73,6 @@
     <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-collaboration-1"></script>
+<script src="/js/staff.js?v=staff-alerts-1"></script>
 </body>
 </html>

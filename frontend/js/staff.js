@@ -3,7 +3,7 @@ const byId=id=>document.getElementById(id);
 const escapeHTML=value=>String(value).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const role=location.pathname==="/Director"?"director":location.pathname==="/teacher"?"teacher":"associate";
 const manager=role!=="teacher", key=`schedule_staff_${role}`;
-let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false;
+let staffToken=sessionStorage.getItem(key)||"", staffUser=null, refreshing=false, unreadNotifications=[];
 byId("pageTitle").textContent=role==="director"?"Кабинет директора":role==="associate"?"Кабинет заместителя директора":"Кабинет учителя";
 const roleNames={director:"Директор",associate:"Заместитель директора",teacher:"Учитель"};
 function showIdentity(user){byId("staffIdentity").textContent=`${user.full_name||"ФИО не указано — заполните профиль"} · ${user.position||roleNames[user.role]||"Сотрудник"}`;}
@@ -39,6 +39,7 @@ async function showSession(data){
   byId("staffCreateChoice").classList.toggle("hidden",!manager);openStaffView("staffHome");
   if(manager)await loadAssignees();
   await loadTasks();
+  await loadNotifications();
 }
 async function loadAssignees(){
   try{
@@ -58,6 +59,7 @@ function personName(name,position){return (name||"ФИО не указано")+(
 function taskMarkup(t){
   const mine=t.assignee_id===staffUser.id;
   return `<article class="task-card status-${escapeHTML(t.status)}" data-task-card="${escapeHTML(t.id)}"><div class="task-top"><span class="task-status">${escapeHTML(statuses[t.status]||t.status)}</span><span class="task-deadline">Срок: ${escapeHTML(fmtDate(t.deadline))}</span></div>
+    <p class="task-notice hidden"></p>
     <p class="task-description">${escapeHTML(t.description)}</p>
     <p class="task-meta">Исполнитель: ${escapeHTML(personName(t.assignee_name,t.assignee_position))} · Автор: ${escapeHTML(personName(t.director_name,t.director_position))}</p>
     <p class="task-meta task-collaborators">${(t.collaborators||[]).length?`Соисполнители: ${(t.collaborators||[]).map(u=>escapeHTML(personName(u.full_name,u.position))).join("; ")}`:""}</p>
@@ -84,6 +86,10 @@ async function refreshComments(detail){
   const data=await request(`/api/staff/tasks/${encodeURIComponent(detail.dataset.discussion)}/comments`);
   const history=[...(data.comments||[]).map(c=>({...c,event:false})),...(data.events||[]).map(c=>({...c,event:true}))].sort((a,b)=>a.created_at.localeCompare(b.created_at)||a.id.localeCompare(b.id));
   out.innerHTML=history.length?history.map(c=>`<div class="task-comment"><b>${escapeHTML(personName(c.author_name,c.author_position))}</b> <span class="task-meta">${escapeHTML(fmtDate(c.created_at))}${c.event?" · Событие":""}</span><p>${escapeHTML(c.text)}</p></div>`).join(""):'<p class="hint">Истории пока нет.</p>';
+  if(detail.open&&data.notification_through_id){
+    await request(`/api/staff/tasks/${encodeURIComponent(detail.dataset.discussion)}/notifications/read`,{method:"POST",body:{through_id:data.notification_through_id}});
+    await loadNotifications();
+  }
 }
 async function loadInviteOptions(form,tid){
   const data=await request(`/api/staff/tasks/${encodeURIComponent(tid)}/collaborators/candidates`),select=form.elements.user_id,previous=select.value;
@@ -93,6 +99,34 @@ async function loadInviteOptions(form,tid){
     return `<option value="${escapeHTML(u.id)}">${escapeHTML(personName(label,u.position||roleNames[u.role]))}</option>`;
   }).join("");
   if(data.users.some(u=>u.id===previous))select.value=previous;
+}
+function paintTaskNotifications(){
+  const counts=new Map();unreadNotifications.forEach(n=>counts.set(n.task_id,(counts.get(n.task_id)||0)+1));
+  for(const id of ["taskList","projectList"])byId(id).querySelectorAll("[data-task-card]").forEach(card=>{
+    const count=counts.get(card.dataset.taskCard)||0;card.classList.toggle("task-has-notification",count>0);
+    const badge=card.querySelector(".task-notice");if(badge){badge.textContent=count?`🔔 Новых событий: ${count}`:"";badge.classList.toggle("hidden",!count);}
+  });
+}
+async function loadNotifications(){
+  if(!staffToken||!staffUser)return;
+  const tokenAtStart=staffToken;
+  try{
+    const data=await request("/api/staff/notifications");if(staffToken!==tokenAtStart)return;
+    unreadNotifications=data.notifications||[];
+    const box=byId("staffNotifications"),list=byId("staffNotificationList");
+    box.classList.toggle("hidden",unreadNotifications.length===0);
+    list.innerHTML=unreadNotifications.map((n,i)=>`<button class="staff-notification" type="button" data-notification-index="${i}"><strong>${n.kind==="completed"?"✅ Задача выполнена":"💬 Новый комментарий"}</strong><span>${escapeHTML(n.description)}</span><small>${escapeHTML(personName(n.actor_name,n.actor_position))} · ${escapeHTML(fmtDate(n.created_at))}</small></button>`).join("");
+    list.querySelectorAll("[data-notification-index]").forEach(button=>button.onclick=async()=>{
+      const n=unreadNotifications[Number(button.dataset.notificationIndex)];if(!n)return;
+      const view=n.project_id?"staffProjectsView":"staffTasksView",container=byId(n.project_id?"projectList":"taskList");
+      let card=Array.from(container.querySelectorAll("[data-task-card]")).find(c=>c.dataset.taskCard===n.task_id);
+      if(!card&&!taskDraftsOpen()){await loadTasks();card=Array.from(container.querySelectorAll("[data-task-card]")).find(c=>c.dataset.taskCard===n.task_id);}
+      if(!card){errorAt("taskListError",new Error("Не удалось открыть задачу. Закройте обсуждения и сохраните черновики, затем обновите список."));return;}
+      openStaffView(view);card.scrollIntoView({behavior:"smooth",block:"center"});
+      const detail=card.querySelector("[data-discussion]");if(detail.open)refreshComments(detail).catch(e=>errorAtElement(detail.querySelector(".task-action-error"),e));else detail.open=true;
+    });
+    paintTaskNotifications();
+  }catch(e){if(staffToken===tokenAtStart)errorAt("taskListError",e);}
 }
 function bindTaskCards(id){
   byId(id).querySelectorAll("[data-task-card]").forEach(card=>{
@@ -153,7 +187,7 @@ async function loadTasks(){
       select.innerHTML='<option value="">Текущие задачи</option>'+editable.map(p=>`<option value="${escapeHTML(p.id)}">${escapeHTML(p.title)}</option>`).join("");
       if(editable.some(p=>p.id===previous))select.value=previous;
     }
-    bindTaskCards("taskList");bindTaskCards("projectList");
+    bindTaskCards("taskList");bindTaskCards("projectList");paintTaskNotifications();
   }catch(e){errorAt("taskListError",e);}finally{refreshing=false;}
 }
 byId("staffLoginForm").onsubmit=async e=>{
@@ -184,8 +218,8 @@ byId("taskForm").onsubmit=async e=>{
   }catch(error){errorAt("taskCreateError",error);}finally{button.disabled=false;}
 };
 document.querySelectorAll("[data-logout]").forEach(button=>button.onclick=async()=>{
-  try{await request("/api/staff/logout",{method:"POST"});}catch(e){}staffToken="";staffUser=null;sessionStorage.removeItem(key);screen("staffLoginCard");
+  try{await request("/api/staff/logout",{method:"POST"});}catch(e){}staffToken="";staffUser=null;unreadNotifications=[];byId("staffNotifications").classList.add("hidden");byId("staffNotificationList").innerHTML="";sessionStorage.removeItem(key);screen("staffLoginCard");
 });
 byId("taskRefresh").onclick=byId("projectRefresh").onclick=()=>{if(taskDraftsOpen()){errorAt("taskListError",new Error("Закройте обсуждения и сохраните или очистите черновики перед обновлением."));return;}if(manager)loadAssignees();loadTasks();};
-setInterval(()=>{if(!document.hidden&&staffToken&&staffUser&&!byId("staffPanel").classList.contains("hidden"))loadTasks();},30000);
+setInterval(()=>{if(!document.hidden&&staffToken&&staffUser&&!byId("staffPanel").classList.contains("hidden")){loadTasks();loadNotifications();}},30000);
 if(staffToken)request("/api/staff/me").then(showSession).catch(e=>{if(staffToken)errorAt("staffLoginError",e);screen("staffLoginCard");});

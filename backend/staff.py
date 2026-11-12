@@ -129,6 +129,10 @@ class TaskProgress(BaseModel):
         return value.strip()
 
 
+class NotificationRead(BaseModel):
+    through_id: int = Field(ge=1)
+
+
 class CollaboratorAdd(BaseModel):
     user_id: str = Field(min_length=1, max_length=64)
 
@@ -217,6 +221,8 @@ class Store:
             db.execute("CREATE INDEX IF NOT EXISTS task_events_task ON task_events(task_id,created_at,id)")
             db.execute("CREATE TABLE IF NOT EXISTS task_collaborators (task_id TEXT NOT NULL REFERENCES tasks(id), user_id TEXT NOT NULL REFERENCES users(id), added_at TEXT NOT NULL, PRIMARY KEY (task_id, user_id))")
             db.execute("CREATE INDEX IF NOT EXISTS task_collaborators_user ON task_collaborators(user_id, task_id)")
+            db.execute("CREATE TABLE IF NOT EXISTS task_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, task_id TEXT NOT NULL REFERENCES tasks(id), recipient_id TEXT NOT NULL REFERENCES users(id), actor_id TEXT NOT NULL REFERENCES users(id), kind TEXT NOT NULL, created_at TEXT NOT NULL, read_at TEXT)")
+            db.execute("CREATE INDEX IF NOT EXISTS task_notifications_unread ON task_notifications(recipient_id,read_at,task_id,id)")
             # Почтовые настройки и коды больше не используются.
             for name in ("mail_oauth", "mail_oauth_pending", "password_resets", "reset_throttle", "reset_ip_throttle"):
                 db.execute(f"DROP TABLE IF EXISTS {name}")
@@ -554,6 +560,27 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 raise HTTPException(409, "Пользователь уже участвует в задаче")
         return {"user": dict(target)}
 
+    def notify_initiator(db, task_id: str, actor_id: str, kind: str):
+        db.execute("""INSERT INTO task_notifications (task_id, recipient_id, actor_id, kind, created_at)
+            SELECT tasks.id, tasks.director_id, ?, ?, ? FROM tasks JOIN users ON users.id=tasks.director_id
+            WHERE tasks.id=? AND tasks.director_id<>? AND users.active=1""", (actor_id, kind, iso(now()), task_id, actor_id))
+
+    @router.get("/api/staff/notifications")
+    def notifications(user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            rows = db.execute("""SELECT n.id,n.task_id,n.kind,n.created_at,tasks.description,tasks.project_id,
+                CASE WHEN actor.active=1 THEN actor.full_name ELSE 'Удалённый пользователь' END AS actor_name,
+                CASE WHEN actor.active=1 THEN COALESCE(NULLIF(actor.position,''),CASE actor.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS actor_position
+                FROM task_notifications n JOIN tasks ON tasks.id=n.task_id JOIN users actor ON actor.id=n.actor_id
+                WHERE n.recipient_id=? AND n.read_at IS NULL ORDER BY n.id DESC""", (user["id"],)).fetchall()
+        return {"notifications": [dict(row) for row in rows]}
+
+    @router.post("/api/staff/tasks/{task_id}/notifications/read")
+    def read_notifications(task_id: str, body: NotificationRead, user: dict = Depends(ready_user)):
+        with store.connect() as db:
+            db.execute("UPDATE task_notifications SET read_at=? WHERE task_id=? AND recipient_id=? AND read_at IS NULL AND id<=?", (iso(now()), task_id, user["id"], body.through_id))
+        return {"ok": True}
+
     @router.put("/api/staff/tasks/{task_id}/completion")
     def complete_task(task_id: str, body: Complete, user: dict = Depends(ready_user)):
         if not body.completed:
@@ -566,6 +593,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
             if not previous["completed_at"]:
                 db.execute("UPDATE tasks SET completed_at=?, partial=0 WHERE id=?", (iso(now()), task_id))
                 db.execute("INSERT INTO task_events VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], "Задача выполнена", iso(now())))
+                notify_initiator(db, task_id, user["id"], "completed")
             task = db.execute(TASK_SELECT + " WHERE tasks.id=?", (task_id,)).fetchone()
         return {"task": task_json(task)}
 
@@ -592,6 +620,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
     @router.get("/api/staff/tasks/{task_id}/comments")
     def comments(task_id: str, user: dict = Depends(ready_user)):
         with store.connect() as db:
+            db.execute("BEGIN")
             check_task_access(db, task_id, user)
             rows = db.execute("""SELECT task_comments.id, task_comments.text, task_comments.created_at,
                 CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS author_name,
@@ -601,7 +630,8 @@ def make_router(store: Store, require_admin) -> APIRouter:
                 CASE WHEN users.active=1 THEN users.full_name ELSE 'Удалённый пользователь' END AS author_name,
                 CASE WHEN users.active=1 THEN COALESCE(NULLIF(users.position,''), CASE users.role WHEN 'teacher' THEN 'Учитель' WHEN 'associate' THEN 'Заместитель директора' ELSE 'Директор' END) ELSE '' END AS author_position
                 FROM task_events JOIN users ON users.id=task_events.author_id WHERE task_events.task_id=? ORDER BY task_events.created_at,task_events.id""", (task_id,)).fetchall()
-        return {"comments": [dict(row) for row in rows], "events": [dict(row) for row in events]}
+            through = db.execute("SELECT MAX(id) FROM task_notifications WHERE task_id=? AND recipient_id=? AND read_at IS NULL", (task_id, user["id"])).fetchone()[0]
+        return {"comments": [dict(row) for row in rows], "events": [dict(row) for row in events], "notification_through_id": through}
 
     @router.post("/api/staff/tasks/{task_id}/comments", status_code=201)
     def add_comment(task_id: str, body: TaskComment, user: dict = Depends(ready_user)):
@@ -609,6 +639,7 @@ def make_router(store: Store, require_admin) -> APIRouter:
             db.execute("BEGIN IMMEDIATE")
             check_task_access(db, task_id, user)
             db.execute("INSERT INTO task_comments VALUES (?,?,?,?,?)", (secrets.token_hex(16), task_id, user["id"], body.text, iso(now())))
+            notify_initiator(db, task_id, user["id"], "comment")
         return {"ok": True}
 
     return router

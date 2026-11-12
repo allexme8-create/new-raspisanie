@@ -354,6 +354,53 @@ class StaffTests(unittest.TestCase):
         self.assertEqual(next(t for t in rows if t["id"]==task["id"])["collaborators"][0]["full_name"],"Удалённый пользователь")
         self.assertEqual(self.client.get(base+"/comments",headers=hh).status_code,401)
 
+    def test_initiator_notifications_and_read_watermark(self):
+        director = self.create("d@example.com", "director")
+        deputy = self.create("a@example.com", "associate")
+        teacher = self.create("t@example.com", "teacher")
+        helper = self.create("h@example.com", "teacher")
+        dh, _ = self.ready("d@example.com", "director", director["password"])
+        ah, _ = self.ready("a@example.com", "associate", deputy["password"])
+        th, _ = self.ready("t@example.com", "teacher", teacher["password"])
+        hh, _ = self.ready("h@example.com", "teacher", helper["password"])
+        self.client.put("/api/staff/profile", headers=th, json={"full_name":"Учитель", "position":"Учитель математики"})
+        project = self.client.post("/api/staff/projects", headers=ah, json={"title":"Проект"}).json()["id"]
+        body={"assignee_id":teacher["user"]["id"], "description":"Задача", "deadline":(staff.now()+timedelta(days=1)).isoformat(), "project_id":project}
+        task=self.client.post("/api/staff/tasks",headers=ah,json=body).json()["task"]
+        url=f"/api/staff/tasks/{task['id']}"
+        self.client.post(url+"/collaborators",headers=ah,json={"user_id":helper["user"]["id"]})
+        self.assertEqual(self.client.get("/api/staff/notifications").status_code,401)
+        self.client.post(url+"/comments",headers=ah,json={"text":"Автор"})
+        self.assertEqual(self.client.get("/api/staff/notifications",headers=ah).json()["notifications"],[])
+        self.client.post(url+"/comments",headers=th,json={"text":"Выполняю"})
+        first=self.client.get("/api/staff/notifications",headers=ah).json()["notifications"]
+        self.assertEqual(len(first),1)
+        self.assertEqual(first[0]["kind"],"comment")
+        self.assertEqual(first[0]["project_id"],project)
+        self.assertEqual(first[0]["actor_name"],"Учитель")
+        self.assertEqual(first[0]["actor_position"],"Учитель математики")
+        self.assertEqual(self.client.get("/api/staff/notifications",headers=dh).json()["notifications"],[])
+        self.assertEqual(self.client.get("/api/staff/notifications",headers=th).json()["notifications"],[])
+        snapshot=self.client.get(url+"/comments",headers=ah).json()["notification_through_id"]
+        self.client.post(url+"/comments",headers=hh,json={"text":"Помогаю"})
+        self.client.post(url+"/notifications/read",headers=th,json={"through_id":snapshot})
+        self.assertEqual(len(self.client.get("/api/staff/notifications",headers=ah).json()["notifications"]),2)
+        self.client.post(url+"/notifications/read",headers=ah,json={"through_id":snapshot})
+        remaining=self.client.get("/api/staff/notifications",headers=ah).json()["notifications"]
+        self.assertEqual(len(remaining),1)
+        self.assertGreater(remaining[0]["id"],snapshot)
+        self.client.put(url+"/completion",headers=th,json={"completed":True})
+        self.client.put(url+"/completion",headers=th,json={"completed":True})
+        remaining=self.client.get("/api/staff/notifications",headers=ah).json()["notifications"]
+        self.assertEqual([n["kind"] for n in remaining].count("completed"),1)
+        latest=self.client.get(url+"/comments",headers=ah).json()["notification_through_id"]
+        self.client.post(url+"/notifications/read",headers=ah,json={"through_id":latest})
+        self.assertEqual(self.client.get("/api/staff/notifications",headers=ah).json()["notifications"],[])
+        self.store.init()
+        self.assertEqual(self.client.get("/api/staff/notifications",headers=ah).json()["notifications"],[])
+        self.client.post(url+"/comments",headers=th,json={"text":"Ещё"})
+        self.assertEqual(len(self.client.get("/api/staff/notifications",headers=ah).json()["notifications"]),1)
+
     def test_bruteforce_throttle(self):
         user = self.create("a@example.com", "associate")
         for _ in range(5):
