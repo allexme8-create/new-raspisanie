@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 
 import github_backup
 import planner
+import staff
 from schedule_parser import (
     ParseError,
     parse_bell_schedule_file,
@@ -144,6 +145,20 @@ def require_admin(
     )
     if not any(_check_token(token) for token in tokens if token):
         raise HTTPException(status_code=401, detail="Требуется вход администратора")
+
+
+# Персональные данные не включаются в GitHub-бэкап публичного расписания.
+staff_store = staff.Store(DATA_DIR / "staff.sqlite3")
+app.include_router(staff.make_router(staff_store, require_admin))
+
+
+@app.middleware("http")
+async def private_no_cache(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith(("/api/staff/", "/api/admin/users")) or request.url.path in ("/Director", "/associate"):
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 class LoginBody(BaseModel):
@@ -509,6 +524,16 @@ def admin_page() -> FileResponse:
         FRONTEND_DIR / "admin.html",
         headers={"Cache-Control": "no-store, max-age=0"},
     )
+
+
+@app.get("/Director", include_in_schema=False)
+def director_page() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "staff.html", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/associate", include_in_schema=False)
+def associate_page() -> FileResponse:
+    return FileResponse(FRONTEND_DIR / "staff.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/healthz", include_in_schema=False)

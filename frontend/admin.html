@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=planner-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-1">
 </head>
 <body>
 
@@ -36,6 +36,18 @@
 
   <!-- Панель -->
   <div id="adminPanel" class="hidden">
+    <section class="card">
+      <h2>Пользователи руководства</h2>
+      <p class="hint">Создайте директора или заместителя. Логин (e-mail) и временный пароль отправляются на указанную почту; при первом входе пароль нужно сменить. Требуется настроенный SMTP.</p>
+      <form id="staffCreateForm" class="planner-form">
+        <label>E-mail<input id="staffEmail" type="email" maxlength="254" required autocomplete="off" placeholder="name@example.ru"></label>
+        <label>Роль<select id="staffRole"><option value="associate">Заместитель директора</option><option value="director">Директор</option></select></label>
+        <button class="btn" type="submit">Создать и отправить письмо</button>
+      </form>
+      <div id="staffAdminResult" aria-live="polite"></div>
+      <button id="staffUsersRefresh" class="btn secondary" type="button" style="width:auto">Показать пользователей</button>
+      <div id="staffUsersList"></div>
+    </section>
     <section class="card">
       <div class="admin-head"><h2>Конструктор расписания</h2><button class="btn secondary planner-toggle" id="plannerOpen" type="button">Открыть конструктор</button></div>
       <p class="hint">Создавайте черновик независимо от опубликованного расписания. Для проверки и подбора сначала загрузите расписание звонков.</p>
@@ -100,5 +112,6 @@
 <div class="toast" id="toast"></div>
 <script src="/js/admin.js?v=planner-1"></script>
 <script src="/js/planner.js?v=planner-1"></script>
+<script src="/js/staff-admin.js?v=staff-1"></script>
 </body>
 </html>

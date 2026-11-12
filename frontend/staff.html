@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Задачи руководства</title>
+<link rel="stylesheet" href="/css/style.css?v=staff-1">
+</head>
+<body>
+<header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Задачи</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
+<main class="staff-main">
+  <section class="card auth-box" id="staffLoginCard">
+    <h2>Вход</h2><div id="staffLoginError" aria-live="polite"></div>
+    <form id="staffLoginForm">
+      <div class="field"><label for="loginEmail">Логин (e-mail)</label><input id="loginEmail" type="email" autocomplete="username" required></div>
+      <div class="field"><label for="loginPassword">Пароль</label><input id="loginPassword" type="password" autocomplete="current-password" required maxlength="256"></div>
+      <button class="btn" type="submit">Войти</button>
+    </form>
+  </section>
+  <section class="card auth-box hidden" id="changePasswordCard">
+    <h2>Смените временный пароль</h2>
+    <p class="hint">Для продолжения придумайте пароль не короче 12 символов.</p><div id="passwordError" aria-live="polite"></div>
+    <form id="staffPasswordForm">
+      <div class="field"><label for="newPassword">Новый пароль</label><input id="newPassword" type="password" required minlength="12" maxlength="256" autocomplete="new-password"></div>
+      <button class="btn" type="submit">Сохранить пароль</button>
+    </form>
+    <button class="staff-logout-link" type="button" data-logout>Выйти</button>
+  </section>
+  <div id="staffPanel" class="hidden">
+    <div class="staff-heading"><span id="staffIdentity"></span><button class="btn secondary" type="button" data-logout>Выйти</button></div>
+    <section class="card hidden" id="createTaskCard">
+      <h2>Поставить задачу</h2><div id="taskCreateError" aria-live="polite"></div>
+      <form id="taskForm">
+        <div class="field"><label for="taskAssignee">Заместитель директора</label><select id="taskAssignee" required></select></div>
+        <div class="field"><label for="taskDescription">Задача</label><textarea id="taskDescription" rows="4" maxlength="5000" required></textarea></div>
+        <div class="field"><label for="taskDeadline">Срок выполнения</label><input id="taskDeadline" type="datetime-local" required></div>
+        <p class="hint">Время указывается в часовом поясе вашего устройства.</p>
+        <button class="btn" type="submit">Назначить задачу</button>
+      </form>
+    </section>
+    <section class="card">
+      <div class="staff-heading"><h2 id="taskListTitle">Задачи</h2><button class="btn secondary" id="taskRefresh" type="button">Обновить</button></div>
+      <div id="taskListError" aria-live="polite"></div><div id="taskList"></div>
+    </section>
+  </div>
+</main>
+<script src="/js/staff.js?v=staff-1"></script>
+</body>
+</html>
