@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Личный кабинет</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-duty-initials-1">
+<link rel="stylesheet" href="/css/style.css?v=staff-duty-reassign-1">
 </head>
 <body>
 <header class="app"><div class="app-inner"><div class="brand"><div class="logo">📋</div><div><h1 id="pageTitle">Личный кабинет</h1><p class="sub">Личный кабинет</p></div></div><a class="stat" href="/">К расписанию</a></div></header>
@@ -64,6 +64,13 @@
         <button class="btn secondary" id="dutyAdminRestore" type="button">Вернуть обычное назначение</button>
         <button class="btn secondary" id="dutyAdminClose" type="button">Закрыть</button>
       </form>
+      <div id="dutyAnyDate" class="duty-form hidden">
+        <strong>Назначить или заменить учителя на любую дату</strong>
+        <p class="hint">Выберите дату и смену. Если место занято, назначение будет заменено. Воскресенье исключено. Записи вне текущей четверти не отображаются на карте.</p>
+        <div class="field"><label for="dutyAnyDay">Дата</label><input id="dutyAnyDay" type="date"></div>
+        <div class="field"><label for="dutyAnyShift">Смена</label><select id="dutyAnyShift"><option value="1">1-я смена</option><option value="2">2-я смена</option></select></div>
+        <button class="btn secondary" id="dutyAnyOpen" type="button">Выбрать учителя</button>
+      </div>
       <div id="dutyFormParking"><form id="dutyForm" class="duty-form duty-inline-form hidden">
         <p id="dutySelected">Выберите свободное место на карте.</p>
         <div class="field hidden" id="dutyTeacherField"><label for="dutyTeacher">Учитель</label><select id="dutyTeacher"><option value="">Выберите учителя</option></select><p class="hint">Чтобы назначить учителя, в его профиле должно быть указано ФИО.</p></div>
@@ -118,7 +125,7 @@
     <section id="staffProjectsView" class="card hidden"><div class="staff-heading"><h2>Состояние проектов</h2><button class="btn secondary" id="projectRefresh" type="button">Обновить</button></div><p class="hint">Выполнение и участие по назначенным задачам.</p><button class="change-selection staff-hidden-toggle" type="button" data-toggle-hidden>Показать удалённые мной</button><div id="projectList"></div></section>
   </div>
 </main>
-<script src="/js/staff.js?v=staff-duty-initials-1"></script>
-<script src="/js/duty.js?v=staff-duty-initials-1"></script>
+<script src="/js/staff.js?v=staff-duty-reassign-1"></script>
+<script src="/js/duty.js?v=staff-duty-reassign-1"></script>
 </body>
 </html>

@@ -950,6 +950,33 @@ class StaffTests(unittest.TestCase):
             self.client.delete(f"/api/admin/users/{teacher2['user']['id']}",headers=self.admin)
             self.assertEqual(post(ah,{**data,"teacher_id":teacher2["user"]["id"]}).status_code,404)
 
+    def test_deputy_can_replace_teacher_on_any_non_sunday(self):
+        deputy=self.create("replace-deputy@example.com","associate")
+        teachers=[self.create(f"replace-{i}@example.com","teacher") for i in range(2)]
+        ah,_=self.ready("replace-deputy@example.com","associate",deputy["password"])
+        th,_=self.ready("replace-0@example.com","teacher",teachers[0]["password"])
+        th2,_=self.ready("replace-1@example.com","teacher",teachers[1]["password"])
+        for h,name in ((th,"Иванов Иван"),(th2,"Петров Пётр")):
+            self.client.put("/api/staff/profile",headers=h,json={"full_name":name})
+        ids=[t["user"]["id"] for t in teachers]
+        day="2026-11-09"
+        url=f"/api/staff/duty/teacher/{day}/1"
+        data={"day":day,"shift":1,"teacher_id":ids[0],"class_name":"5А"}
+        with patch.object(staff,"school_today",return_value=date(2026,11,10)):
+            self.assertEqual(self.client.put(url,headers=th,json=data).status_code,403)
+            self.assertEqual(self.client.put(url,headers=ah,json=data).status_code,200)
+            self.assertEqual(self.client.put(url,headers=ah,json={**data,"teacher_id":ids[1],"class_name":"6А"}).status_code,200)
+            entries=self.client.get("/api/staff/duty",headers=ah).json()["entries"]
+            entry=next(e for e in entries if e["day"]==day and e["slot"]==1)
+            self.assertEqual((entry["full_name"],entry["class_name"]),("Петров Пётр","6А"))
+            self.assertEqual(self.client.put(f"/api/staff/duty/teacher/{day}/2",headers=ah,json={**data,"shift":2,"teacher_id":ids[1]}).status_code,409)
+            self.assertEqual(self.client.put(url,headers=ah,json={**data,"teacher_id":"missing"}).status_code,404)
+            self.assertEqual(self.client.put(url,headers=ah,json={**data,"shift":2}).status_code,422)
+            self.assertEqual(self.client.put("/api/staff/duty/teacher/2026-11-08/1",headers=ah,json={**data,"day":"2026-11-08"}).status_code,422)
+            self.assertEqual(self.client.put("/api/staff/duty/teacher/2027-07-01/1",headers=ah,json={**data,"day":"2027-07-01"}).status_code,200)
+            with self.store.connect() as db:
+                self.assertEqual(db.execute("SELECT user_id FROM duty_assignments WHERE day=? AND slot=1",(day,)).fetchone()[0],ids[1])
+
     def test_deputy_assignment_races_teacher_reservation(self):
         deputy=self.create("race-deputy@example.com","associate")
         t1=self.create("race-assign1@example.com","teacher")

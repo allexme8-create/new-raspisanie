@@ -858,6 +858,36 @@ def make_router(store: Store, require_admin, class_catalog=None, catalog_lock=No
             raise HTTPException(409, "Место занято или этот сотрудник уже записан на эту дату. Обновите карту.")
         return {"ok": True}
 
+    @router.put("/api/staff/duty/teacher/{day}/{slot}")
+    def set_duty_teacher(day: date, slot: int, body: DutyBooking, user: dict = Depends(duty_deputy)):
+        if slot not in (1, 2) or body.day != day or body.shift != slot:
+            raise HTTPException(422, "Укажите дату и смену учителя")
+        if day.weekday() == 6:
+            raise HTTPException(422, "В воскресенье дежурства нет")
+        if not body.teacher_id:
+            raise HTTPException(422, "Выберите учителя")
+        try:
+            with catalog_guard(), store.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                check_duty_session(db, user)
+                target = db.execute("SELECT full_name,homeroom_class FROM users WHERE id=? AND role='teacher' AND active=1", (body.teacher_id,)).fetchone()
+                if not target:
+                    raise HTTPException(404, "Активный учитель не найден")
+                if not target["full_name"]:
+                    raise HTTPException(422, "У выбранного учителя не указано ФИО")
+                class_name = target["homeroom_class"] or body.class_name
+                if not class_name:
+                    raise HTTPException(422, "Укажите класс дежурного учителя")
+                available = classes()
+                if available and class_name not in available:
+                    raise HTTPException(422, "Выберите класс из конструктора расписания")
+                db.execute("""INSERT INTO duty_assignments(day,slot,user_id,class_name) VALUES (?,?,?,?)
+                    ON CONFLICT(day,slot) DO UPDATE SET user_id=excluded.user_id,class_name=excluded.class_name""",
+                    (day.isoformat(),slot,body.teacher_id,class_name))
+        except sqlite3.IntegrityError:
+            raise HTTPException(409, "Этот учитель уже назначен на другую смену в этот день")
+        return {"ok": True}
+
     @router.delete("/api/staff/duty/{day}/{slot}")
     def cancel_duty(day: date, slot: int, user: dict = Depends(duty_user)):
         if slot not in (0,1,2) or day < school_today():
