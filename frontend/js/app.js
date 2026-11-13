@@ -275,7 +275,7 @@ function cellFor(cls,day,lesson){
   else title=tText;
   const rooms=uniqueRooms(t?.rooms||[],s?.rooms||[]);
   return `<div class="lc ${SERVICE.has(title)?'svc':''}">
-    <div class="subj">${esc(title)}</div>
+    <div class="${!sText&&!SERVICE.has(tText)?'teach teacher-title':'subj'}">${esc(title)}</div>
     ${sub?`<div class="teach">${esc(sub)}</div>`:""}
     ${rooms.length?`<div class="rb">${rooms.map(r=>`<span class="room-badge">${esc(r)}</span>`).join("")}</div>`:""}
   </div>`;
@@ -469,7 +469,7 @@ function renderTeacherArea(){
     return;
   }
   if(state.curTeacher){
-    box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeTeacher" type="button">← Все учителя</button><strong>${esc(state.curTeacher)}</strong></div><div class="lesson-live hidden" id="teacherCurrentLesson" aria-live="polite"></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="teacherDuty" aria-live="polite"></div></section><div id="teacherPanel"></div>`;
+    box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeTeacher" type="button">← Все учителя</button><strong class="schedule-teacher-name">${esc(state.curTeacher)}</strong></div><div class="lesson-live hidden" id="teacherCurrentLesson" aria-live="polite"></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="teacherDuty" aria-live="polite"></div></section><div id="teacherPanel"></div>`;
     renderDutyBanner();renderCurrentLesson();
     $("changeTeacher").onclick=()=>{state.curTeacher=null;state.teacherQuery="";renderTeacherArea();$("teacherSearch").focus();};
     renderTeacherPanel();
@@ -619,7 +619,7 @@ function renderFavArea(){
     html+=`<h3>👩‍🏫 Мои учителя</h3>`;
     for(const name of favs.teachers){
       const rows=teacherDayRows(name,d);
-      html+=`<div class="fav-card"><div class="fav-head"><b>${esc(name)}</b><span class="muted">учитель · уроков: ${rows.length}</span>
+      html+=`<div class="fav-card"><div class="fav-head"><b class="schedule-teacher-name">${esc(name)}</b><span class="muted">учитель · уроков: ${rows.length}</span>
         <button class="rm-fav" data-kind="teachers" data-name="${esc(name)}">убрать ✕</button></div>
         ${teacherShiftGroupHTML(rows)||'<div class="muted">В этот день уроков нет 🎉</div>'}</div>`;
     }

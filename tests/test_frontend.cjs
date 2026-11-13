@@ -151,6 +151,16 @@ assert.match(result.week, /class="mobile-week"/);
 assert.match(result.week, /class="mobile-week-day"/);
 assert.equal((result.classCell.match(/class="room-badge"/g) || []).length, 2);
 assert.doesNotMatch(result.classCell, /\(101|\(102/);
+assert.match(result.classCell, /class="subj">Алгебра, Геометрия/);
+assert.match(result.classCell, /class="teach">Иванова ИИ, Петрова ПП/);
+vm.runInContext(`{const saved=state.subjects;state.subjects=null;globalThis.teacherOnlyCell=cellFor("5а","Пн","1");state.subjects=saved}`,context);
+assert.match(context.teacherOnlyCell,/class="teach teacher-title">Иванова ИИ/);
+const css=fs.readFileSync("frontend/css/style.css","utf8");
+assert.match(css,/\.lc \.subj,\.tsubj\{color:#1d54a3/);
+assert.match(css,/\.lc \.teach,\.schedule-teacher-name\{color:#176b38/);
+assert.match(css,/\.week td\.lesson-active\{background:#e9edf1/);
+assert.match(css,/\.week tbody td:first-child\{color:#1d54a3/);
+
 assert.deepEqual(Array.from(result.rooms), ["101", "102", "301"]);
 assert.deepEqual(Array.from(result.occupancy), [1, 1, 1]);
 assert.ok(Array.from(result.roomText).every(text=>!/\(101|\(102|\(301/.test(text)));

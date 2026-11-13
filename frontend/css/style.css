@@ -88,10 +88,12 @@ table.week{border-collapse:separate;border-spacing:0;width:100%;min-width:820px;
 .week tr:last-child td{border-bottom:none}
 .week td.today{background:#f3f4ff}
 .week thead th.today{color:var(--acc)}
-.lc .subj{font-weight:650}
-.lc .teach{color:var(--muted);font-size:11.5px;margin-top:2px}
+.lc .subj,.tsubj{color:#1d54a3;font-weight:650}
+.lc .teach,.schedule-teacher-name{color:#176b38;font-weight:700;}
+.lc .teach{font-size:11.5px;margin-top:2px}
+.lc .teacher-title{font-size:inherit;margin-top:0}
 .week-time{font-size:10.5px;color:var(--muted);margin-top:5px;white-space:nowrap}
-.lc.svc .subj{color:var(--muted);font-style:italic;font-weight:600}
+.lc.svc .subj{font-style:italic;font-weight:600}
 .dash{color:#c3c8d6}
 .rb{margin-top:4px;display:flex;gap:4px;flex-wrap:wrap}
 .room-badge{display:inline-block;background:var(--acc-soft);color:var(--acc);border-radius:6px;padding:1px 7px;font-size:11px;font-weight:700}
@@ -99,7 +101,7 @@ table.week{border-collapse:separate;border-spacing:0;width:100%;min-width:820px;
 .lrow{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:#fff}
 .lrow .lcell{flex:1;min-width:0}
 .lesson-marker{flex:0 0 56px;display:flex;flex-direction:column;align-items:center;gap:3px}
-.lesson-marker .lnum{flex:0 0 auto;width:26px;height:26px;border-radius:8px;background:var(--acc-soft);color:var(--acc);font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}
+.lesson-marker .lnum{flex:0 0 auto;width:26px;height:26px;border-radius:8px;background:var(--acc-soft);color:#1d54a3;font-weight:700;display:flex;align-items:center;justify-content:center;font-size:13px}
 .lesson-time{font-size:10px;color:var(--muted);white-space:nowrap;line-height:1.2}
 .trow{display:grid;grid-template-columns:52px 54px 1fr auto;gap:8px;align-items:center;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:6px;background:#fff}
 .trow .lesson-marker{flex-basis:42px}
@@ -286,6 +288,5 @@ footer a{color:var(--muted)}
 .person-teacher{color:#176b38;font-weight:700}.person-associate{color:#1d54a3;font-weight:700}.person-director{color:#b42318;font-weight:700}
 
 /* Текущий урок заметен как в списке, так и в таблице недели. */
-.lrow.lesson-active,.trow.lesson-active,.week td.lesson-active{background:#ffec80;border-color:#cf7a00;box-shadow:inset 0 0 0 2px #cf7a00;color:#352100}
-.lesson-active .lesson-time,.lesson-active .teach,.lesson-active .week-time{color:#593600}
-.lesson-active .lnum{background:#a64b00;color:#fff}
+.lrow.lesson-active,.trow.lesson-active,.week td.lesson-active{background:#e9edf1;border-color:#aab4bf;box-shadow:inset 0 0 0 2px #aab4bf}
+.week tbody td:first-child{color:#1d54a3}
