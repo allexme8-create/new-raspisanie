@@ -41,7 +41,7 @@
       <button class="btn secondary" id="adminCollapseAll" type="button">Свернуть все блоки</button>
       <button class="btn danger" id="logoutBtn" type="button">Выйти</button>
     </div>
-    <details class="card admin-block" open>
+    <details class="card admin-block">
       <summary><h2>Пользователи</h2></summary>
       <p class="hint">Укажите e-mail как логин и выберите роль. Пароль создаётся автоматически; передайте его пользователю безопасным способом. При первом входе пользователь сменит пароль. Администратор может показать текущий пароль или создать новый. Письма не отправляются.</p>
       <p class="hint">Чтобы изменить данные или назначить классное руководство существующему учителю, откройте «Редактировать пользователя» в списке ниже. Классы берутся из расписания и справочника конструктора.</p>
@@ -58,13 +58,13 @@
       <button id="staffUsersRefresh" class="btn secondary" type="button" style="width:auto">Обновить список пользователей</button>
       <div id="staffUsersList"></div>
     </details>
-    <details class="card admin-block" open>
+    <details class="card admin-block">
       <summary><h2>Конструктор расписания</h2></summary>
       <button class="btn secondary planner-toggle" id="plannerOpen" type="button">Открыть конструктор</button>
       <p class="hint">Создавайте черновик независимо от опубликованного расписания. Для проверки и подбора сначала загрузите расписание звонков.</p>
       <div id="plannerRoot" class="hidden"></div>
     </details>
-    <details class="card admin-block" open>
+    <details class="card admin-block">
       <summary><h2>Загруженные файлы</h2></summary>
       <div class="admin-head">
         <button class="btn secondary" id="refreshBtn" style="width:auto">🔄 Обновить статус</button>
@@ -75,7 +75,7 @@
       <p class="hint" id="updatedLabel"></p>
     </details>
 
-    <details class="card admin-block" open>
+    <details class="card admin-block">
       <summary><h2>Загрузить файлы с устройства</h2></summary>
       <div class="dropzone" id="dropzone">
         <b>📂 Перетащите файлы сюда</b> или нажмите, чтобы выбрать
@@ -85,7 +85,7 @@
       <div id="uploadResult" style="margin-top:10px"></div>
     </details>
 
-    <details class="card admin-block" open>
+    <details class="card admin-block">
       <summary><h2>Расписание звонков</h2></summary>
       <p class="hint">Загрузите отдельную таблицу со временем начала и окончания уроков. Поддерживаются CSV, XLS, XLSX, XLSM и XML. Для смен используйте два блока по четыре столбца: «День недели», «Урок», «Начало», «Окончание».</p>
       <div class="field">
@@ -108,7 +108,7 @@
       <div id="bellUploadResult" style="margin-top:10px"></div>
     </details>
 
-    <details class="card admin-block" open>
+    <details class="card admin-block">
       <summary><h2>Классы второй смены</h2></summary>
       <p class="hint">Отметьте классы, которые учатся во вторую смену. Для них номера уроков начинаются заново с первого и берётся время из блока «2 смена».</p>
       <div class="shift-class-list" id="shiftClassList"><p class="muted">Сначала загрузите расписание уроков.</p></div>
@@ -116,7 +116,7 @@
       <div id="shiftSettingsResult" style="margin-top:10px"></div>
     </details>
 
-    <details class="card admin-block" open>
+    <details class="card admin-block">
       <summary><h2>Загрузить по ссылке Яндекс.Диска</h2></summary>
       <p class="hint">Вставьте публичную ссылку на файл (например <span class="mono">https://disk.yandex.ru/i/…</span>) —
       сервер скачает файл и применит его. Требуется доступ сервера к интернету.</p>
