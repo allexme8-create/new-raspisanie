@@ -90,11 +90,19 @@ function clockMinutes(value){
   return match?Number(match[1])*60+Number(match[2]):null;
 }
 function renderCurrentLesson(){
-  const box=$("currentLesson"),shifts=state.bellSchedule?.shifts;
-  if(!box)return;
-  if(!shifts){box.classList.add("hidden");return;}
-  const now=new Date(),day=DAYS[now.getDay()-1];
-  const nowMinutes=now.getHours()*60+now.getMinutes()+now.getSeconds()/60;
+  const boxes=["currentLesson","classCurrentLesson","teacherCurrentLesson","favCurrentLesson"].map(id=>$(id)).filter(Boolean),shifts=state.bellSchedule?.shifts;
+  if(!boxes.length)return;
+  if(!shifts){boxes.forEach(box=>box.classList.add("hidden"));return;}
+  const now=new Date();
+  let day=DAYS[now.getDay()-1],nowMinutes=now.getHours()*60+now.getMinutes()+now.getSeconds()/60;
+  if(publicDuty?.timezone){
+    try{
+      const parts=new Intl.DateTimeFormat("en-US",{timeZone:publicDuty.timezone,weekday:"short",hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"}).formatToParts(now);
+      const values=Object.fromEntries(parts.map(p=>[p.type,p.value]));
+      day=({Mon:"Пн",Tue:"Вт",Wed:"Ср",Thu:"Чт",Fri:"Пт",Sat:"Сб"})[values.weekday];
+      nowMinutes=Number(values.hour)*60+Number(values.minute)+Number(values.second)/60;
+    }catch(e){} // Until the school timezone is available, use the device clock.
+  }
   const active=[],upcoming=[];
   if(day){
     for(const shift of ["1","2"]){
@@ -113,6 +121,7 @@ function renderCurrentLesson(){
   }
   active.sort((a,b)=>a.shift.localeCompare(b.shift));
   upcoming.sort((a,b)=>a.start-b.start||a.shift.localeCompare(b.shift));
+  for(const box of boxes){
   box.classList.remove("hidden","idle");
   if(active.length===1){
     const lesson=active[0];
@@ -122,10 +131,11 @@ function renderCurrentLesson(){
   }else if(upcoming.length){
     const next=upcoming[0];
     box.classList.add("idle");
-    box.innerHTML=`Сейчас перемена. Ближайший урок № ${next.number} (${next.shift}-я смена) начнётся в ${esc(next.period.start)}.`;
+    box.innerHTML=`Сейчас уроки не идут. Ближайший урок № ${next.number} (${next.shift}-я смена) начнётся в ${esc(next.period.start)}.`;
   }else{
     box.classList.add("idle");
     box.textContent="Сейчас уроки не идут.";
+  }
   }
 }
 
@@ -164,7 +174,7 @@ function renderDutyBanner(){
 }
 async function loadPublicDuty(){
   try{const response=await fetch("/api/duties/today",{cache:"no-store"});if(!response.ok)throw new Error("ошибка сервера");
-    const data=await response.json();if(!data.today||!data.timezone||!Array.isArray(data.entries))throw new Error("нет данных");publicDuty=data;publicDutyError=false;renderDutyBanner();
+    const data=await response.json();if(!data.today||!data.timezone||!Array.isArray(data.entries))throw new Error("нет данных");publicDuty=data;publicDutyError=false;renderDutyBanner();renderCurrentLesson();
   }catch(e){publicDuty=null;publicDutyError=true;renderDutyBanner();}
 }
 
@@ -380,8 +390,8 @@ function renderClassArea(){
     box.querySelectorAll("[data-cls]").forEach(b=>b.onclick=()=>{state.curClass=b.dataset.cls;renderClassArea();});
     return;
   }
-  box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeClass" type="button">← Все классы</button><strong>Класс ${esc(state.curClass)}</strong></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="classDuty" aria-live="polite"></div></section><div id="classPanel"></div>`;
-  renderDutyBanner();
+  box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeClass" type="button">← Все классы</button><strong>Класс ${esc(state.curClass)}</strong></div><div class="lesson-live hidden" id="classCurrentLesson" aria-live="polite"></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="classDuty" aria-live="polite"></div></section><div id="classPanel"></div>`;
+  renderDutyBanner();renderCurrentLesson();
   $("changeClass").onclick=()=>{state.curClass=null;renderClassArea();};
   renderClassPanel();
 }
@@ -442,8 +452,8 @@ function renderTeacherArea(){
     return;
   }
   if(state.curTeacher){
-    box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeTeacher" type="button">← Все учителя</button><strong>${esc(state.curTeacher)}</strong></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="teacherDuty" aria-live="polite"></div></section><div id="teacherPanel"></div>`;
-    renderDutyBanner();
+    box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeTeacher" type="button">← Все учителя</button><strong>${esc(state.curTeacher)}</strong></div><div class="lesson-live hidden" id="teacherCurrentLesson" aria-live="polite"></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="teacherDuty" aria-live="polite"></div></section><div id="teacherPanel"></div>`;
+    renderDutyBanner();renderCurrentLesson();
     $("changeTeacher").onclick=()=>{state.curTeacher=null;state.teacherQuery="";renderTeacherArea();$("teacherSearch").focus();};
     renderTeacherPanel();
     return;
@@ -575,7 +585,7 @@ function renderFavArea(){
   }
   const sel=state.favDay, d=DAYS[sel];
   const pills=DAYS.map((dd,i)=>`<button class="pill ${sel===i?'active':''}" data-fd="${i}">${dd}${i===TODAY?'<span class="dot"></span>':''}</button>`).join("");
-  let html=`<div class="toolbar"><div class="pills">${pills}</div></div><p class="date-label">${dateLabel(sel)}</p>`;
+  let html=`<div class="lesson-live hidden" id="favCurrentLesson" aria-live="polite"></div><div class="toolbar"><div class="pills">${pills}</div></div><p class="date-label">${dateLabel(sel)}</p>`;
   if(favs.classes.length){
     html+=`<h3>🎓 Мои классы</h3>`;
     for(const cls of favs.classes){
@@ -597,6 +607,7 @@ function renderFavArea(){
     }
   }
   box.innerHTML=html;
+  renderCurrentLesson();
   box.querySelectorAll("[data-fd]").forEach(b=>b.onclick=()=>{ state.favDay=+b.dataset.fd; renderFavArea(); });
 }
 document.addEventListener("click",e=>{
