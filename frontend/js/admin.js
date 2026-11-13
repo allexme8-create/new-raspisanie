@@ -187,15 +187,20 @@ async function uploadFiles(files){
 const bellEditorDays=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
 let bellEditorRevision=null;
 function bellEditorRow(entry={}){
-  const options=(items,value)=>items.map(item=>`<option value="${esc(item)}"${String(item)===String(value)?" selected":""}>${esc(item)}</option>`).join("");
-  return `<div class="planner-form bell-editor-row"><label>День<select data-bell-day>${options(bellEditorDays,entry.day||"Пн")}</select></label><label>Смена<select data-bell-shift>${options([1,2],entry.shift||1)}</select></label><label>Урок<input data-bell-lesson type="number" min="1" max="99" required value="${esc(entry.lesson||1)}"></label><label>Начало<input data-bell-start type="time" required value="${esc(entry.start||"")}"></label><label>Окончание<input data-bell-end type="time" required value="${esc(entry.end||"")}"></label><button class="btn danger" type="button" data-bell-remove aria-label="Удалить урок" title="Удалить урок">✕</button></div>`;
+  const day=entry.day||"Пн",shift=String(entry.shift||1);
+  return `<div class="planner-form bell-editor-row"><input type="hidden" data-bell-day value="${esc(day)}"><input type="hidden" data-bell-shift value="${esc(shift)}"><span class="bell-row-context hidden"></span><label>Урок<input data-bell-lesson type="number" min="1" max="99" required value="${esc(entry.lesson||1)}"></label><label>Начало<input data-bell-start type="time" required value="${esc(entry.start||"")}"></label><label>Окончание<input data-bell-end type="time" required value="${esc(entry.end||"")}"></label><button class="btn danger" type="button" data-bell-remove aria-label="Удалить урок" title="Удалить урок">✕</button></div>`;
 }
 function bellEditorFilter(){
   const day=$("bellEditorDayFilter").value,shift=$("bellEditorShiftFilter").value;
   let visible=0;
   $("bellEditorRows").querySelectorAll(".bell-editor-row").forEach(row=>{
     const matches=(!day||row.querySelector("[data-bell-day]").value===day)&&(!shift||row.querySelector("[data-bell-shift]").value===shift);
-    row.classList.toggle("hidden",!matches);if(matches)visible++;
+    row.classList.toggle("hidden",!matches);
+    const context=row.querySelector(".bell-row-context"),details=[];
+    if(!day)details.push(row.querySelector("[data-bell-day]").value);
+    if(!shift)details.push(`${row.querySelector("[data-bell-shift]").value}-я смена`);
+    context.textContent=details.join(" · ");context.classList.toggle("hidden",!details.length);row.classList.toggle("has-context",details.length>0);
+    if(matches)visible++;
   });
   $("bellEditorEmpty").classList.toggle("hidden",visible>0);
 }
@@ -214,7 +219,9 @@ $("bellEditorLoad").onclick=async()=>{
   }catch(e){$("bellEditorMessage").innerHTML=`<div class="alert err">${esc(e.message)}</div>`;}
 };
 $("bellEditorAdd").onclick=()=>{
-  $("bellEditorRows").insertAdjacentHTML("beforeend",bellEditorRow({day:$("bellEditorDayFilter").value||"Пн",shift:$("bellEditorShiftFilter").value||1}));
+  if(!$("bellEditorDayFilter").value)$("bellEditorDayFilter").value="Пн";
+  if(!$("bellEditorShiftFilter").value)$("bellEditorShiftFilter").value="1";
+  $("bellEditorRows").insertAdjacentHTML("beforeend",bellEditorRow({day:$("bellEditorDayFilter").value,shift:$("bellEditorShiftFilter").value}));
   bellEditorFilter();
 };
 $("bellEditorRows").onclick=e=>{const button=e.target.closest("[data-bell-remove]");if(button){button.closest(".bell-editor-row").remove();bellEditorFilter();}};
