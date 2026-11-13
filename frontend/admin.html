@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=bell-editor-1">
+<link rel="stylesheet" href="/css/style.css?v=bell-editor-compact-1">
 </head>
 <body>
 
@@ -98,8 +98,13 @@
         <summary><strong>Изменить расписание звонков вручную</strong></summary>
         <p class="hint">Изменения сразу применяются к опубликованному расписанию. Для каждого дня и смены укажите номер урока, начало и окончание.</p>
         <button class="btn secondary" id="bellEditorLoad" type="button">Загрузить текущее расписание</button>
-        <form id="bellEditorForm" class="hidden">
+        <form id="bellEditorForm" class="hidden" novalidate>
+          <div class="bell-editor-filters">
+            <label>День<select id="bellEditorDayFilter"><option value="Пн">Понедельник</option><option value="Вт">Вторник</option><option value="Ср">Среда</option><option value="Чт">Четверг</option><option value="Пт">Пятница</option><option value="Сб">Суббота</option><option value="Вс">Воскресенье</option><option value="">Все дни</option></select></label>
+            <label>Смена<select id="bellEditorShiftFilter"><option value="1">1-я смена</option><option value="2">2-я смена</option><option value="">Все смены</option></select></label>
+          </div>
           <div id="bellEditorRows"></div>
+          <p id="bellEditorEmpty" class="hint hidden">Для выбранных дня и смены уроков нет.</p>
           <button class="btn secondary" id="bellEditorAdd" type="button">Добавить урок</button>
           <button class="btn" id="bellEditorSave" type="submit">Сохранить звонки</button>
         </form>
@@ -131,8 +136,8 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="/js/admin.js?v=bell-editor-1"></script>
+<script src="/js/admin.js?v=bell-editor-compact-1"></script>
 <script src="/js/planner.js?v=planner-edit-classes-1"></script>
-<script src="/js/staff-admin.js?v=bell-editor-1"></script>
+<script src="/js/staff-admin.js?v=bell-editor-compact-1"></script>
 </body>
 </html>

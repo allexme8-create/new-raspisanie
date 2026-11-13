@@ -307,5 +307,11 @@ footer a{color:var(--muted)}
 
 .bell-editor{margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:12px}
 .bell-editor>summary{cursor:pointer;color:var(--acc)}
-.bell-editor-row{padding:8px;border-bottom:1px solid var(--line)}
-.bell-editor-row label{flex:1 1 100px}
+.bell-editor-filters{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.bell-editor-filters label{display:flex;align-items:center;gap:6px;font-size:13px;font-weight:700}
+.bell-editor-filters select{padding:6px 8px}
+.bell-editor-row{display:grid;grid-template-columns:70px 70px 68px minmax(105px,1fr) minmax(105px,1fr) auto;gap:6px;align-items:end;margin:0;padding:5px 0;border-bottom:1px solid var(--line)}
+.bell-editor-row label{min-width:0;font-size:11px;gap:2px}
+.bell-editor-row input,.bell-editor-row select{min-width:0;padding:5px;font-size:13px;border-radius:7px}
+.bell-editor-row .btn{min-height:32px;padding:5px 9px}
+@media(max-width:600px){.bell-editor-row{grid-template-columns:repeat(3,minmax(0,1fr));gap:4px 6px}.bell-editor-row .btn{justify-self:start}.bell-editor-row input,.bell-editor-row select{font-size:16px}}

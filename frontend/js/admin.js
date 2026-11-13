@@ -188,8 +188,19 @@ const bellEditorDays=["Пн","Вт","Ср","Чт","Пт","Сб","Вс"];
 let bellEditorRevision=null;
 function bellEditorRow(entry={}){
   const options=(items,value)=>items.map(item=>`<option value="${esc(item)}"${String(item)===String(value)?" selected":""}>${esc(item)}</option>`).join("");
-  return `<div class="planner-form bell-editor-row"><label>День<select data-bell-day>${options(bellEditorDays,entry.day||"Пн")}</select></label><label>Смена<select data-bell-shift>${options([1,2],entry.shift||1)}</select></label><label>Урок<input data-bell-lesson type="number" min="1" max="99" required value="${esc(entry.lesson||1)}"></label><label>Начало<input data-bell-start type="time" required value="${esc(entry.start||"")}"></label><label>Окончание<input data-bell-end type="time" required value="${esc(entry.end||"")}"></label><button class="btn danger" type="button" data-bell-remove aria-label="Удалить урок">Удалить</button></div>`;
+  return `<div class="planner-form bell-editor-row"><label>День<select data-bell-day>${options(bellEditorDays,entry.day||"Пн")}</select></label><label>Смена<select data-bell-shift>${options([1,2],entry.shift||1)}</select></label><label>Урок<input data-bell-lesson type="number" min="1" max="99" required value="${esc(entry.lesson||1)}"></label><label>Начало<input data-bell-start type="time" required value="${esc(entry.start||"")}"></label><label>Окончание<input data-bell-end type="time" required value="${esc(entry.end||"")}"></label><button class="btn danger" type="button" data-bell-remove aria-label="Удалить урок" title="Удалить урок">✕</button></div>`;
 }
+function bellEditorFilter(){
+  const day=$("bellEditorDayFilter").value,shift=$("bellEditorShiftFilter").value;
+  let visible=0;
+  $("bellEditorRows").querySelectorAll(".bell-editor-row").forEach(row=>{
+    const matches=(!day||row.querySelector("[data-bell-day]").value===day)&&(!shift||row.querySelector("[data-bell-shift]").value===shift);
+    row.classList.toggle("hidden",!matches);if(matches)visible++;
+  });
+  $("bellEditorEmpty").classList.toggle("hidden",visible>0);
+}
+$("bellEditorDayFilter").onchange=bellEditorFilter;
+$("bellEditorShiftFilter").onchange=bellEditorFilter;
 $("bellEditorLoad").onclick=async()=>{
   if(bellEditorRevision!==null&&!confirm("Загрузить заново? Несохранённые изменения будут потеряны."))return;
   try{
@@ -199,13 +210,20 @@ $("bellEditorLoad").onclick=async()=>{
       for(const lesson of Object.keys(lessons).sort((a,b)=>Number(a)-Number(b)))entries.push({shift,day,lesson,...lessons[lesson]});
     }
     bellEditorRevision=result.revision;$("bellEditorRows").innerHTML=entries.map(bellEditorRow).join("");
-    $("bellEditorForm").classList.remove("hidden");$("bellEditorMessage").innerHTML="";
+    $("bellEditorForm").classList.remove("hidden");bellEditorFilter();$("bellEditorMessage").innerHTML="";
   }catch(e){$("bellEditorMessage").innerHTML=`<div class="alert err">${esc(e.message)}</div>`;}
 };
-$("bellEditorAdd").onclick=()=>$("bellEditorRows").insertAdjacentHTML("beforeend",bellEditorRow());
-$("bellEditorRows").onclick=e=>{const button=e.target.closest("[data-bell-remove]");if(button)button.closest(".bell-editor-row").remove();};
+$("bellEditorAdd").onclick=()=>{
+  $("bellEditorRows").insertAdjacentHTML("beforeend",bellEditorRow({day:$("bellEditorDayFilter").value||"Пн",shift:$("bellEditorShiftFilter").value||1}));
+  bellEditorFilter();
+};
+$("bellEditorRows").onclick=e=>{const button=e.target.closest("[data-bell-remove]");if(button){button.closest(".bell-editor-row").remove();bellEditorFilter();}};
 $("bellEditorForm").onsubmit=async e=>{
   e.preventDefault();const button=$("bellEditorSave"),rows=[...$("bellEditorRows").querySelectorAll(".bell-editor-row")];
+  for(const row of rows){
+    const invalid=[...row.querySelectorAll("input,select")].find(input=>!input.checkValidity());
+    if(invalid){$("bellEditorDayFilter").value=row.querySelector("[data-bell-day]").value;$("bellEditorShiftFilter").value=row.querySelector("[data-bell-shift]").value;bellEditorFilter();invalid.reportValidity();return;}
+  }
   const entries=rows.map(row=>({day:row.querySelector("[data-bell-day]").value,shift:Number(row.querySelector("[data-bell-shift]").value),lesson:Number(row.querySelector("[data-bell-lesson]").value),start:row.querySelector("[data-bell-start]").value,end:row.querySelector("[data-bell-end]").value}));
   if(!entries.length){$("bellEditorMessage").innerHTML='<div class="alert err">Добавьте хотя бы один урок.</div>';return;}
   button.disabled=true;
