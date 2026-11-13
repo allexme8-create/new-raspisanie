@@ -293,3 +293,14 @@ footer a{color:var(--muted)}
 
 /* В карте дежурств суббота и ссылки назначения выделены красным. */
 .duty-row.duty-saturday>strong,.duty-saturday .duty-action,.duty-saturday .duty-slot>.muted,.duty-saturday .duty-mobile-label{color:#b42318}
+
+/* Сворачиваемые разделы администрирования. */
+.admin-block>summary{cursor:pointer;display:flex;align-items:center;gap:10px;font-weight:700;list-style:none}
+.admin-block>summary::-webkit-details-marker{display:none}
+.admin-block>summary::before{content:"▸";color:var(--acc);font-size:18px}
+.admin-block[open]>summary::before{content:"▾"}
+.admin-block>summary h2{margin:0}
+.admin-block[open]>summary{margin-bottom:12px}
+.admin-block>summary:focus-visible{outline:2px solid var(--acc);outline-offset:4px;border-radius:4px}
+.admin-block-controls{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.admin-block-controls .btn{width:auto}

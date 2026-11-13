@@ -158,6 +158,8 @@ $("loginForm").onsubmit=async e=>{
 
 $("logoutBtn").onclick=()=>logout();
 $("refreshBtn").onclick=()=>loadStatus();
+$("adminExpandAll").onclick=()=>document.querySelectorAll("#adminPanel > .admin-block").forEach(block=>{block.open=true;});
+$("adminCollapseAll").onclick=()=>document.querySelectorAll("#adminPanel > .admin-block").forEach(block=>{block.open=false;});
 
 /* ── загрузка файлов расписания ── */
 const dz=$("dropzone"), fi=$("fileInput");

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=staff-role-bold-1">
+<link rel="stylesheet" href="/css/style.css?v=admin-collapsible-1">
 </head>
 <body>
 
@@ -36,8 +36,13 @@
 
   <!-- Панель -->
   <div id="adminPanel" class="hidden">
-    <section class="card">
-      <h2>Пользователи</h2>
+    <div class="admin-block-controls">
+      <button class="btn secondary" id="adminExpandAll" type="button">Развернуть все блоки</button>
+      <button class="btn secondary" id="adminCollapseAll" type="button">Свернуть все блоки</button>
+      <button class="btn danger" id="logoutBtn" type="button">Выйти</button>
+    </div>
+    <details class="card admin-block" open>
+      <summary><h2>Пользователи</h2></summary>
       <p class="hint">Укажите e-mail как логин и выберите роль. Пароль создаётся автоматически; передайте его пользователю безопасным способом. При первом входе пользователь сменит пароль. Администратор может показать текущий пароль или создать новый. Письма не отправляются.</p>
       <p class="hint">Чтобы изменить данные или назначить классное руководство существующему учителю, откройте «Редактировать пользователя» в списке ниже. Классы берутся из расписания и справочника конструктора.</p>
       <p class="hint">Доступ к паролям имеют администраторы: используйте HTTPS и надёжный пароль администратора.</p>
@@ -52,37 +57,36 @@
       <div id="staffAdminResult" aria-live="polite"></div>
       <button id="staffUsersRefresh" class="btn secondary" type="button" style="width:auto">Обновить список пользователей</button>
       <div id="staffUsersList"></div>
-    </section>
-    <section class="card">
-      <div class="admin-head"><h2>Конструктор расписания</h2><button class="btn secondary planner-toggle" id="plannerOpen" type="button">Открыть конструктор</button></div>
+    </details>
+    <details class="card admin-block" open>
+      <summary><h2>Конструктор расписания</h2></summary>
+      <button class="btn secondary planner-toggle" id="plannerOpen" type="button">Открыть конструктор</button>
       <p class="hint">Создавайте черновик независимо от опубликованного расписания. Для проверки и подбора сначала загрузите расписание звонков.</p>
       <div id="plannerRoot" class="hidden"></div>
-    </section>
-    <section class="card">
+    </details>
+    <details class="card admin-block" open>
+      <summary><h2>Загруженные файлы</h2></summary>
       <div class="admin-head">
-        <h2 style="margin:0">Загруженные файлы</h2>
-        <div class="spacer"></div>
         <button class="btn secondary" id="refreshBtn" style="width:auto">🔄 Обновить статус</button>
-        <button class="btn danger" id="logoutBtn">Выйти</button>
       </div>
       <p class="hint">Нужны два файла расписания: <b>«Учителя»</b> (в ячейках фамилии учителей с кабинетами)
       и <b>«Предметы»</b> (в ячейках названия предметов). Тип файла определяется автоматически при загрузке.</p>
       <div class="files-list" id="filesList"></div>
       <p class="hint" id="updatedLabel"></p>
-    </section>
+    </details>
 
-    <section class="card">
-      <h2>Загрузить файлы с устройства</h2>
+    <details class="card admin-block" open>
+      <summary><h2>Загрузить файлы с устройства</h2></summary>
       <div class="dropzone" id="dropzone">
         <b>📂 Перетащите файлы сюда</b> или нажмите, чтобы выбрать
         <p class="muted" style="margin:6px 0 0;font-size:12.5px">Форматы: .xls, .xlsx, .xlsm, .xml, .csv. Можно сразу оба файла — тип определится автоматически.</p>
         <input type="file" id="fileInput" accept=".xls,.xlsx,.xlsm,.xml,.csv" multiple hidden>
       </div>
       <div id="uploadResult" style="margin-top:10px"></div>
-    </section>
+    </details>
 
-    <section class="card">
-      <h2>Расписание звонков</h2>
+    <details class="card admin-block" open>
+      <summary><h2>Расписание звонков</h2></summary>
       <p class="hint">Загрузите отдельную таблицу со временем начала и окончания уроков. Поддерживаются CSV, XLS, XLSX, XLSM и XML. Для смен используйте два блока по четыре столбца: «День недели», «Урок», «Начало», «Окончание».</p>
       <div class="field">
         <label for="bellFileInput">Файл расписания звонков</label>
@@ -91,18 +95,18 @@
       <button class="btn" id="bellUploadBtn" type="button">🔔 Загрузить расписание звонков</button>
       <a class="btn secondary hidden" id="bellDownloadBtn" href="/api/schedule/bell-schedule.csv" target="_blank" rel="noopener" download="bell-schedule.csv">⬇️ Скачать текущее расписание звонков (CSV)</a>
       <div id="bellUploadResult" style="margin-top:10px"></div>
-    </section>
+    </details>
 
-    <section class="card">
-      <h2>Классы второй смены</h2>
+    <details class="card admin-block" open>
+      <summary><h2>Классы второй смены</h2></summary>
       <p class="hint">Отметьте классы, которые учатся во вторую смену. Для них номера уроков начинаются заново с первого и берётся время из блока «2 смена».</p>
       <div class="shift-class-list" id="shiftClassList"><p class="muted">Сначала загрузите расписание уроков.</p></div>
       <button class="btn" id="saveShiftBtn" type="button" disabled>Сохранить классы второй смены</button>
       <div id="shiftSettingsResult" style="margin-top:10px"></div>
-    </section>
+    </details>
 
-    <section class="card">
-      <h2>Загрузить по ссылке Яндекс.Диска</h2>
+    <details class="card admin-block" open>
+      <summary><h2>Загрузить по ссылке Яндекс.Диска</h2></summary>
       <p class="hint">Вставьте публичную ссылку на файл (например <span class="mono">https://disk.yandex.ru/i/…</span>) —
       сервер скачает файл и применит его. Требуется доступ сервера к интернету.</p>
       <div class="field">
@@ -111,13 +115,13 @@
       </div>
       <button class="btn" id="yandexBtn">⬇️ Скачать и применить</button>
       <div id="yandexResult" style="margin-top:10px"></div>
-    </section>
+    </details>
   </div>
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="/js/admin.js?v=bell-csv-download-2"></script>
+<script src="/js/admin.js?v=admin-collapsible-1"></script>
 <script src="/js/planner.js?v=planner-edit-classes-1"></script>
-<script src="/js/staff-admin.js?v=bell-csv-download-2"></script>
+<script src="/js/staff-admin.js?v=admin-collapsible-1"></script>
 </body>
 </html>
