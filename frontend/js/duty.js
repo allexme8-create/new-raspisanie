@@ -6,6 +6,11 @@ function resetDuty(){
   byId("dutyError").innerHTML="";byId("dutySelected").textContent="Выберите свободное место на карте.";byId("dutySubmit").disabled=true;
 }
 const dutyRoleClass=role=>["teacher","associate","director"].includes(role)?`person-${role}`:"";
+function dutyShortName(fullName){
+  const parts=String(fullName||"").trim().split(/\s+/).filter(Boolean);
+  if(!parts.length)return "ФИО не указано";
+  return [parts[0],...parts.slice(1).map(part=>/^(?:\p{L}\.)+$/u.test(part)?part:`${Array.from(part)[0]}.`)].join(" ");
+}
 const dutySlotLabel=slot=>slot===0?"Дежурный администратор":`${slot}-я смена · учитель`;
 function dutyDateText(value){const date=new Date(value+"T00:00:00Z");return `${date.toLocaleDateString("ru-RU",{timeZone:"UTC",day:"numeric",month:"long"})} ${date.getUTCFullYear()} года`;}
 function dutyShortDate(value){
@@ -68,9 +73,9 @@ async function loadDutyCalendar(){
     if(teachers){
       dutyTeachers=teachers.users.filter(u=>u.role==="teacher");
       const select=byId("dutyTeacher"),previous=select.value,counts=new Map();
-      dutyTeachers.forEach(u=>{const name=u.full_name||"ФИО не указано";counts.set(name,(counts.get(name)||0)+1);});
+      dutyTeachers.forEach(u=>{const name=dutyShortName(u.full_name);counts.set(name,(counts.get(name)||0)+1);});
       select.innerHTML='<option value="">Выберите учителя</option>'+dutyTeachers.map(u=>{
-        const name=u.full_name||"ФИО не указано",label=name+(counts.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"")+(u.position?` · ${u.position}`:"");
+        const name=dutyShortName(u.full_name),label=name+(counts.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"")+(u.position?` · ${u.position}`:"");
         return `<option value="${escapeHTML(u.id)}" class="person-teacher"${u.full_name?"":" disabled"}>${escapeHTML(label)}</option>`;
       }).join("");
       if(dutyTeachers.some(u=>u.id===previous&&u.full_name))select.value=previous;
@@ -110,9 +115,9 @@ byId("dutyQuarterForm").onsubmit=async e=>{
 };
 const dutyWeekDays=["Понедельник","Вторник","Среда","Четверг","Пятница"];
 function deputyOptions(selected){
-  const users=dutyWeek?.deputies||[],counts=new Map();users.forEach(u=>{const name=u.full_name||"ФИО не указано";counts.set(name,(counts.get(name)||0)+1);});
+  const users=dutyWeek?.deputies||[],counts=new Map();users.forEach(u=>{const name=dutyShortName(u.full_name);counts.set(name,(counts.get(name)||0)+1);});
   let options=`<option value="">Не назначен</option>`+users.map(u=>{
-    const name=u.full_name||"ФИО не указано",label=name+(counts.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"")+(u.position?` · ${u.position}`:"");
+    const name=dutyShortName(u.full_name),label=name+(counts.get(name)>1||!u.full_name?` (${u.id.slice(0,8)})`:"")+(u.position?` · ${u.position}`:"");
     return `<option value="${escapeHTML(u.id)}" class="person-associate"${u.id===selected?' selected':''}${u.full_name?'':' disabled'}>${escapeHTML(label)}</option>`;
   }).join("");
   if(selected&&!users.some(u=>u.id===selected))options+=`<option value="${escapeHTML(selected)}" selected disabled>Пользователь удалён — выберите замену</option>`;
