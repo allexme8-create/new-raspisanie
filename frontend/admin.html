@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=admin-collapsible-1">
+<link rel="stylesheet" href="/css/style.css?v=bell-editor-1">
 </head>
 <body>
 
@@ -94,6 +94,17 @@
       </div>
       <button class="btn" id="bellUploadBtn" type="button">🔔 Загрузить расписание звонков</button>
       <a class="btn secondary hidden" id="bellDownloadBtn" href="/api/schedule/bell-schedule.csv" target="_blank" rel="noopener" download="bell-schedule.csv">⬇️ Скачать текущее расписание звонков (CSV)</a>
+      <details class="bell-editor">
+        <summary><strong>Изменить расписание звонков вручную</strong></summary>
+        <p class="hint">Изменения сразу применяются к опубликованному расписанию. Для каждого дня и смены укажите номер урока, начало и окончание.</p>
+        <button class="btn secondary" id="bellEditorLoad" type="button">Загрузить текущее расписание</button>
+        <form id="bellEditorForm" class="hidden">
+          <div id="bellEditorRows"></div>
+          <button class="btn secondary" id="bellEditorAdd" type="button">Добавить урок</button>
+          <button class="btn" id="bellEditorSave" type="submit">Сохранить звонки</button>
+        </form>
+        <div id="bellEditorMessage" aria-live="polite"></div>
+      </details>
       <div id="bellUploadResult" style="margin-top:10px"></div>
     </details>
 
@@ -120,8 +131,8 @@
 </main>
 
 <div class="toast" id="toast"></div>
-<script src="/js/admin.js?v=admin-collapsible-1"></script>
+<script src="/js/admin.js?v=bell-editor-1"></script>
 <script src="/js/planner.js?v=planner-edit-classes-1"></script>
-<script src="/js/staff-admin.js?v=admin-collapsible-1"></script>
+<script src="/js/staff-admin.js?v=bell-editor-1"></script>
 </body>
 </html>

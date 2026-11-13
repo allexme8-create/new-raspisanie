@@ -28,6 +28,7 @@ import threading
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 import requests
 from fastapi import Cookie, Depends, FastAPI, File, Header, HTTPException, Response, UploadFile
@@ -162,6 +163,7 @@ def require_admin_header(
 
 # Единая блокировка черновика и привязок классов для одного процесса.
 _planner_lock = threading.Lock()
+_bell_lock = threading.RLock()
 # Персональные данные не включаются в GitHub-бэкап публичного расписания.
 staff_store = staff.Store(DATA_DIR / "staff.sqlite3")
 app.include_router(staff.make_router(staff_store, require_admin_header,
@@ -187,6 +189,24 @@ class YandexBody(BaseModel):
 
 class AdminSettingsBody(BaseModel):
     second_shift_classes: list[str] = Field(default_factory=list)
+
+
+class BellEntry(BaseModel):
+    shift: Literal[1, 2]
+    day: Literal["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
+    lesson: int = Field(ge=1, le=99)
+    start: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+
+
+class BellEdit(BaseModel):
+    revision: str
+    entries: list[BellEntry] = Field(min_length=1, max_length=1386)
+
+
+def bell_revision() -> str:
+    data = json.dumps(state.get("bell_schedule"), ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(data.encode("utf-8")).hexdigest()
 
 
 # ------------------------------------------------------------------ состояние
@@ -485,6 +505,38 @@ async def admin_upload(
     return {"results": results, "updated_at": state["updated_at"]}
 
 
+@app.get("/api/admin/bell-schedule/editor")
+def get_bell_editor(_: None = Depends(require_admin)) -> dict:
+    with _bell_lock:
+        bell = state.get("bell_schedule") or {}
+        return {"shifts": bell.get("shifts", {"1": {}, "2": {}}), "revision": bell_revision()}
+
+
+@app.put("/api/admin/bell-schedule/editor")
+def save_bell_editor(body: BellEdit, _: None = Depends(require_admin)) -> dict:
+    shifts = {"1": {}, "2": {}}
+    for item in body.entries:
+        if item.start >= item.end:
+            raise HTTPException(422, f"{item.day}, {item.shift}-я смена, урок {item.lesson}: окончание должно быть позже начала")
+        lessons = shifts[str(item.shift)].setdefault(item.day, {})
+        if str(item.lesson) in lessons:
+            raise HTTPException(422, f"{item.day}, {item.shift}-я смена: урок {item.lesson} указан дважды")
+        lessons[str(item.lesson)] = {"start": item.start, "end": item.end}
+    for shift, days in shifts.items():
+        for day, lessons in days.items():
+            periods = sorted(lessons.items(), key=lambda item: item[1]["start"])
+            for previous, current in zip(periods, periods[1:]):
+                if current[1]["start"] < previous[1]["end"]:
+                    raise HTTPException(422, f"{day}, {shift}-я смена: уроки {previous[0]} и {current[0]} пересекаются")
+    with _bell_lock:
+        if body.revision != bell_revision():
+            raise HTTPException(409, "Расписание звонков изменилось. Загрузите его заново перед сохранением.")
+        state["bell_schedule"] = {"filename": "Изменено вручную", "shifts": shifts}
+        _touch_updated_at()
+        _save_state()
+        return {"ok": True, "revision": bell_revision()}
+
+
 @app.get("/api/schedule/bell-schedule.csv")
 def download_bell_schedule() -> Response:
     """Экспорт текущих данных звонков в CSV, совместимый с импортом."""
@@ -530,9 +582,10 @@ async def admin_upload_bell_schedule(
 
     safe = _safe_upload_name(name)
     (UPLOAD_DIR / f"bell__{safe}").write_bytes(buf)
-    state["bell_schedule"] = {"filename": name, **parsed}
-    _touch_updated_at()
-    _save_state()
+    with _bell_lock:
+        state["bell_schedule"] = {"filename": name, **parsed}
+        _touch_updated_at()
+        _save_state()
     return {
         "ok": True,
         "file": name,
@@ -604,7 +657,11 @@ def admin_delete(kind: str, _: None = Depends(require_admin)) -> dict:
         state["files"][kind] = None
         state["second_shift_classes"] = _second_shift_classes()
     elif kind == "bell_schedule":
-        state["bell_schedule"] = None
+        with _bell_lock:
+            state["bell_schedule"] = None
+            _touch_updated_at()
+            _save_state()
+        return {"ok": True, "updated_at": state["updated_at"]}
     else:
         raise HTTPException(status_code=404, detail="Неизвестный тип файла")
     _touch_updated_at()

@@ -304,3 +304,8 @@ footer a{color:var(--muted)}
 .admin-block>summary:focus-visible{outline:2px solid var(--acc);outline-offset:4px;border-radius:4px}
 .admin-block-controls{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
 .admin-block-controls .btn{width:auto}
+
+.bell-editor{margin-top:16px;padding:12px;border:1px solid var(--line);border-radius:12px}
+.bell-editor>summary{cursor:pointer;color:var(--acc)}
+.bell-editor-row{padding:8px;border-bottom:1px solid var(--line)}
+.bell-editor-row label{flex:1 1 100px}

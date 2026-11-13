@@ -35,6 +35,35 @@ def project():
 
 
 class PlannerTests(unittest.TestCase):
+    def test_bell_manual_editor_validation_and_revision(self):
+        from schedule_parser import parse_bell_schedule_file
+        old=copy.deepcopy(backend.state)
+        try:
+            backend.state["bell_schedule"]={"filename":"test.xlsx",**bells()}
+            with patch.object(backend,"_save_state") as save, TestClient(backend.app) as client:
+                url="/api/admin/bell-schedule/editor"
+                headers={"Authorization":"Bearer "+backend._create_token()}
+                self.assertEqual(client.get(url).status_code,401)
+                loaded=client.get(url,headers=headers).json()
+                self.assertEqual(loaded["shifts"]["1"]["Пн"]["1"]["start"],"08:00")
+                entry={"day":"Пн","shift":1,"lesson":1,"start":"08:00","end":"08:40"}
+                payload={"revision":loaded["revision"],"entries":[entry]}
+                self.assertEqual(client.put(url,json=payload).status_code,401)
+                self.assertEqual(client.put(url,headers=headers,json={**payload,"entries":[{**entry,"end":"07:00"}]}).status_code,422)
+                self.assertEqual(client.put(url,headers=headers,json={**payload,"entries":[entry,entry]}).status_code,422)
+                self.assertEqual(client.put(url,headers=headers,json={**payload,"entries":[entry,{**entry,"lesson":2,"start":"08:30","end":"09:00"}]}).status_code,422)
+                self.assertEqual(client.put(url,headers=headers,json={**payload,"entries":[]}).status_code,422)
+                self.assertEqual(save.call_count,0)
+                result=client.put(url,headers=headers,json=payload)
+                self.assertEqual(result.status_code,200,result.text)
+                self.assertEqual(save.call_count,1)
+                self.assertEqual(client.get("/api/schedule").json()["bell_schedule"]["shifts"]["1"]["Пн"]["1"],{"start":"08:00","end":"08:40"})
+                self.assertEqual(parse_bell_schedule_file(client.get("/api/schedule/bell-schedule.csv").content,"bells.csv")["shifts"],{"1":{"Пн":{"1":{"start":"08:00","end":"08:40"}}},"2":{}})
+                self.assertEqual(client.put(url,headers=headers,json=payload).status_code,409)
+                self.assertEqual(save.call_count,1)
+        finally:
+            backend.state.clear();backend.state.update(old)
+
     def test_bell_csv_download_auth_and_roundtrip(self):
         from schedule_parser import parse_bell_schedule_file
         old=backend.state.get("bell_schedule")
