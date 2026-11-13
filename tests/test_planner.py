@@ -47,6 +47,9 @@ class PlannerTests(unittest.TestCase):
                 headers={"Authorization":"Bearer "+backend._create_token()}
                 response=client.get(url,headers=headers)
                 self.assertEqual(response.status_code,200)
+                public_response=client.get("/api/schedule/bell-schedule.csv")
+                self.assertEqual(public_response.status_code,200)
+                self.assertEqual(response.content,public_response.content)
                 self.assertIn("attachment",response.headers["content-disposition"])
                 self.assertIn("no-store",response.headers["cache-control"])
                 self.assertEqual(parse_bell_schedule_file(response.content,"bells.csv")["shifts"],sample)

@@ -70,7 +70,7 @@ function renderShiftClasses(st){
 async function loadStatus(){
   try{
     const st=await api("/api/admin/status");
-    $("bellDownloadBtn").disabled=!st.bell_schedule;
+    $("bellDownloadBtn").classList.toggle("hidden",!st.bell_schedule);
     const list=[];
     for(const kind of ["teachers","subjects"]){
       const f=st[kind];
@@ -124,7 +124,7 @@ async function loadStatus(){
     });
     return true;
   }catch(e){
-    $("bellDownloadBtn").disabled=true;
+    $("bellDownloadBtn").classList.add("hidden");
     $("filesList").innerHTML=`<div class="alert err">${esc(e.message)}</div>`;
     return false;
   }
@@ -181,19 +181,6 @@ async function uploadFiles(files){
   }
   await loadStatus();
 }
-
-/* CSV создаётся из текущего расписания и подходит для повторной загрузки. */
-$("bellDownloadBtn").onclick=async()=>{
-  const button=$("bellDownloadBtn"),requestToken=token;button.disabled=true;
-  try{
-    const response=await fetch("/api/admin/bell-schedule.csv",{credentials:"same-origin",cache:"no-store",headers:{Authorization:`Bearer ${requestToken}`,"X-Admin-Token":requestToken}});
-    if(response.status===401){if(requestToken&&requestToken===token)logout(false);throw new Error("Сессия истекла — войдите заново");}
-    if(!response.ok){let data={};try{data=await response.json();}catch(e){}throw new Error(data.detail||`Ошибка ${response.status}`);}
-    const url=URL.createObjectURL(await response.blob()),link=document.createElement("a");
-    try{link.href=url;link.download="bell-schedule.csv";document.body.appendChild(link);link.click();link.remove();}finally{URL.revokeObjectURL(url);}
-  }catch(e){$("bellUploadResult").innerHTML=`<div class="alert err">${esc(e.message)}</div>`;}
-  finally{button.disabled=false;}
-};
 
 /* ── отдельная загрузка расписания звонков ── */
 $("bellUploadBtn").onclick=async()=>{

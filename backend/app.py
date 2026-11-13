@@ -485,8 +485,8 @@ async def admin_upload(
     return {"results": results, "updated_at": state["updated_at"]}
 
 
-@app.get("/api/admin/bell-schedule.csv")
-def admin_download_bell_schedule(_: None = Depends(require_admin)) -> Response:
+@app.get("/api/schedule/bell-schedule.csv")
+def download_bell_schedule() -> Response:
     """Экспорт текущих данных звонков в CSV, совместимый с импортом."""
     bell = state.get("bell_schedule")
     if not bell or not bell.get("shifts"):
@@ -508,6 +508,11 @@ def admin_download_bell_schedule(_: None = Depends(require_admin)) -> Response:
         writer.writerow(sum((block[index] if index < len(block) else ["", "", "", ""] for block in blocks), []))
     return Response(content=output.getvalue().encode("utf-8-sig"), media_type="text/csv; charset=utf-8",
                     headers={"Content-Disposition": 'attachment; filename="bell-schedule.csv"', "Cache-Control": "no-store"})
+
+
+@app.get("/api/admin/bell-schedule.csv")
+def admin_download_bell_schedule(_: None = Depends(require_admin)) -> Response:
+    return download_bell_schedule()
 
 
 @app.post("/api/admin/bell-schedule")
