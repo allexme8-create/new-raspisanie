@@ -35,6 +35,26 @@ def project():
 
 
 class PlannerTests(unittest.TestCase):
+    def test_bell_csv_download_auth_and_roundtrip(self):
+        from schedule_parser import parse_bell_schedule_file
+        old=backend.state.get("bell_schedule")
+        sample={"1":{"Пн":{"2":{"start":"09:15","end":"09:55"},"1":{"start":"08:25","end":"09:05"}},"Сб":{"1":{"start":"08:00","end":"08:40"}}},"2":{"Вт":{"1":{"start":"13:30","end":"14:10"}}}}
+        try:
+            backend.state["bell_schedule"]={"filename":"original.xlsx","shifts":sample}
+            with TestClient(backend.app) as client:
+                url="/api/admin/bell-schedule.csv"
+                self.assertEqual(client.get(url).status_code,401)
+                headers={"Authorization":"Bearer "+backend._create_token()}
+                response=client.get(url,headers=headers)
+                self.assertEqual(response.status_code,200)
+                self.assertIn("attachment",response.headers["content-disposition"])
+                self.assertIn("no-store",response.headers["cache-control"])
+                self.assertEqual(parse_bell_schedule_file(response.content,"bells.csv")["shifts"],sample)
+                backend.state["bell_schedule"]=None
+                self.assertEqual(client.get(url,headers=headers).status_code,404)
+        finally:
+            backend.state["bell_schedule"]=old
+
     def test_unified_staff_page_and_admin_routes(self):
         with TestClient(backend.app) as client:
             response = client.get("/users")

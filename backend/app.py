@@ -15,6 +15,8 @@ Backend «Расписание лицея».
 """
 from __future__ import annotations
 
+import csv
+import io
 import hashlib
 import hmac
 import json
@@ -481,6 +483,31 @@ async def admin_upload(
             }
         )
     return {"results": results, "updated_at": state["updated_at"]}
+
+
+@app.get("/api/admin/bell-schedule.csv")
+def admin_download_bell_schedule(_: None = Depends(require_admin)) -> Response:
+    """Экспорт текущих данных звонков в CSV, совместимый с импортом."""
+    bell = state.get("bell_schedule")
+    if not bell or not bell.get("shifts"):
+        raise HTTPException(404, "Расписание звонков не загружено")
+    output = io.StringIO(newline="")
+    writer = csv.writer(output, delimiter=";", lineterminator="\r\n")
+    writer.writerow(["1 смена", "", "", "", "2 смена", "", "", ""])
+    writer.writerow(["День недели", "Урок", "Начало", "Окончание"] * 2)
+    days = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс")
+    blocks = []
+    for shift in ("1", "2"):
+        entries = []
+        for day in days:
+            lessons = bell["shifts"].get(shift, {}).get(day, {})
+            for lesson, period in sorted(lessons.items(), key=lambda item: int(item[0])):
+                entries.append([day, lesson, period["start"], period["end"]])
+        blocks.append(entries)
+    for index in range(max(map(len, blocks))):
+        writer.writerow(sum((block[index] if index < len(block) else ["", "", "", ""] for block in blocks), []))
+    return Response(content=output.getvalue().encode("utf-8-sig"), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="bell-schedule.csv"', "Cache-Control": "no-store"})
 
 
 @app.post("/api/admin/bell-schedule")
