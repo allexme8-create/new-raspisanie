@@ -290,3 +290,6 @@ footer a{color:var(--muted)}
 /* Текущий урок заметен как в списке, так и в таблице недели. */
 .lrow.lesson-active,.trow.lesson-active,.week td.lesson-active{background:#e9edf1;border-color:#aab4bf;box-shadow:inset 0 0 0 2px #aab4bf}
 .week tbody td:first-child{color:#1d54a3}
+
+/* В карте дежурств суббота и ссылки назначения выделены красным. */
+.duty-row.duty-saturday>strong,.duty-saturday .duty-action,.duty-saturday .duty-slot>.muted,.duty-saturday .duty-mobile-label{color:#b42318}

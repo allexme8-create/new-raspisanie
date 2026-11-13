@@ -41,7 +41,7 @@ function renderDuty(){
       const selected=dutySelected?.day===day&&dutySelected?.slot===slot;
       return `<div class="duty-slot"><span class="duty-mobile-label">${escapeHTML(dutySlotLabel(slot))}: </span>${allowed&&canAct?`<button type="button" class="duty-action ${selected?'selected':''}" data-duty-select="${escapeHTML(day)}" data-slot="${slot}">${selected?'Выбрано':'Свободно · выбрать'}</button>`:'<span class="muted">Свободно</span>'}${editAdmin}</div>`;
     }).join("");
-    return `<div class="duty-row ${day===data.today?'duty-today':''}"><strong>${escapeHTML(dutyShortDate(day))}${day===data.today?' · сегодня':''}</strong>${slots}</div>${dutyFeedback?.day===day?`<div class="duty-inline-feedback alert ${dutyFeedback.error?'err':'ok'}" role="status">${escapeHTML(dutyFeedback.text)}</div>`:""}${dutySelected?.day===day?'<div id="dutyFormHere" class="duty-inline-location"></div>':""}`;
+    return `<div class="duty-row ${day===data.today?'duty-today':''}${new Date(day+"T00:00:00Z").getUTCDay()===6?' duty-saturday':''}"><strong>${escapeHTML(dutyShortDate(day))}${day===data.today?' · сегодня':''}</strong>${slots}</div>${dutyFeedback?.day===day?`<div class="duty-inline-feedback alert ${dutyFeedback.error?'err':'ok'}" role="status">${escapeHTML(dutyFeedback.text)}</div>`:""}${dutySelected?.day===day?'<div id="dutyFormHere" class="duty-inline-location"></div>':""}`;
   }).join("")}</div>`;
   if(dutySelected)byId("dutyFormHere").appendChild(byId("dutyForm"));
   byId("dutyMap").querySelectorAll("[data-duty-select]").forEach(button=>button.onclick=()=>{
