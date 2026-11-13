@@ -89,11 +89,7 @@ function clockMinutes(value){
   const match=/^(\d{1,2}):(\d{2})$/.exec(String(value||""));
   return match?Number(match[1])*60+Number(match[2]):null;
 }
-function renderCurrentLesson(){
-  const boxes=["currentLesson","classCurrentLesson","teacherCurrentLesson","favCurrentLesson"].map(id=>$(id)).filter(Boolean),shifts=state.bellSchedule?.shifts;
-  if(!boxes.length)return;
-  if(!shifts){boxes.forEach(box=>box.classList.add("hidden"));return;}
-  const now=new Date();
+function schoolClock(now=new Date()) {
   let day=DAYS[now.getDay()-1],nowMinutes=now.getHours()*60+now.getMinutes()+now.getSeconds()/60;
   if(publicDuty?.timezone){
     try{
@@ -103,6 +99,25 @@ function renderCurrentLesson(){
       nowMinutes=Number(values.hour)*60+Number(values.minute)+Number(values.second)/60;
     }catch(e){} // Until the school timezone is available, use the device clock.
   }
+  return {day,nowMinutes};
+}
+function lessonAttributes(day,shift,lesson){
+  const period=bellPeriod(shift,day,lesson);
+  return period?`data-lesson-day="${esc(day)}" data-lesson-start="${esc(period.start)}" data-lesson-end="${esc(period.end)}"`:"";
+}
+function updateActiveLessons(){
+  const {day,nowMinutes}=schoolClock();
+  document.querySelectorAll("[data-lesson-day]").forEach(el=>{
+    const start=clockMinutes(el.dataset.lessonStart),end=clockMinutes(el.dataset.lessonEnd);
+    el.classList.toggle("lesson-active",!!day&&el.dataset.lessonDay===day&&start!==null&&end!==null&&start<end&&nowMinutes>=start&&nowMinutes<end);
+  });
+}
+function renderCurrentLesson(){
+  updateActiveLessons();
+  const boxes=["currentLesson","classCurrentLesson","teacherCurrentLesson","favCurrentLesson"].map(id=>$(id)).filter(Boolean),shifts=state.bellSchedule?.shifts;
+  if(!boxes.length)return;
+  if(!shifts){boxes.forEach(box=>box.classList.add("hidden"));return;}
+  const {day,nowMinutes}=schoolClock();
   const active=[],upcoming=[];
   if(day){
     for(const shift of ["1","2"]){
@@ -350,12 +365,12 @@ function teacherDayRows(name,dayName){
       }
       const teacherRooms=pairValueForTeacher(c.rooms||[],teacherIndex,teacherCount);
       const subjectRooms=pairValueForTeacher(s?.rooms||[],teacherIndex,teacherCount);
-      rows.push({l:entry.lesson,displayLesson:entry.displayLesson,order:entry.order,beforeSecondShift:entry.beforeSecondShift,cls,shift,subj,rooms:uniqueRooms(teacherRooms,subjectRooms),time:entry.time});
+      rows.push({day:dayName,timeShift:entry.timeShift,l:entry.lesson,displayLesson:entry.displayLesson,order:entry.order,beforeSecondShift:entry.beforeSecondShift,cls,shift,subj,rooms:uniqueRooms(teacherRooms,subjectRooms),time:entry.time});
     }
   }
   return rows.sort((a,b)=>a.shift.localeCompare(b.shift)||a.order-b.order||a.cls.localeCompare(b.cls,"ru"));
 }
-const trowHTML=r=>`<div class="trow">
+const trowHTML=r=>`<div class="trow" ${lessonAttributes(r.day,r.timeShift,r.l)}>
   ${lessonMarker(r.displayLesson??r.l,r.time)}
   <span class="tcls">${esc(r.cls)}</span>
   <span class="tsubj">${r.subj?esc(r.subj):'<span class="muted">—</span>'}</span>
@@ -413,10 +428,11 @@ function renderClassBody(){
   for(const entry of classLessonEntries(cls,d)){
     const c=cellFor(cls,d,entry.raw);
     if(!c) continue; count++;
-    rows+=`<div class="lrow">${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`;
+    rows+=`<div class="lrow" ${lessonAttributes(d,entry.timeShift,entry.lesson)}>${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`;
   }
   out.innerHTML=`<p class="date-label"><b>${esc(cls)}</b> · ${dateLabel(sel)} · уроков: ${count}</p>`
     +(rows||`<div class="nodata">В этот день уроков нет 🎉</div>`);
+  updateActiveLessons();
 }
 function renderWeekInto(out,cls){
   const entriesByDay=Object.fromEntries(DAYS.map(d=>[d,classLessonEntries(cls,d)]));
@@ -432,17 +448,18 @@ function renderWeekInto(out,cls){
     html+=`<tr><td>${esc(row.label)}</td>`+DAYS.map((d,i)=>{
       const entry=entriesByDay[d].find(item=>item.weekKey===row.key);
       const c=entry?cellFor(cls,d,entry.raw):"";
-      return `<td class="${i===TODAY?'today':''}">${c?`${c}${entry.time?`<div class="week-time">${esc(entry.time)}</div>`:""}`:'<span class="dash">—</span>'}</td>`;
+      return `<td class="${i===TODAY?'today':''}" ${c?lessonAttributes(d,entry.timeShift,entry.lesson):""}>${c?`${c}${entry.time?`<div class="week-time">${esc(entry.time)}</div>`:""}`:'<span class="dash">—</span>'}</td>`;
     }).join("")+`</tr>`;
   }
   const mobileWeek=DAYS.map((d,i)=>{
     const rows=entriesByDay[d].map(entry=>{
       const cell=cellFor(cls,d,entry.raw);
-      return cell?`<div class="lrow">${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${cell}</div></div>`:"";
+      return cell?`<div class="lrow" ${lessonAttributes(d,entry.timeShift,entry.lesson)}>${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${cell}</div></div>`:"";
     }).join("");
     return `<section class="mobile-week-day"><h3>${esc(DAY_FULL[d])}${i===TODAY?" · сегодня":""}</h3>${rows||'<p class="muted">Уроков нет</p>'}</section>`;
   }).join("");
   out.innerHTML=html+`</tbody></table></div><div class="mobile-week">${mobileWeek}</div>`;
+  updateActiveLessons();
 }
 
 function renderTeacherArea(){
@@ -500,6 +517,7 @@ function renderTeacherSchedule(){
     html+=teacherShiftGroupHTML(rows,dayLabel);
   }
   out.innerHTML=html||`<div class="nodata">${sel==="all"?"Уроков не найдено.":"В этот день уроков нет 🎉"}</div>`;
+  updateActiveLessons();
 }
 
 // Занятость определяется по реальному времени, а не по номеру урока:
@@ -591,7 +609,7 @@ function renderFavArea(){
     for(const cls of favs.classes){
       let rows="",count=0;
       for(const entry of classLessonEntries(cls,d)){ const c=cellFor(cls,d,entry.raw); if(!c)continue; count++;
-        rows+=`<div class="lrow">${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`; }
+        rows+=`<div class="lrow" ${lessonAttributes(d,entry.timeShift,entry.lesson)}>${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`; }
       html+=`<div class="fav-card"><div class="fav-head"><b>${esc(cls)}</b><span class="muted">класс · уроков: ${count}</span>
         <button class="rm-fav" data-kind="classes" data-name="${esc(cls)}">убрать ✕</button></div>
         ${rows||'<div class="muted">В этот день уроков нет 🎉</div>'}</div>`;

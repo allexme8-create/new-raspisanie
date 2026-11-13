@@ -284,3 +284,8 @@ footer a{color:var(--muted)}
 
 /* Цвета показывают роль, а не должность сотрудника. */
 .person-teacher{color:#176b38;font-weight:700}.person-associate{color:#1d54a3;font-weight:700}.person-director{color:#b42318;font-weight:700}
+
+/* Текущий урок заметен как в списке, так и в таблице недели. */
+.lrow.lesson-active,.trow.lesson-active,.week td.lesson-active{background:#ffec80;border-color:#cf7a00;box-shadow:inset 0 0 0 2px #cf7a00;color:#352100}
+.lesson-active .lesson-time,.lesson-active .teach,.lesson-active .week-time{color:#593600}
+.lesson-active .lnum{background:#a64b00;color:#fff}

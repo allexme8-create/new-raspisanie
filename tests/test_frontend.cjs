@@ -171,6 +171,19 @@ assert.equal(result.secondShiftTime, "13:45–14:25");
 assert.match(element("currentLesson").innerHTML, /урок № 1/);
 assert.match(element("currentLesson").innerHTML, /осталось 35 мин/);
 
+// Выделение следует школьному времени, сменяется по звонку и не затрагивает другие дни.
+const activeNodes = ['Пн','Вт'].map(day => ({dataset:{lessonDay:day,lessonStart:'08:25',lessonEnd:'09:05'},active:false,classList:null}));
+activeNodes.forEach(n=>n.classList={toggle(_name,on){n.active=on}});
+context.document.querySelectorAll=selector=>selector==='[data-lesson-day]'?activeNodes:[];
+vm.runInContext('updateActiveLessons()',context);
+assert.equal(activeNodes[0].active,true);assert.equal(activeNodes[1].active,false);
+vm.runInContext(`Date=class extends FixedDate {constructor(...args){args.length?super(...args):super(2026,10,9,9,5)}};updateActiveLessons()`,context);
+assert.equal(activeNodes[0].active,false);
+context.document.querySelectorAll=()=>[];
+vm.runInContext(`Date=FixedDate`,context);
+assert.match(result.week,/data-lesson-day="Пн"/);
+assert.match(result.split,/data-lesson-start=/);
+
 // Во время пересечения расписаний двух смен показываются оба номера урока.
 vm.runInContext(`
   Date = class extends FixedDate { constructor(...args){ args.length?super(...args):super(2026,10,9,13,50,0,0); } };
