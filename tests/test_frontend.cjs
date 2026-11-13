@@ -160,6 +160,8 @@ assert.match(css,/\.lc \.subj,\.tsubj\{color:#1d54a3/);
 assert.match(css,/\.lc \.teach,\.schedule-teacher-name\{color:#176b38/);
 assert.match(css,/\.week td\.lesson-active\{background:#e9edf1/);
 assert.match(css,/\.week tbody td:first-child\{color:#1d54a3/);
+assert.match(css,/\.room-badge\{[^}]*color:#b42318/);
+assert.match(css,/\.room \.rnum\{[^}]*color:#b42318/);
 
 assert.deepEqual(Array.from(result.rooms), ["101", "102", "301"]);
 assert.deepEqual(Array.from(result.occupancy), [1, 1, 1]);
