@@ -16,6 +16,7 @@ Backend «Расписание лицея».
 from __future__ import annotations
 
 import csv
+import copy
 from collections import Counter
 import io
 import hashlib
@@ -39,6 +40,7 @@ from pydantic import BaseModel, Field
 
 import github_backup
 import planner
+import schedule_map
 import staff
 from schedule_parser import (
     ParseError,
@@ -76,6 +78,7 @@ state: dict = {
     "planner_subjects_imported": False,
     "planner_rooms_imported": False,
     "planner_groups_imported": False,
+    "schedule_map_draft": None,
 }
 
 _revoked_tokens: set[str] = set()
@@ -93,7 +96,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported", "planner_groups_imported"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported", "planner_groups_imported", "schedule_map_draft"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -179,7 +182,7 @@ app.include_router(staff.make_router(staff_store, require_admin_header,
 @app.middleware("http")
 async def private_no_cache(request, call_next):
     response = await call_next(request)
-    if request.url.path.startswith(("/api/staff/", "/api/admin/users", "/api/duties/")) or request.url.path == "/users":
+    if request.url.path.startswith(("/api/staff/", "/api/admin/", "/api/duties/")) or request.url.path == "/users":
         response.headers["Cache-Control"] = "no-store"
         response.headers["Referrer-Policy"] = "no-referrer"
     return response
@@ -708,6 +711,149 @@ def planner_rename_group(body: PlannerGroupRename, _: None = Depends(require_adm
         item.name=name;item.inferred=False;project.revision+=1
         state["planner"]=project.model_dump();_save_state()
         return {"project":project.model_dump(),"issues":planner.issues(project,state.get("bell_schedule"),complete=True)}
+
+
+def map_fingerprint(data):
+    return hashlib.sha256(json.dumps(data,sort_keys=True,ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def map_current():
+    published=schedule_map.snapshot(state)
+    draft=state.get("schedule_map_draft")
+    if draft:
+        return draft, draft["base"] != map_fingerprint(published)
+    return {"base":map_fingerprint(published),"revision":0,"data":published}, False
+
+
+def check_map_conflicts(data, class_name, day, shift, lesson, teacher_cell, subject_cell):
+    p=schedule_map.period(data,shift,day,lesson)
+    start,end=schedule_map.clock(p.get("start")),schedule_map.clock(p.get("end"))
+    if start is None or end is None or start>=end:
+        raise HTTPException(422,"Для выбранного дня и урока нет времени звонков.")
+    names={normalize_teacher_initials(x).casefold() for x in teacher_cell.get("names",[]) if x and x not in {"Классный час","СФУ","Экскурсия"}}
+    rooms={" ".join(x.split()).casefold() for cell in (teacher_cell,subject_cell) for x in cell.get("rooms",[]) if x}
+    classes={c for kind in ("teachers","subjects") for c in (data.get(kind) or {}).get("classes",[])}
+    for cls in classes-{class_name}:
+        for other in schedule_map.entries(data,cls):
+            if other["day"]!=day:continue
+            other_names={normalize_teacher_initials(x).casefold() for x in other["teachers"].get("names",[]) if x and x not in {"Классный час","СФУ","Экскурсия"}}
+            other_rooms={" ".join(x.split()).casefold() for kind in ("teachers","subjects") for x in other[kind].get("rooms",[]) if x}
+            if not (names & other_names or rooms & other_rooms):continue
+            other_period=schedule_map.period(data,other["shift"],other["day"],other["lesson"])
+            a,b=schedule_map.clock(other_period.get("start")),schedule_map.clock(other_period.get("end"))
+            if a is None or b is None:raise HTTPException(422,f"Нельзя проверить конфликт с классом {cls}: нет времени звонков.")
+            if start<b and a<end:raise HTTPException(409,f"Конфликт учителя или кабинета с классом {cls}.")
+
+
+class MapMove(BaseModel):
+    revision: int = Field(ge=0)
+    class_name: str = Field(min_length=1,max_length=80)
+    day: Literal["Пн","Вт","Ср","Чт","Пт","Сб"]
+    raw: str = Field(pattern=r"^\d{1,2}$")
+    target_day: Literal["Пн","Вт","Ср","Чт","Пт","Сб"]
+    target_lesson: int = Field(ge=1,le=12)
+
+
+@app.get("/api/admin/schedule-map")
+def read_schedule_map(class_name: str = "", _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        draft,stale=map_current();data=draft["data"]
+        classes=list(dict.fromkeys(c for kind in ("teachers","subjects") for c in (data.get(kind) or {}).get("classes",[])))
+        if class_name and class_name not in classes: raise HTTPException(404,"Класс не найден")
+        return {"revision":draft["revision"],"stale":stale,"classes":classes,"entries":schedule_map.entries(data,class_name) if class_name else [],"has_changes":bool(state.get("schedule_map_draft"))}
+
+
+@app.post("/api/admin/schedule-map/move")
+def move_schedule_map(body: MapMove, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        draft,stale=map_current()
+        if stale: raise HTTPException(409,"Опубликованное расписание изменилось. Обновите карту, чтобы не потерять новые данные.")
+        if draft["revision"]!=body.revision: raise HTTPException(409,"Карта изменилась в другом окне. Обновите страницу.")
+        data=copy.deepcopy(draft["data"])
+        valid_classes={c for kind in ("teachers","subjects") for c in (data.get(kind) or {}).get("classes",[])}
+        if body.class_name not in valid_classes: raise HTTPException(404,"Класс не найден")
+        entry=next((e for e in schedule_map.entries(data,body.class_name) if e["day"]==body.day and e["raw"]==body.raw),None)
+        if not entry: raise HTTPException(404,"Урок не найден")
+        target_raw=schedule_map.destination(data,body.class_name,body.target_day,body.target_lesson)
+        if body.day==body.target_day and body.raw==target_raw:
+            return {"revision":draft["revision"],"ok":True}
+        for kind in ("teachers","subjects"):
+            existing=schedule_map.getcell(data,kind,body.target_day,target_raw,body.class_name) or {}
+            if existing.get("names") or existing.get("raw") or existing.get("rooms"):
+                raise HTTPException(409,"Ячейка занята. Сначала перенесите урок из неё.")
+        shift=2 if body.class_name in (data.get("second_shift_classes") or []) else 1
+        check_map_conflicts(data,body.class_name,body.target_day,shift,body.target_lesson,entry["teachers"],entry["subjects"])
+        for kind in ("teachers","subjects"):
+            if data.get(kind):
+                cell=schedule_map.getcell(data,kind,body.day,body.raw,body.class_name)
+                schedule_map.putcell(data,kind,body.day,body.raw,body.class_name,None)
+                schedule_map.putcell(data,kind,body.target_day,target_raw,body.class_name,cell)
+        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data}
+        state["schedule_map_draft"]=updated;_save_state()
+        return {"revision":updated["revision"],"ok":True}
+
+
+class MapEdit(BaseModel):
+    revision: int = Field(ge=0)
+    class_name: str = Field(min_length=1,max_length=80)
+    day: Literal["Пн","Вт","Ср","Чт","Пт","Сб"]
+    raw: str = Field(pattern=r"^\d{1,2}$")
+    teachers: list[str] = Field(max_length=10)
+    subjects: list[str] = Field(max_length=10)
+    rooms: list[str] = Field(max_length=10)
+
+
+@app.post("/api/admin/schedule-map/edit")
+def edit_schedule_map(body: MapEdit, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        draft,stale=map_current()
+        if stale or body.revision!=draft["revision"]:raise HTTPException(409,"Расписание или карта изменились. Обновите данные.")
+        data=copy.deepcopy(draft["data"])
+        entry=next((e for e in schedule_map.entries(data,body.class_name) if e["day"]==body.day and e["raw"]==body.raw),None)
+        if not entry:raise HTTPException(404,"Урок не найден")
+        if any(entry[k].get("groups") for k in ("teachers","subjects")):
+            raise HTTPException(422,"Урок содержит данные групп. Их можно изменить в черновике конструктора.")
+        def clean(items):
+            result=[" ".join(x.split()) for x in items]
+            if any(not x or len(x)>80 for x in result):raise HTTPException(422,"Проверьте названия: они не должны быть пустыми или длиннее 80 символов")
+            return result
+        teachers,subjects,rooms=clean(body.teachers),clean(body.subjects),clean(body.rooms)
+        if not teachers and not subjects:raise HTTPException(422,"Укажите учителя или предмет")
+        if (teachers and not data.get("teachers")) or (subjects and not data.get("subjects")):
+            raise HTTPException(422,"Отсутствует соответствующий файл расписания")
+        t={**entry["teachers"],"names":teachers,"raw":", ".join(teachers),"rooms":rooms}
+        s={**entry["subjects"],"names":subjects,"raw":", ".join(subjects),"rooms":rooms}
+        if teachers!=entry["teachers"].get("names",[]) or rooms!=entry["teachers"].get("rooms",[]):
+            check_map_conflicts(data,body.class_name,body.day,entry["shift"],entry["lesson"],t,s)
+        for kind,cell in (("teachers",t),("subjects",s)):
+            if data.get(kind):schedule_map.putcell(data,kind,body.day,body.raw,body.class_name,cell)
+        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data}
+        state["schedule_map_draft"]=updated;_save_state();return {"revision":updated["revision"],"ok":True}
+
+
+class MapPublish(BaseModel):
+    revision: int = Field(ge=0)
+
+
+@app.post("/api/admin/schedule-map/reset")
+def reset_schedule_map(body: MapPublish, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        draft,_=map_current()
+        if body.revision != draft["revision"]:raise HTTPException(409,"Карта изменена в другом окне. Обновите данные.")
+        state["schedule_map_draft"]=None;_save_state()
+        return {"ok":True}
+
+
+@app.post("/api/admin/schedule-map/publish")
+def publish_schedule_map(body: MapPublish, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        draft,stale=map_current()
+        if stale or draft["revision"]!=body.revision: raise HTTPException(409,"Расписание или карта изменились. Обновите данные.")
+        if not state.get("schedule_map_draft"): raise HTTPException(422,"Нет изменений для публикации")
+        for kind in ("teachers","subjects"):
+            state[kind]=draft["data"][kind]
+        state["schedule_map_draft"]=None;_touch_updated_at();_save_state()
+        return {"ok":True}
 
 
 class PlannerMove(BaseModel):

@@ -297,6 +297,43 @@ class PlannerTests(unittest.TestCase):
             finally:
                 backend.state.clear();backend.state.update(old)
 
+    def test_published_schedule_map_moves_edits_publishes_and_detects_stale(self):
+        old=copy.deepcopy(backend.state)
+        try:
+            classes=["5а","6а"]
+            def cell(names,rooms):return {"names":names,"raw":", ".join(names),"rooms":rooms}
+            backend.state["teachers"]={"classes":classes,"grid":{"Пн":{"1":{"5а":cell(["Иванов ИИ","Петров ПП"],["101","102"]),"6а":cell(["Другой"],["103"])}}},"numbering":"local"}
+            backend.state["subjects"]={"classes":classes,"grid":{"Пн":{"1":{"5а":cell(["Физика","Математика"],["101","102"]),"6а":cell(["Химия"],["103"])}}},"numbering":"local"}
+            backend.state["second_shift_classes"]=[];backend.state["bell_schedule"]=bells();backend.state["schedule_map_draft"]=None
+            with patch.object(backend,"_save_state"):
+                data=backend.read_schedule_map("5а")
+                self.assertEqual(len(data["entries"]),1);self.assertFalse(data["has_changes"])
+                request=backend.MapMove(revision=0,class_name="5а",day="Пн",raw="1",target_day="Пн",target_lesson=2)
+                backend.move_schedule_map(request)
+                self.assertEqual(backend.state["teachers"]["grid"]["Пн"]["1"]["5а"]["names"],["Иванов ИИ","Петров ПП"])
+                data=backend.read_schedule_map("5а");self.assertTrue(data["has_changes"]);self.assertEqual(data["entries"][0]["lesson"],2)
+                self.assertEqual(data["entries"][0]["subjects"]["names"],["Физика","Математика"])
+                with self.assertRaises(backend.HTTPException):backend.move_schedule_map(request)
+                edit=backend.MapEdit(revision=1,class_name="5а",day="Пн",raw="2",teachers=["Иванов ИИ","Петров ПП"],subjects=["Физика","Алгебра"],rooms=["101","102"])
+                backend.edit_schedule_map(edit)
+                backend.publish_schedule_map(backend.MapPublish(revision=2))
+                self.assertEqual(backend.state["subjects"]["grid"]["Пн"]["2"]["5а"]["names"],["Физика","Алгебра"])
+                self.assertFalse(backend.read_schedule_map("5а")["has_changes"])
+                backend.move_schedule_map(backend.MapMove(revision=0,class_name="5а",day="Пн",raw="2",target_day="Вт",target_lesson=1))
+                backend.state["teachers"]["extra"]="external update"
+                self.assertTrue(backend.read_schedule_map("5а")["stale"])
+                with self.assertRaises(backend.HTTPException):backend.publish_schedule_map(backend.MapPublish(revision=1))
+                backend.reset_schedule_map(backend.MapPublish(revision=1));self.assertFalse(backend.read_schedule_map("5а")["stale"])
+        finally:
+            backend.state.clear();backend.state.update(old)
+
+    def test_published_schedule_map_global_second_shift_and_conflicts(self):
+        import schedule_map
+        data={"teachers":{"classes":["5а","6а"],"grid":{"Пн":{"7":{"6а":{"names":["Иванов ИИ"],"rooms":["101"]}},"1":{"5а":{"names":["Иванов И.И."],"rooms":["101"]}}}}},"subjects":{"classes":["5а","6а"],"grid":{}},"second_shift_classes":["6а"],"bell_schedule":{"shifts":{"1":{"Пн":{"1":{"start":"08:00","end":"08:40"},"7":{"start":"13:45","end":"14:25"}}},"2":{"Пн":{"1":{"start":"13:45","end":"14:25"}}}}}}
+        self.assertTrue(schedule_map.global_grid(data,"6а"));self.assertEqual(schedule_map.entries(data,"6а")[0]["lesson"],1);self.assertEqual(schedule_map.destination(data,"6а","Пн",1),"7")
+        with self.assertRaises(backend.HTTPException) as conflict:backend.check_map_conflicts(data,"6а","Пн",1,1,{"names":["Иванов ИИ"],"rooms":[]},{})
+        self.assertEqual(conflict.exception.status_code,409)
+
     def test_map_move_checks_conflicts_groups_and_revision(self):
         old=copy.deepcopy(backend.state)
         try:
