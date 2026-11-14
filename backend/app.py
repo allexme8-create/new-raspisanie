@@ -727,6 +727,10 @@ def change_load(body: LoadChange, _: None = Depends(require_admin)) -> dict:
             return Counter(issue for issue in planner.issues(project,state.get("bell_schedule")) if not issue.startswith("Укажите кабинет для "))
         before=conflicts(p)
         if other:other.group=load.group
+        if body.room != load.room:
+            for placement in p.placements:
+                if placement.load_id == load.id:
+                    placement.room = "" if body.room else (load.room or placement.room)
         load.group=body.group;load.room=body.room
         after=conflicts(p)
         added=list((after-before).elements())
@@ -777,6 +781,11 @@ def planner_rename(kind: str, body: PlannerRename, _: None = Depends(require_adm
                 load.subject=name
             elif kind == "rooms" and load.room == old_name:
                 load.room=name
+        if kind == "rooms":
+            for teacher in project.teachers:
+                if teacher.preferred_room == old_name: teacher.preferred_room = name
+            for placement in project.placements:
+                if placement.room == old_name: placement.room = name
         project.revision += 1
         previous=state.get("planner")
         try:
