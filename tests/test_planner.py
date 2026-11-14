@@ -97,6 +97,27 @@ class PlannerTests(unittest.TestCase):
             for old_path in ("/teacher", "/Director", "/associate"):
                 self.assertEqual(client.get(old_path).status_code, 404)
 
+    def test_import_schedule_teachers_once_without_duplicates_or_service_rows(self):
+        old=copy.deepcopy(backend.state)
+        try:
+            backend.state["planner"]=project().model_dump()
+            backend.state["planner_teachers_imported"]=False
+            backend.state["teachers"]={"classes":["5а"],"grid":{"Пн":{"1":{"5а":{"names":["Учитель", "Иванов ИИ", "Классный час", "Иванов ИИ", "ошибка"]}},"2":{"5а":{"names":["Петрова АА"]}}}}}
+            with patch.object(backend,"_save_state") as save:
+                backend.migrate_schedule_teachers()
+                names=[x.name for x in backend._planner_project().teachers]
+                self.assertEqual(names,["Учитель","Другой","Иванов ИИ","Петрова АА"])
+                self.assertTrue(backend.state["planner_teachers_imported"])
+                self.assertEqual(len(backend._planner_project().loads),2)
+                self.assertEqual(save.call_count,1)
+                backend.state["planner"]["teachers"]=[x for x in backend.state["planner"]["teachers"] if x["name"]!="Иванов ИИ"]
+                backend.migrate_schedule_teachers()
+                self.assertNotIn("Иванов ИИ",[x.name for x in backend._planner_project().teachers])
+                self.assertEqual(backend.import_schedule_teachers()["added"],["Иванов ИИ"])
+                self.assertEqual(backend.import_schedule_teachers()["added"],[])
+        finally:
+            backend.state.clear();backend.state.update(old)
+
     def test_migrate_schedule_classes_and_preserve_planner(self):
         original=copy.deepcopy(backend.state)
         try:

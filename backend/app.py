@@ -70,6 +70,7 @@ state: dict = {
     "updated_at": None,
     "planner": None,
     "planner_class_imported": False,
+    "planner_teachers_imported": False,
 }
 
 _revoked_tokens: set[str] = set()
@@ -87,7 +88,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -343,6 +344,61 @@ def _import_schedule_classes() -> list[str]:
         project.revision += 1
         state["planner"] = project.model_dump()
     return added
+
+
+def _import_schedule_teachers() -> list[str]:
+    """Добавить имена из опубликованной сетки в справочник, не меняя учётные записи."""
+    source = state.get("teachers") or {}
+    names = set()
+    for lessons in source.get("grid", {}).values():
+        for cells in lessons.values():
+            for cell in cells.values():
+                for raw in cell.get("names", []):
+                    name = str(raw).strip()
+                    if not name or name in {"Классный час", "СФУ", "Экскурсия"}:
+                        continue
+                    if source.get("numbering") != "local" and not re.fullmatch(r"[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ]{1,3}\.?)?", name):
+                        continue
+                    names.add(name)
+    project = _planner_project()
+    existing = {teacher.name.casefold() for teacher in project.teachers}
+    added = []
+    for name in sorted(names, key=str.casefold):
+        if name.casefold() in existing:
+            continue
+        if len(project.teachers) >= 200 or len(name) > 80:
+            raise ValueError("Невозможно перенести всех учителей: превышен предел конструктора или длина имени")
+        project.teachers.append(planner.Teacher(name=name))
+        existing.add(name.casefold()); added.append(name)
+    if added:
+        project.revision += 1
+        state["planner"] = project.model_dump()
+    return added
+
+
+@app.on_event("startup")
+def migrate_schedule_teachers():
+    with _planner_lock:
+        source=state.get("teachers") or {}
+        if not state.get("planner_teachers_imported") and any(source.get("grid", {}).values()):
+            try:
+                _import_schedule_teachers()
+            except ValueError:
+                return  # Explicit import reports limits; startup must remain available.
+            state["planner_teachers_imported"] = True
+            _save_state()
+
+
+@app.post("/api/admin/planner/import-teachers")
+def import_schedule_teachers(_: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        try:
+            added = _import_schedule_teachers()
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if added:
+            _save_state()
+        return {"added": added, "project": _planner_project().model_dump()}
 
 
 @app.on_event("startup")
