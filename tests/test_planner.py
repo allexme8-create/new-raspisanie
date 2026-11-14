@@ -35,6 +35,52 @@ def project():
 
 
 class PlannerTests(unittest.TestCase):
+    def test_soft_preferences_scope_search_and_fallback(self):
+        p=planner.Project(classes=[planner.SchoolClass(name='5а'),planner.SchoolClass(name='10а')],teachers=[planner.Teacher(name='А')],subjects=[planner.Named(name='Математика')],rooms=[planner.Room(name='101')],loads=[planner.Load(id='a',class_name='5а',teacher='А',subject='Математика',room='101',per_week=1)],preferences=[planner.Preference(scope='grade',scope_value='5',subject='Математика',kind='avoid_lesson',lesson=1)])
+        schedule={'shifts':{'1':{'Пн':{'1':{'start':'08:00','end':'08:40'},'2':{'start':'09:00','end':'09:40'}}}}}
+        result,error=planner.generate(p,schedule);self.assertIsNotNone(result,error);self.assertEqual(result.placements[0].lesson,2);self.assertFalse(planner.preference_warnings(result))
+        schedule['shifts']['1']['Пн'].pop('2');result,error=planner.generate(p,schedule);self.assertIsNotNone(result,error)
+        self.assertEqual(result.placements[0].lesson,1);self.assertEqual(len(planner.preference_warnings(result)),1);self.assertFalse(planner.issues(result,schedule,complete=True))
+        p.preferences[0].enabled=False;result,error=planner.generate(p,schedule);self.assertIsNotNone(result,error);self.assertFalse(planner.preference_warnings(result))
+        p.preferences[0].enabled=True;p.loads[0].class_name='10а';result,error=planner.generate(p,schedule);self.assertIsNotNone(result,error);self.assertFalse(planner.preference_warnings(result))
+        p.preferences[0].scope='class';p.preferences[0].scope_value='10а';result,error=planner.generate(p,schedule);self.assertIsNotNone(result,error);self.assertEqual(len(planner.preference_warnings(result)),1)
+
+    def test_publish_allows_soft_preference_violations(self):
+        old=copy.deepcopy(backend.state)
+        try:
+            p=project();p.loads=p.loads[:1];p.loads[0].per_week=1;p.placements=[planner.Placement(load_id='a',day='Пн',lesson=1)]
+            p.preferences=[planner.Preference(scope='class',scope_value='5а',subject='Математика',kind='avoid_lesson',lesson=1)]
+            backend.state['planner']=p.model_dump();backend.state['bell_schedule']=bells()
+            with patch.object(backend,'_save_state'):
+                self.assertEqual(len(planner.preference_warnings(p)),1)
+                backend.planner_publish(backend.PlannerAction(revision=0))
+                self.assertEqual(backend.state['subjects']['grid']['Пн']['1']['5а']['names'],['Математика'])
+        finally:backend.state.clear();backend.state.update(old)
+
+    def test_soft_before_detects_both_orders_and_across_groups(self):
+        p=planner.Project(classes=[planner.SchoolClass(name='5а')],teachers=[planner.Teacher(name='А'),planner.Teacher(name='Б')],subjects=[planner.Named(name='Физкультура'),planner.Named(name='Физика')],rooms=[planner.Room(name='101'),planner.Room(name='102')],loads=[planner.Load(id='sport',class_name='5а',teacher='А',subject='Физкультура',room='101',group='1 группа',per_week=1),planner.Load(id='physics',class_name='5а',teacher='Б',subject='Физика',room='102',per_week=1)],preferences=[planner.Preference(scope='grade',scope_value='5',subject='Физкультура',kind='avoid_before',next_subject='Физика')])
+        p.placements=[planner.Placement(load_id='physics',day='Пн',lesson=2),planner.Placement(load_id='sport',day='Пн',lesson=1)]
+        self.assertEqual(len(planner.preference_warnings(p)),1)
+        p.placements.reverse();self.assertEqual(len(planner.preference_warnings(p)),1)
+        p.placements[1].day='Вт';self.assertFalse(planner.preference_warnings(p))
+        p.placements=[];generated,error=planner.generate(p,bells());self.assertIsNotNone(generated,error);self.assertFalse(planner.preference_warnings(generated))
+
+    def test_preference_validation_and_rename_preserves_rules(self):
+        old=copy.deepcopy(backend.state)
+        with tempfile.TemporaryDirectory() as folder:
+            store=staff.Store(Path(folder)/'staff.sqlite3');store.init()
+            try:
+                p=project();p.preferences=[planner.Preference(scope='class',scope_value='5а',subject='Математика',kind='avoid_lesson',lesson=1),planner.Preference(scope='grade',scope_value='5',subject='Математика',kind='avoid_before',next_subject='Математика')]
+                backend.state['planner']=p.model_dump()
+                with patch.object(backend,'staff_store',store),patch.object(backend,'_save_state'):
+                    r=backend.planner_rename('classes',backend.PlannerRename(revision=0,old_name='5а',new_name='5б'))
+                    self.assertEqual(r['project']['preferences'][0]['scope_value'],'5б')
+                    r=backend.planner_rename('subjects',backend.PlannerRename(revision=1,old_name='Математика',new_name='Алгебра'))
+                    self.assertEqual(r['project']['preferences'][1]['next_subject'],'Алгебра')
+                    p=planner.Project.model_validate(r['project']);p.subjects=[];self.assertTrue(any('Предпочтение' in x for x in planner.references(p)))
+                with self.assertRaises(ValueError):planner.Preference(scope='grade',scope_value='55',subject='Математика',kind='avoid_lesson',lesson=1)
+            finally:backend.state.clear();backend.state.update(old)
+
     def test_room_unavailability_cross_shift_generator_and_manual_checks(self):
         p=planner.Project(classes=[planner.SchoolClass(name='5а',shift=2)],teachers=[planner.Teacher(name='Учитель',preferred_room='101')],subjects=[planner.Named(name='Физика')],rooms=[planner.Room(name='101',unavailable=[planner.Slot(day='Пн',shift=1,lesson=1)]),planner.Room(name='102')],loads=[planner.Load(id='a',class_name='5а',teacher='Учитель',subject='Физика',room='',per_week=1)])
         schedule={'shifts':{'1':{'Пн':{'1':{'start':'08:00','end':'08:40'}}},'2':{'Пн':{'1':{'start':'08:20','end':'09:00'}}}}}

@@ -781,6 +781,12 @@ def planner_rename(kind: str, body: PlannerRename, _: None = Depends(require_adm
                 load.subject=name
             elif kind == "rooms" and load.room == old_name:
                 load.room=name
+        for rule in project.preferences:
+            if kind == "classes" and rule.scope == "class" and rule.scope_value == old_name:
+                rule.scope_value = name
+            if kind == "subjects":
+                if rule.subject == old_name: rule.subject = name
+                if rule.next_subject == old_name: rule.next_subject = name
         if kind == "rooms":
             for teacher in project.teachers:
                 if teacher.preferred_room == old_name: teacher.preferred_room = name

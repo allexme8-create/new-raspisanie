@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from collections import Counter
-from pydantic import BaseModel, Field, field_validator
+import re
+from typing import Literal
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 DAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб")
 
@@ -89,6 +91,26 @@ class Placement(BaseModel):
         return value
 
 
+class Preference(BaseModel):
+    scope: Literal["class", "grade"]
+    scope_value: str = Field(min_length=1, max_length=80)
+    subject: str = Field(min_length=1, max_length=80)
+    kind: Literal["avoid_lesson", "avoid_before"]
+    lesson: int | None = Field(default=None, ge=1, le=12)
+    next_subject: str = Field(default="", max_length=80)
+    enabled: bool = True
+
+    @model_validator(mode="after")
+    def validate_rule(self):
+        if self.scope == "grade" and not re.fullmatch(r"(?:[1-9]|1[01])", self.scope_value):
+            raise ValueError("Параллель должна быть от 1 до 11")
+        if self.kind == "avoid_lesson" and self.lesson is None:
+            raise ValueError("Укажите номер урока")
+        if self.kind == "avoid_before" and not self.next_subject:
+            raise ValueError("Укажите следующий предмет")
+        return self
+
+
 class Project(BaseModel):
     revision: int = Field(default=0, ge=0)
     classes: list[SchoolClass] = Field(default_factory=list, max_length=500)
@@ -98,6 +120,7 @@ class Project(BaseModel):
     rooms: list[Room] = Field(default_factory=list, max_length=200)
     loads: list[Load] = Field(default_factory=list, max_length=10000)
     placements: list[Placement] = Field(default_factory=list, max_length=30000)
+    preferences: list[Preference] = Field(default_factory=list, max_length=1000)
 
 
 def references(project: Project) -> list[str]:
@@ -114,6 +137,12 @@ def references(project: Project) -> list[str]:
     for group in project.groups:
         if group.class_name not in class_names:
             errors.append(f"Группа {group.name}: неизвестный класс «{group.class_name}».")
+    subjects_set={x.name for x in project.subjects}
+    for rule in project.preferences:
+        if rule.scope == "class" and rule.scope_value not in class_names:
+            errors.append(f"Предпочтение: неизвестный класс «{rule.scope_value}».")
+        if rule.subject not in subjects_set or (rule.kind == "avoid_before" and rule.next_subject not in subjects_set):
+            errors.append("Предпочтение ссылается на отсутствующий предмет.")
     ids = [x.id for x in project.loads]
     if len(ids) != len(set(ids)):
         errors.append("Повторяется идентификатор нагрузки.")
@@ -223,6 +252,38 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
     return errors
 
 
+def preference_hits(project: Project, load: Load, day: str, lesson: int, previous: list[tuple[Load, str, int]]) -> list[str]:
+    hits=[]
+    for rule in project.preferences:
+        if not rule.enabled:
+            continue
+        if rule.scope == "class" and rule.scope_value != load.class_name:
+            continue
+        if rule.scope == "grade" and not re.match(r"^" + re.escape(rule.scope_value) + r"(?!\d)", load.class_name.strip()):
+            continue
+        if rule.kind == "avoid_lesson" and load.subject == rule.subject and lesson == rule.lesson:
+            hits.append(f"{day}, {load.class_name}: {load.subject} на уроке {lesson}.")
+        elif rule.kind == "avoid_before":
+            for other, other_day, other_lesson in previous:
+                if other_day != day or other.class_name != load.class_name:
+                    continue
+                if ((load.subject == rule.subject and other.subject == rule.next_subject and other_lesson == lesson + 1) or
+                    (other.subject == rule.subject and load.subject == rule.next_subject and lesson == other_lesson + 1)):
+                    hits.append(f"{day}, {load.class_name}: {rule.subject} непосредственно перед «{rule.next_subject}».")
+    return hits
+
+
+def preference_warnings(project: Project) -> list[str]:
+    loads={load.id: load for load in project.loads}
+    previous=[];warnings=[]
+    for placement in project.placements:
+        load=loads.get(placement.load_id)
+        if load:
+            warnings.extend(preference_hits(project,load,placement.day,placement.lesson,previous))
+            previous.append((load,placement.day,placement.lesson))
+    return warnings
+
+
 def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> tuple[Project | None, str]:
     errors = issues(project, bells)
     if errors:
@@ -255,39 +316,55 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
         daily_load[(load.id, p.day)] += 1
     remaining.sort(key=lambda load: len(slots[classes[load.class_name].shift]))
     nodes = 0
-    def search(index: int) -> bool:
-        nonlocal nodes
-        if index == len(remaining): return True
+    best = None
+    best_cost = float("inf")
+    def search(index: int, cost: int) -> bool:
+        nonlocal nodes, best, best_cost
+        if nodes >= node_limit or cost >= best_cost:
+            return False
+        if index == len(remaining):
+            best = work.model_copy(deep=True)
+            best_cost = cost
+            return cost == 0
         load = remaining[index]
         cls = classes[load.class_name]
-        choices = sorted(slots[cls.shift], key=lambda slot: (daily_load[(load.id, slot[0])], slot[1], DAYS.index(slot[0])))
         preferred=teachers[load.teacher].preferred_room
         room_choices=[load.room] if load.room else ([preferred] if preferred else [])+[r.name for r in work.rooms if r.name!=preferred]
-        for room in room_choices:
-            for day, lesson, time in choices:
-                nodes += 1
-                if nodes > node_limit: return False
-                if (not daily_class[(load.class_name, day, lesson)] and sum(1 for (name, d, _), count in daily_class.items() if name == load.class_name and d == day and count > 0) >= cls.max_daily) or daily_load[(load.id, day)] >= load.max_per_day:
-                    continue
-                if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked[load.teacher]):
-                    continue
-                if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked_rooms[room]):
-                    continue
-                if any(time[0] < t[1] and t[0] < time[1] and
-                       ((load.class_name == other.class_name and (not load.group or not other.group or load.group.casefold()==other.group.casefold() or time != t or lesson != other_lesson)) or load.teacher == other.teacher or room == other_room)
-                       for other, t, other_lesson, other_room in occupied[day]):
-                    continue
-                work.placements.append(Placement(load_id=load.id, day=day, lesson=lesson, room="" if load.room else room))
-                occupied[day].append((load, time, lesson, room))
-                daily_class[(load.class_name, day, lesson)] += 1
-                daily_load[(load.id, day)] += 1
-                if search(index + 1): return True
-                daily_class[(load.class_name, day, lesson)] -= 1
-                daily_load[(load.id, day)] -= 1
-                occupied[day].pop()
-                work.placements.pop()
+        candidates=[]
+        for day, lesson, time in slots[cls.shift]:
+            previous=[(other,day,other_lesson) for other, _, other_lesson, _ in occupied[day]]
+            penalty=len(preference_hits(work,load,day,lesson,previous))
+            for room in room_choices:
+                room_penalty=int(bool(preferred and not load.room and room!=preferred))
+                candidates.append((penalty+room_penalty,daily_load[(load.id,day)],lesson,DAYS.index(day),room_choices.index(room),day,time,room))
+        candidates.sort()
+        for penalty, _, lesson, _, _, day, time, room in candidates:
+            nodes += 1
+            if nodes > node_limit: return False
+            if cost + penalty >= best_cost: continue
+            if (not daily_class[(load.class_name, day, lesson)] and sum(1 for (name, d, _), count in daily_class.items() if name == load.class_name and d == day and count > 0) >= cls.max_daily) or daily_load[(load.id, day)] >= load.max_per_day:
+                continue
+            if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked[load.teacher]):
+                continue
+            if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked_rooms[room]):
+                continue
+            if any(time[0] < t[1] and t[0] < time[1] and
+                   ((load.class_name == other.class_name and (not load.group or not other.group or load.group.casefold()==other.group.casefold() or time != t or lesson != other_lesson)) or load.teacher == other.teacher or room == other_room)
+                   for other, t, other_lesson, other_room in occupied[day]):
+                continue
+            work.placements.append(Placement(load_id=load.id, day=day, lesson=lesson, room="" if load.room else room))
+            occupied[day].append((load, time, lesson, room))
+            daily_class[(load.class_name, day, lesson)] += 1
+            daily_load[(load.id, day)] += 1
+            done=search(index + 1,cost+penalty)
+            daily_class[(load.class_name, day, lesson)] -= 1
+            daily_load[(load.id, day)] -= 1
+            occupied[day].pop()
+            work.placements.pop()
+            if done: return True
         return False
-    if search(0): return work, ""
+    search(0,0)
+    if best is not None: return best, ""
     return None, "Не удалось расставить все уроки в пределах ограничений и лимита поиска. Проверьте звонки, доступность и нагрузку. Черновик не изменён."
 
 
