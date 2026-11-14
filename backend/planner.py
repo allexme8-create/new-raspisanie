@@ -24,6 +24,11 @@ class SchoolClass(Named):
     max_daily: int = Field(default=7, ge=1, le=12)
 
 
+class ClassGroup(Named):
+    class_name: str = Field(min_length=1, max_length=80)
+    inferred: bool = False
+
+
 class Slot(BaseModel):
     day: str
     shift: int = Field(ge=1, le=2)
@@ -74,6 +79,7 @@ class Project(BaseModel):
     revision: int = Field(default=0, ge=0)
     classes: list[SchoolClass] = Field(default_factory=list, max_length=500)
     teachers: list[Teacher] = Field(default_factory=list, max_length=200)
+    groups: list[ClassGroup] = Field(default_factory=list, max_length=2000)
     subjects: list[Named] = Field(default_factory=list, max_length=200)
     rooms: list[Named] = Field(default_factory=list, max_length=200)
     loads: list[Load] = Field(default_factory=list, max_length=300)
@@ -87,6 +93,13 @@ def references(project: Project) -> list[str]:
         names = [x.name.casefold() for x in items]
         if len(names) != len(set(names)):
             errors.append(f"Повторяется название {label}.")
+    group_keys = [(g.class_name.casefold(), g.name.casefold()) for g in project.groups]
+    if len(group_keys) != len(set(group_keys)):
+        errors.append("Повторяется название группы в одном классе.")
+    class_names = {c.name for c in project.classes}
+    for group in project.groups:
+        if group.class_name not in class_names:
+            errors.append(f"Группа {group.name}: неизвестный класс «{group.class_name}».")
     ids = [x.id for x in project.loads]
     if len(ids) != len(set(ids)):
         errors.append("Повторяется идентификатор нагрузки.")

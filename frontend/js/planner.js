@@ -2,7 +2,7 @@
 /* Конструктор работает с отдельным черновиком, публикация — только явным действием. */
 const plannerDays=["Пн","Вт","Ср","Чт","Пт","Сб"];
 let plannerProject=null, plannerIssues=[];
-const plannerSearch={classes:"",teachers:"",subjects:"",rooms:""};
+const plannerSearch={classes:"",teachers:"",subjects:"",rooms:"",groups:""};
 const plannerRoot=$("plannerRoot");
 const optionList=(items,value="name")=>items.map(x=>`<option value="${esc(x[value])}">${esc(x[value])}</option>`).join("");
 const dayOptions=plannerDays.map(d=>`<option>${d}</option>`).join("");
@@ -11,29 +11,30 @@ const field=(id,label,content)=>`<label>${label}${content.replace("<select",`<se
 const select=(id,label,opts)=>field(id,label,`<select required>${opts}</select>`);
 const input=(id,label,placeholder,type="text",extra="")=>field(id,label,`<input type="${type}" placeholder="${placeholder}" required ${extra}>`);
 function plannerRender(){
-  const p=plannerProject;
+  const p=plannerProject;p.groups=p.groups||[];
   const openDetails=[...plannerRoot.querySelectorAll("details")].map(d=>d.open);
   const list=(key,format)=>p[key].length?p[key].map((x,i)=>{
-    const editable=["classes","teachers","subjects","rooms"].includes(key);
+    const editable=["classes","teachers","subjects","rooms","groups"].includes(key);
     const title=editable?`<button type="button" class="planner-name-edit" data-edit-kind="${key}" data-edit-index="${i}" title="Изменить">${format(x)} ✎</button>`:`<span>${format(x)}</span>`;
     const form=editable?`<form class="planner-inline-edit hidden" id="plannerEdit-${key}-${i}"><label class="sr-only" for="plannerEditInput-${key}-${i}">Новое название</label><input id="plannerEditInput-${key}-${i}" maxlength="80" required value="${esc(x.name)}"><button class="btn" type="submit">Сохранить</button><button class="btn secondary" type="button" data-edit-cancel>Отмена</button></form>`:"";
-    return `<li class="planner-catalog-item" data-search-name="${esc((x.name||"").toLocaleLowerCase("ru-RU"))}"><div class="planner-item-line">${title}<button type="button" class="planner-remove" data-kind="${key}" data-index="${i}" aria-label="Удалить ${esc(x.name||"запись")}">✕</button></div>${form}</li>`;
+    return `<li class="planner-catalog-item" data-search-name="${esc(`${x.class_name||""} ${x.name||""}`.trim().toLocaleLowerCase("ru-RU"))}"><div class="planner-item-line">${title}<button type="button" class="planner-remove" data-kind="${key}" data-index="${i}" aria-label="Удалить ${esc(x.name||"запись")}">✕</button></div>${form}</li>`;
   }).join(""):'<li class="muted">Пока нет записей</li>';
   const loadOptions=p.loads.map(x=>`<option value="${esc(x.id)}">${esc(`${x.class_name}${x.group?` · ${x.group}`:""} · ${x.subject} · ${x.teacher} · ${x.room}`)}</option>`).join("");
   const nameForm=(type,label)=>`<form data-form="${type}" class="planner-form">${input(`${type}Name`,label,label)}<button class="btn" type="submit">Добавить</button></form>`;
   plannerRoot.innerHTML=`
     <div class="planner-actions planner-main-actions"><button type="button" id="plannerGenerate" class="btn">Автоподбор</button><button type="button" id="plannerPublish" class="btn">Опубликовать</button></div>
-    <details class="planner-tools"><summary>Импорт и обновление</summary><div class="planner-actions"><button type="button" id="plannerRefresh" class="btn secondary">Обновить черновик</button><button type="button" id="plannerImportClasses" class="btn secondary">Импорт классов</button><button type="button" id="plannerImportTeachers" class="btn secondary">Импорт учителей</button><button type="button" id="plannerImportSubjects" class="btn secondary">Импорт предметов</button><button type="button" id="plannerImportRooms" class="btn secondary">Импорт кабинетов</button></div></details>
+    <details class="planner-tools"><summary>Импорт и обновление</summary><div class="planner-actions"><button type="button" id="plannerRefresh" class="btn secondary">Обновить черновик</button><button type="button" id="plannerImportClasses" class="btn secondary">Импорт классов</button><button type="button" id="plannerImportTeachers" class="btn secondary">Импорт учителей</button><button type="button" id="plannerImportSubjects" class="btn secondary">Импорт предметов</button><button type="button" id="plannerImportRooms" class="btn secondary">Импорт кабинетов</button><button type="button" id="plannerImportGroups" class="btn secondary">Импорт групп</button></div></details>
     <div id="plannerMessage" aria-live="polite"></div>
     <p class="hint">Изменения сохраняются в черновике. Автоподбор сохраняет уже расставленные уроки; публикация заменяет текущее расписание на сайте только после проверки.</p>
     <details open><summary>1. Справочники</summary><div class="planner-grid">
       <details class="planner-category"><summary>Классы · ${p.classes.length}</summary><form data-form="classes" class="planner-form">${input("className","Класс","Например, 5а")}${select("classShift","Смена",'<option value="1">1</option><option value="2">2</option>')}${input("classMax","Максимум уроков в день","7","number",'min="1" max="12" value="7"')}<button class="btn">Добавить</button></form><details class="planner-catalog-list"><summary>Список классов (${p.classes.length})</summary><input class="planner-search" type="search" data-catalog-search="classes" value="${esc(plannerSearch.classes)}" placeholder="Поиск класса" aria-label="Поиск класса"><ul class="planner-list" data-catalog-list="classes">${list("classes",x=>`${esc(x.name)} · ${x.shift}-я смена`)}</ul></details></details>
       <details class="planner-category"><summary>Учителя · ${p.teachers.length}</summary>${nameForm("teachers","ФИО учителя")}<details class="planner-catalog-list"><summary>Список учителей (${p.teachers.length})</summary><input class="planner-search" type="search" data-catalog-search="teachers" value="${esc(plannerSearch.teachers)}" placeholder="Поиск учителя" aria-label="Поиск учителя"><ul class="planner-list" data-catalog-list="teachers">${list("teachers",x=>esc(x.name))}</ul></details><p class="hint">Это справочник расписания, а не учётные записи сотрудников.</p></details>
+      <details class="planner-category"><summary>Группы классов · ${p.groups.length}</summary><p class="hint">Номера групп, определённые по нескольким именам в старом расписании, предположительные: проверьте их. Совместное преподавание не всегда означает разделение класса.</p><form data-form="groups" class="planner-form">${select("groupClass","Класс",optionList(p.classes))}${input("groupName","Название группы","Например, 1 группа")}<button class="btn">Добавить</button></form><details class="planner-catalog-list"><summary>Список групп (${p.groups.length})</summary><input class="planner-search" type="search" data-catalog-search="groups" value="${esc(plannerSearch.groups)}" placeholder="Поиск класса или группы" aria-label="Поиск класса или группы"><ul class="planner-list" data-catalog-list="groups">${list("groups",x=>`${esc(x.class_name)} · ${esc(x.name)}${x.inferred?" · проверить":""}`)}</ul></details></details>
       <details class="planner-category"><summary>Предметы · ${p.subjects.length}</summary>${nameForm("subjects","Предмет")}<details class="planner-catalog-list"><summary>Список предметов (${p.subjects.length})</summary><input class="planner-search" type="search" data-catalog-search="subjects" value="${esc(plannerSearch.subjects)}" placeholder="Поиск предмета" aria-label="Поиск предмета"><ul class="planner-list" data-catalog-list="subjects">${list("subjects",x=>esc(x.name))}</ul></details></details>
       <details class="planner-category"><summary>Кабинеты · ${p.rooms.length}</summary>${nameForm("rooms","Кабинет")}<details class="planner-catalog-list"><summary>Список кабинетов (${p.rooms.length})</summary><input class="planner-search" type="search" data-catalog-search="rooms" value="${esc(plannerSearch.rooms)}" placeholder="Поиск кабинета" aria-label="Поиск кабинета"><ul class="planner-list" data-catalog-list="rooms">${list("rooms",x=>esc(x.name))}</ul></details></details>
     </div></details>
     <details><summary>2. Недоступность учителей</summary><p class="hint">Укажите время по звонкам соответствующей смены. Пересечения со второй сменой тоже учитываются.</p><form data-form="unavailable" class="planner-form">${select("unTeacher","Учитель",optionList(p.teachers))}${select("unDay","День",dayOptions)}${select("unShift","Смена",'<option>1</option><option>2</option>')}${select("unLesson","Урок",numberOptions)}<button class="btn">Добавить</button></form><ul class="planner-list">${p.teachers.flatMap((t,ti)=>t.unavailable.map((s,si)=>`<li><span>${esc(t.name)} · ${esc(s.day)} · смена ${s.shift} · урок ${s.lesson}</span><button type="button" class="planner-remove" data-un-teacher="${ti}" data-index="${si}" aria-label="Удалить">✕</button></li>`)).join("")||'<li class="muted">Ограничений нет</li>'}</ul></details>
-    <details><summary>3. Учебная нагрузка</summary><p class="hint">Для всего класса оставьте группу пустой. Для параллельных занятий создайте нагрузку для каждой группы с разными названиями, учителями и кабинетами. Используйте одно название для одной и той же группы во всех предметах.</p><form data-form="loads" class="planner-form">${select("loadClass","Класс",optionList(p.classes))}<label>Группа (необязательно)<input id="loadGroup" maxlength="80" placeholder="Например, 1 группа"></label>${select("loadSubject","Предмет",optionList(p.subjects))}${select("loadTeacher","Учитель",optionList(p.teachers))}${select("loadRoom","Кабинет",optionList(p.rooms))}${input("loadWeek","Уроков в неделю","1","number",'min="1" max="36" value="1"')}${input("loadDay","Не более в день","1","number",'min="1" max="12" value="1"')}<button class="btn">Добавить</button></form><ul class="planner-list">${list("loads",x=>`${esc(x.class_name)} · ${esc(x.subject)} · ${esc(x.teacher)} · каб. ${esc(x.room)} · ${x.per_week} в неделю (до ${x.max_per_day} в день)`)}</ul></details>
+    <details><summary>3. Учебная нагрузка</summary><p class="hint">Для всего класса оставьте группу пустой. Для параллельных занятий создайте нагрузку для каждой группы с разными названиями, учителями и кабинетами. Используйте одно название для одной и той же группы во всех предметах.</p><form data-form="loads" class="planner-form">${select("loadClass","Класс",optionList(p.classes))}<label>Группа<select id="loadGroup"><option value="">Весь класс</option></select></label>${select("loadSubject","Предмет",optionList(p.subjects))}${select("loadTeacher","Учитель",optionList(p.teachers))}${select("loadRoom","Кабинет",optionList(p.rooms))}${input("loadWeek","Уроков в неделю","1","number",'min="1" max="36" value="1"')}${input("loadDay","Не более в день","1","number",'min="1" max="12" value="1"')}<button class="btn">Добавить</button></form><ul class="planner-list">${list("loads",x=>`${esc(x.class_name)}${x.group?` · ${esc(x.group)}`:" · весь класс"} · ${esc(x.subject)} · ${esc(x.teacher)} · каб. ${esc(x.room)} · ${x.per_week} в неделю (до ${x.max_per_day} в день)`)}</ul></details>
     <details><summary>4. Расстановка уроков</summary><p class="hint">Добавьте уроки вручную или используйте автоподбор. Номер урока указывается внутри смены.</p><form data-form="placements" class="planner-form">${select("placeLoad","Нагрузка",loadOptions)}${select("placeDay","День",dayOptions)}${select("placeLesson","Урок",numberOptions)}<button class="btn">Поставить</button></form><ul class="planner-list planner-placements">${list("placements",x=>{const load=p.loads.find(l=>l.id===x.load_id);return `${esc(x.day)} · урок ${x.lesson} · ${esc(load?.class_name||"")}${load?.group?` · ${esc(load.group)}`:""} · ${esc(load?.subject||"")} · ${esc(load?.teacher||"")}`;})}</ul></details>
     <div class="planner-check"><b>Проверка перед публикацией</b>${plannerIssues.length?`<ul>${plannerIssues.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:'<p class="tag-ok">Конфликтов и нераспределённой нагрузки нет.</p>'}</div>`;
   plannerRoot.querySelectorAll("details").forEach((d,i)=>{if(openDetails[i]!==undefined)d.open=openDetails[i];});
@@ -52,16 +53,17 @@ function plannerRender(){
     form.onsubmit=async e=>{
       e.preventDefault();const newName=input.value.trim();if(!newName){input.reportValidity();return;}
       form.querySelectorAll("button").forEach(b=>b.disabled=true);
-      try{const data=await api(`/api/admin/planner/rename/${kind}`,{method:"POST",body:{revision:plannerProject.revision,old_name:plannerProject[kind][index].name,new_name:newName}});
+      try{const item=plannerProject[kind][index];const data=await api(kind==="groups"?"/api/admin/planner/rename-group":`/api/admin/planner/rename/${kind}`,{method:"POST",body:{revision:plannerProject.revision,old_name:item.name,new_name:newName,...(kind==="groups"?{class_name:item.class_name}:{})}});
         plannerProject=data.project;plannerIssues=data.issues;plannerRender();document.dispatchEvent(new Event("planner-catalog-changed"));}
       catch(error){form.querySelectorAll("button").forEach(b=>b.disabled=false);plannerError(error);}
     };
   });
   plannerRoot.querySelectorAll("[data-kind]").forEach(b=>b.onclick=()=>{
     const kind=b.dataset.kind,index=Number(b.dataset.index),item=plannerProject[kind][index];
-    if(["classes","teachers","subjects","rooms"].includes(kind)){
+    if(["classes","teachers","subjects","rooms","groups"].includes(kind)){
       const field={classes:"class_name",teachers:"teacher",subjects:"subject",rooms:"room"}[kind];
-      const used=plannerProject.loads.filter(load=>load[field]===item.name).length;
+      const used=plannerProject.loads.filter(load=>kind==="groups"?load.class_name===item.class_name&&load.group?.toLocaleLowerCase("ru-RU")===item.name.toLocaleLowerCase("ru-RU"):load[field]===item.name).length;
+      if(kind==="classes"&&plannerProject.groups.some(group=>group.class_name===item.name)){plannerError(new Error(`Сначала удалите группы класса «${item.name}».`));return;}
       if(used){plannerError(new Error(`Нельзя удалить «${item.name}»: есть учебная нагрузка (${used}). Сначала удалите её и связанные уроки.`));return;}
       if(!confirm(`Удалить «${item.name}» из справочника конструктора? Опубликованное расписание и учётные записи не изменятся.`))return;
     }
@@ -83,6 +85,15 @@ function plannerRender(){
       catch(error){plannerError(error);}
     };
   }
+  $("plannerImportGroups").onclick=async()=>{
+    try{const data=await api("/api/admin/planner/import-groups",{method:"POST"});await plannerLoad();toast(data.added.length?`Добавлено групп: ${data.added.length}`:"Новые группы не найдены");}catch(error){plannerError(error);}
+  };
+  function updateLoadGroups(){
+    const cls=$("loadClass").value,select=$("loadGroup"),previous=select.value;
+    select.innerHTML='<option value="">Весь класс</option>'+plannerProject.groups.filter(g=>g.class_name===cls).map(g=>`<option value="${esc(g.name)}">${esc(g.name)}${g.inferred?' · проверить':''}</option>`).join("");
+    if(plannerProject.groups.some(g=>g.class_name===cls&&g.name===previous))select.value=previous;
+  }
+  $("loadClass").onchange=updateLoadGroups;updateLoadGroups();
   $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
   $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }
@@ -105,7 +116,8 @@ function plannerSubmit(event){
   event.preventDefault(); const kind=event.currentTarget.dataset.form;
   const val=id=>$(id).value.trim();
   plannerChange(p=>{
-    if(kind==="classes")p.classes.push({name:val("className"),shift:Number(val("classShift")),max_daily:Number(val("classMax"))});
+    if(kind==="groups")p.groups.push({class_name:val("groupClass"),name:val("groupName"),inferred:false});
+    else if(kind==="classes")p.classes.push({name:val("className"),shift:Number(val("classShift")),max_daily:Number(val("classMax"))});
     else if(["teachers","subjects","rooms"].includes(kind))p[kind].push(kind==="teachers"?{name:val(`${kind}Name`),unavailable:[]}:{name:val(`${kind}Name`)});
     else if(kind==="unavailable")p.teachers.find(t=>t.name===val("unTeacher")).unavailable.push({day:val("unDay"),shift:Number(val("unShift")),lesson:Number(val("unLesson"))});
     else if(kind==="loads")p.loads.push({id:crypto.randomUUID(),class_name:val("loadClass"),group:val("loadGroup"),subject:val("loadSubject"),teacher:val("loadTeacher"),room:val("loadRoom"),per_week:Number(val("loadWeek")),max_per_day:Number(val("loadDay"))});

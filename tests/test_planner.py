@@ -270,6 +270,33 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(subjects["numbering"], "local")
         self.assertEqual(teachers["grid"]["Пн"]["1"]["5а"]["rooms"], ["101"])
 
+    def test_group_catalog_import_rename_and_deletion_safety(self):
+        old=copy.deepcopy(backend.state)
+        with tempfile.TemporaryDirectory() as folder:
+            store=staff.Store(Path(folder)/"staff.sqlite3");store.init()
+            try:
+                p=project();p.loads[0].group="Красная";backend.state["planner"]=p.model_dump();backend.state["planner_groups_imported"]=False
+                backend.state["teachers"]={"grid":{"Пн":{"1":{"5а":{"names":["Учитель","Другой"]}},"2":{"6а":{"names":["Учитель"],"groups":[{"group":"Языковая"}]}}}}}
+                backend.state["subjects"]=None
+                with patch.object(backend,"staff_store",store),patch.object(backend,"_save_state"):
+                    backend.migrate_schedule_groups();current=backend._planner_project()
+                    groups={(g.class_name,g.name):g.inferred for g in current.groups}
+                    self.assertFalse(groups[("5а","Красная")]);self.assertTrue(groups[("5а","1 группа")]);self.assertTrue(groups[("5а","2 группа")]);self.assertFalse(groups[("6а","Языковая")])
+                    self.assertEqual(backend.import_schedule_groups()["added"],[])
+                    revision=current.revision
+                    response=backend.planner_rename_group(backend.PlannerGroupRename(revision=revision,class_name="5а",old_name="Красная",new_name="Синяя"))
+                    self.assertEqual(response["project"]["loads"][0]["group"],"Синяя")
+                    with self.assertRaises(backend.HTTPException):backend.planner_rename_group(backend.PlannerGroupRename(revision=revision,class_name="5а",old_name="Синяя",new_name="Другие"))
+                    edited=backend._planner_project();edited.groups=[g for g in edited.groups if g.name!="Синяя"]
+                    with self.assertRaises(backend.HTTPException) as exc:backend.planner_save(edited)
+                    self.assertEqual(exc.exception.status_code,409)
+                    current=backend._planner_project();current.groups=[g for g in current.groups if g.name!="1 группа"]
+                    backend.planner_save(current);backend.migrate_schedule_groups()
+                    self.assertNotIn("1 группа",[g.name for g in backend._planner_project().groups])
+                    self.assertTrue(backend.import_schedule_groups()["added"])
+            finally:
+                backend.state.clear();backend.state.update(old)
+
     def test_parallel_groups_conflicts_limits_generation_and_publication(self):
         p=project();p.classes=p.classes[:1];p.classes[0].max_daily=1
         p.loads=[planner.Load(id="g1",class_name="5а",subject="Математика",teacher="Учитель",room="101",per_week=1,group="1 группа"),planner.Load(id="g2",class_name="5а",subject="Математика",teacher="Другой",room="102",per_week=1,group="2 группа")]

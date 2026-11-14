@@ -10,6 +10,6 @@ const search={dataset:{catalogSearch:'teachers'},value:'петр'},records=[{dat
 records.forEach(r=>r.classList={toggle(_n,on){r.hidden=on}});
 const root=el('plannerRoot');root.querySelectorAll=s=>s==='[data-catalog-search]'?[search]:[];root.querySelector=s=>s==='[data-catalog-list="teachers"]'?{querySelectorAll:()=>records}:null;
 vm.runInContext('plannerRender()',ctx);assert.equal(records[0].hidden,true);assert.equal(records[1].hidden,false);search.value='иван';search.oninput();assert.equal(records[0].hidden,false);assert.equal(records[1].hidden,true);
-assert.match(root.innerHTML,/class="planner-category"/);assert.match(root.innerHTML,/Поиск учителя/);assert.match(root.innerHTML,/Импорт и обновление/);assert.match(root.innerHTML,/id="loadGroup"/);assert.doesNotMatch(root.innerHTML,/Параллельные группы пока не поддерживаются/);
+assert.match(root.innerHTML,/class="planner-category"/);assert.match(root.innerHTML,/Поиск учителя/);assert.match(root.innerHTML,/Импорт и обновление/);assert.match(root.innerHTML,/id="loadGroup"/);assert.match(root.innerHTML,/data-form="groups"/);assert.match(root.innerHTML,/plannerImportGroups/);assert.match(root.innerHTML,/предположительные/);assert.doesNotMatch(root.innerHTML,/Параллельные группы пока не поддерживаются/);
 const css=fs.readFileSync('frontend/css/style.css','utf8');assert.match(css,/#plannerRoot \.planner-remove\{min-width:44px;min-height:44px\}/);assert.match(css,/#plannerRoot \.planner-form\{display:grid/);
 console.log('Planner catalog UI OK');

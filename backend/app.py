@@ -74,6 +74,7 @@ state: dict = {
     "planner_initials_normalized": False,
     "planner_subjects_imported": False,
     "planner_rooms_imported": False,
+    "planner_groups_imported": False,
 }
 
 _revoked_tokens: set[str] = set()
@@ -91,7 +92,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported", "planner_groups_imported"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -502,6 +503,57 @@ def import_schedule_catalog(kind: str, _: None = Depends(require_admin)) -> dict
         return {"added": added, "project": _planner_project().model_dump()}
 
 
+def _import_schedule_groups() -> list[dict]:
+    """Названия из метаданных или предположительные номера по разделённым ячейкам."""
+    project = _planner_project()
+    classes = {c.name.casefold(): c.name for c in project.classes}
+    candidates = {}
+    def add(cls, name, inferred):
+        cls = classes.get(str(cls).strip().casefold())
+        name = " ".join(str(name).split())
+        if cls and name:
+            key = (cls.casefold(), name.casefold())
+            if key not in candidates or not inferred:
+                candidates[key] = {"class_name":cls,"name":name,"inferred":inferred}
+    for load in project.loads:
+        if load.group:
+            add(load.class_name, load.group, False)
+    sources=[state.get("teachers") or {},state.get("subjects") or {}]
+    for source in sources:
+        for lessons in source.get("grid", {}).values():
+            for cells in lessons.values():
+                for cls,cell in cells.items():
+                    groups=cell.get("groups") or []
+                    for item in groups:
+                        if item.get("group"):
+                            add(cls,item["group"],False)
+                    # Старые таблицы не содержат названий групп: несколько имён
+                    # могут означать как деление, так и совместное преподавание.
+                    if not groups:
+                        count=len([x for x in cell.get("names",[]) if str(x).strip()])
+                        if count>1:
+                            for index in range(1,count+1): add(cls,f"{index} группа",True)
+    existing={(g.class_name.casefold(),g.name.casefold()) for g in project.groups}
+    added=[]
+    for key, data in sorted(candidates.items()):
+        if key in existing: continue
+        if len(project.groups)>=2000 or len(data["name"])>80:
+            raise ValueError("Невозможно перенести группы: превышен предел конструктора или длина названия")
+        project.groups.append(planner.ClassGroup(**data));existing.add(key);added.append(data)
+    if added:
+        project.revision+=1;state["planner"]=project.model_dump()
+    return added
+
+
+@app.post("/api/admin/planner/import-groups")
+def import_schedule_groups(_: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        try: added=_import_schedule_groups()
+        except ValueError as exc: raise HTTPException(422,str(exc)) from exc
+        if added: _save_state()
+        return {"added":added,"project":_planner_project().model_dump()}
+
+
 @app.on_event("startup")
 def migrate_schedule_classes():
     # One-time migration; do not resurrect a class deliberately deleted later.
@@ -524,6 +576,21 @@ def import_schedule_classes(_: None = Depends(require_admin)) -> dict:
         return {"added":added,"project":_planner_project().model_dump()}
 
 
+@app.on_event("startup")
+def migrate_schedule_groups():
+    with _planner_lock:
+        if state.get("planner_groups_imported"):
+            return
+        if not state.get("planner") and not state.get("teachers") and not state.get("subjects"):
+            return
+        try:
+            _import_schedule_groups()
+        except ValueError:
+            return
+        state["planner_groups_imported"]=True
+        _save_state()
+
+
 @app.get("/api/admin/planner")
 def planner_get(_: None = Depends(require_admin)) -> dict:
     project = _planner_project()
@@ -542,6 +609,12 @@ def planner_save(project: planner.Project, _: None = Depends(require_admin)) -> 
         errors = planner.references(project)
         if errors:
             raise HTTPException(status_code=422, detail=" ".join(errors[:5]))
+        previous_project = _planner_project()
+        old_groups={(g.class_name,g.name.casefold()) for g in previous_project.groups}
+        new_groups={(g.class_name,g.name.casefold()) for g in project.groups}
+        for load in project.loads:
+            if load.group and (load.class_name,load.group.casefold()) in old_groups-new_groups:
+                raise HTTPException(409, "Нельзя удалить группу с учебной нагрузкой. Сначала измените нагрузку.")
         class_names={c.name for c in project.classes}
         with staff_store.connect() as db:
             assigned={row[0] for row in db.execute("SELECT DISTINCT homeroom_class FROM users WHERE active=1 AND role='teacher' AND homeroom_class<>''")}
@@ -583,6 +656,10 @@ def planner_rename(kind: str, body: PlannerRename, _: None = Depends(require_adm
             return {"project":project.model_dump(),"issues":planner.issues(project,state.get("bell_schedule"),complete=True)}
         old_name=item.name
         item.name=name
+        if kind == "classes":
+            for group in project.groups:
+                if group.class_name == old_name:
+                    group.class_name = name
         for load in project.loads:
             if kind == "classes" and load.class_name == old_name:
                 load.class_name=name
@@ -604,6 +681,31 @@ def planner_rename(kind: str, body: PlannerRename, _: None = Depends(require_adm
         except Exception:
             state["planner"] = previous
             raise
+        return {"project":project.model_dump(),"issues":planner.issues(project,state.get("bell_schedule"),complete=True)}
+
+
+class PlannerGroupRename(BaseModel):
+    revision: int = Field(ge=0)
+    class_name: str = Field(min_length=1,max_length=80)
+    old_name: str = Field(min_length=1,max_length=80)
+    new_name: str = Field(min_length=1,max_length=80)
+
+
+@app.post("/api/admin/planner/rename-group")
+def planner_rename_group(body: PlannerGroupRename, _: None = Depends(require_admin)) -> dict:
+    name=" ".join(body.new_name.split())
+    if not name: raise HTTPException(422,"Укажите название группы")
+    with _planner_lock:
+        project=_planner_project()
+        if body.revision != project.revision: raise HTTPException(409,"Черновик изменён в другом окне. Обновите конструктор.")
+        item=next((g for g in project.groups if g.class_name==body.class_name and g.name==body.old_name),None)
+        if not item: raise HTTPException(404,"Группа не найдена")
+        if any(g is not item and g.class_name==item.class_name and g.name.casefold()==name.casefold() for g in project.groups):
+            raise HTTPException(422,"Группа с таким названием уже существует в этом классе")
+        for load in project.loads:
+            if load.class_name==item.class_name and load.group.casefold()==item.name.casefold(): load.group=name
+        item.name=name;item.inferred=False;project.revision+=1
+        state["planner"]=project.model_dump();_save_state()
         return {"project":project.model_dump(),"issues":planner.issues(project,state.get("bell_schedule"),complete=True)}
 
 
