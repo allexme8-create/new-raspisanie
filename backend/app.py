@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 
 import github_backup
 import planner
+import load_import
 import schedule_map
 import staff
 from schedule_parser import (
@@ -629,6 +630,109 @@ def planner_save(project: planner.Project, _: None = Depends(require_admin)) -> 
         state["planner"] = project.model_dump()
         _save_state()
         return {"project": project.model_dump(), "issues": planner.issues(project, state.get("bell_schedule"), complete=True)}
+
+
+@app.post("/api/admin/planner/load-import/preview")
+async def preview_load_import(file: UploadFile = File(...), _: None = Depends(require_admin)) -> dict:
+    name=file.filename or ""
+    if name.rsplit(".",1)[-1].lower() not in {"csv","xls","xlsx","xlsm","xml","ods"}:raise HTTPException(422,"Поддерживаются CSV, XLS, XLSX, XLSM, ODS и Excel XML.")
+    buf=await file.read(10*1024*1024+1)
+    if len(buf)>10*1024*1024:raise HTTPException(413,"Файл больше 10 МБ.")
+    try:rows=load_import.parse(buf,name)
+    except (ParseError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
+    with _planner_lock:
+        p=_planner_project()
+        choices={"class_name":[x.name for x in p.classes],"teacher":[x.name for x in p.teachers],"subject":[x.name for x in p.subjects]}
+        for row in rows:row["matches"]={k:load_import.match(row[k],v) for k,v in choices.items()}
+        return {"revision":p.revision,"rows":rows,"choices":choices}
+
+
+class LoadImportRow(BaseModel):
+    class_name: str
+    teacher: str
+    subject: str
+    per_week: int = Field(ge=1,le=36)
+
+
+class LoadImportRequest(BaseModel):
+    revision: int = Field(ge=0)
+    rows: list[LoadImportRow] = Field(min_length=1,max_length=5000)
+
+
+@app.post("/api/admin/planner/load-import/apply")
+def apply_load_import(body: LoadImportRequest, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Загрузите файл заново.")
+        sets={"class_name":{x.name for x in p.classes},"teacher":{x.name for x in p.teachers},"subject":{x.name for x in p.subjects}}
+        seen=set()
+        for row in body.rows:
+            if any(getattr(row,k) not in names for k,names in sets.items()):raise HTTPException(422,"Выберите существующие класс, учителя и предмет для каждой строки.")
+            key=(row.class_name,row.subject,row.teacher)
+            if key in seen:raise HTTPException(422,f"Повтор нагрузки: {row.class_name}, {row.subject}, {row.teacher}. Проверьте файл.")
+            seen.add(key)
+        existing={(x.class_name,x.subject,x.teacher):x for x in p.loads}
+        if len(existing)!=len(p.loads):raise HTTPException(409,"В существующей нагрузке есть одинаковые записи. Устраните дубликаты перед импортом.")
+        placed={x.load_id for x in p.placements};added=updated=0;affected=set()
+        for row in body.rows:
+            key=(row.class_name,row.subject,row.teacher);affected.add(key[:2])
+            if key in existing:
+                load=existing[key]
+                if load.per_week!=row.per_week and load.id in placed:raise HTTPException(409,f"Нагрузка {row.class_name} · {row.teacher} уже расставлена. Сначала снимите её уроки.")
+                if load.per_week!=row.per_week:load.per_week=row.per_week;updated+=1
+            else:
+                load=planner.Load(id=secrets.token_hex(16),class_name=row.class_name,subject=row.subject,teacher=row.teacher,room="",per_week=row.per_week)
+                p.loads.append(load);existing[key]=load;added+=1
+        for cls,subject in affected:
+            loads=[l for l in p.loads if l.class_name==cls and l.subject==subject]
+            if len(loads)<2:continue
+            used={l.group.casefold() for l in loads if l.group}
+            if len(used)!=sum(bool(l.group) for l in loads):raise HTTPException(409,f"В {cls}, {subject} повторяется группа. Исправьте существующую нагрузку.")
+            for load in loads:
+                if load.group:continue
+                if load.id in placed:raise HTTPException(409,f"Уроки {cls}, {subject} уже расставлены. Снимите их перед разделением на группы.")
+                n=1
+                while f"{n} группа".casefold() in used:n+=1
+                group=f"{n} группа";used.add(group.casefold());load.group=group
+                if not any(g.class_name==cls and g.name.casefold()==group.casefold() for g in p.groups):p.groups.append(planner.ClassGroup(name=group,class_name=cls,inferred=True))
+        try:p=planner.Project.model_validate(p.model_dump())
+        except ValueError as exc:raise HTTPException(422,"Превышены ограничения проекта.") from exc
+        errors=planner.references(p)
+        if errors:raise HTTPException(422," ".join(errors[:5]))
+        p.revision+=1;state["planner"]=p.model_dump();_save_state()
+        return {"added":added,"updated":updated,"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
+
+
+class LoadChange(BaseModel):
+    revision: int = Field(ge=0)
+    load_id: str
+    group: str = Field(max_length=80)
+    room: str = Field(max_length=80)
+
+
+@app.post("/api/admin/planner/load-change")
+def change_load(body: LoadChange, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор.")
+        load=next((x for x in p.loads if x.id==body.load_id),None)
+        if not load:raise HTTPException(404,"Нагрузка не найдена")
+        if body.room and body.room not in {r.name for r in p.rooms}:raise HTTPException(422,"Кабинет отсутствует в справочнике")
+        peers=[x for x in p.loads if x.class_name==load.class_name and x.subject==load.subject and x.id!=load.id]
+        if body.group and not any(g.class_name==load.class_name and g.name==body.group for g in p.groups):raise HTTPException(422,"Группа отсутствует в справочнике")
+        if peers and not body.group:raise HTTPException(422,"Для параллельных учителей выберите группу.")
+        other=next((x for x in peers if x.group==body.group and body.group),None)
+        if other and not load.group:raise HTTPException(409,"Сначала назначьте текущему учителю другую группу.")
+        def conflicts(project):
+            return Counter(issue for issue in planner.issues(project,state.get("bell_schedule")) if not issue.startswith("Укажите кабинет для "))
+        before=conflicts(p)
+        if other:other.group=load.group
+        load.group=body.group;load.room=body.room
+        after=conflicts(p)
+        added=list((after-before).elements())
+        if added:raise HTTPException(409,"Изменение создаёт конфликт: "+added[0])
+        p.revision+=1;state["planner"]=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
 
 
 class PlannerRename(BaseModel):

@@ -82,8 +82,8 @@ class Project(BaseModel):
     groups: list[ClassGroup] = Field(default_factory=list, max_length=2000)
     subjects: list[Named] = Field(default_factory=list, max_length=200)
     rooms: list[Named] = Field(default_factory=list, max_length=200)
-    loads: list[Load] = Field(default_factory=list, max_length=300)
-    placements: list[Placement] = Field(default_factory=list, max_length=600)
+    loads: list[Load] = Field(default_factory=list, max_length=10000)
+    placements: list[Placement] = Field(default_factory=list, max_length=30000)
 
 
 def references(project: Project) -> list[str]:
@@ -108,10 +108,10 @@ def references(project: Project) -> list[str]:
                                    ("учитель", load.teacher, project.teachers),
                                    ("предмет", load.subject, project.subjects),
                                    ("кабинет", load.room, project.rooms)):
+            if label == "кабинет" and not name:
+                continue
             if name not in {x.name for x in items}:
                 errors.append(f"Нагрузка {load.id}: неизвестный {label} «{name}».")
-    if sum(x.per_week for x in project.loads) > 600:
-        errors.append("В проекте допускается не более 600 уроков в неделю.")
     if any(p.load_id not in ids for p in project.placements):
         errors.append("Есть уроки с неизвестной нагрузкой.")
     return errors
@@ -131,6 +131,9 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
     errors = references(project)
     if errors:
         return errors
+    missing_rooms = [x for x in project.loads if not x.room]
+    if missing_rooms:
+        errors.append(f"Укажите кабинет для {len(missing_rooms)} записей нагрузки перед расстановкой и публикацией.")
     loads = {x.id: x for x in project.loads}
     classes = {x.name: x for x in project.classes}
     teachers = {x.name: x for x in project.teachers}
