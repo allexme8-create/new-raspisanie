@@ -97,6 +97,45 @@ class PlannerTests(unittest.TestCase):
             for old_path in ("/teacher", "/Director", "/associate"):
                 self.assertEqual(client.get(old_path).status_code, 404)
 
+    def test_import_subjects_and_rooms_preserves_existing_and_does_not_resurrect(self):
+        old=copy.deepcopy(backend.state)
+        try:
+            backend.state["planner"]=project().model_dump()
+            backend.state["planner_subjects_imported"]=False;backend.state["planner_rooms_imported"]=False
+            backend.state["subjects"]={"grid":{"Пн":{"1":{"5а":{"names":["Математика","Физика","физика","Классный час"],"rooms":["101", " 103 "]}}}}}
+            backend.state["teachers"]={"grid":{"Пн":{"1":{"5а":{"names":["Учитель"],"rooms":["103", "спортзал"]}}}}}
+            with patch.object(backend,"_save_state"):
+                backend.migrate_schedule_catalogs()
+                p=backend._planner_project()
+                self.assertEqual([x.name for x in p.subjects],["Математика","Физика"])
+                self.assertEqual([x.name for x in p.rooms],["101","102","103","спортзал"])
+                self.assertEqual(len(p.loads),2)
+                backend.state["planner"]["subjects"]=[x for x in backend.state["planner"]["subjects"] if x["name"]!="Физика"]
+                backend.migrate_schedule_catalogs()
+                self.assertNotIn("Физика",[x.name for x in backend._planner_project().subjects])
+                self.assertEqual(backend.import_schedule_catalog("subjects")["added"],["Физика"])
+                self.assertEqual(backend.import_schedule_catalog("rooms")["added"],[])
+                with self.assertRaises(backend.HTTPException):backend.import_schedule_catalog("teachers")
+        finally:
+            backend.state.clear();backend.state.update(old)
+
+    def test_rename_subjects_rooms_preserves_load_and_placements(self):
+        old=copy.deepcopy(backend.state)
+        with tempfile.TemporaryDirectory() as folder:
+            store=staff.Store(Path(folder)/"staff.sqlite3");store.init()
+            try:
+                p=project();p.placements=[planner.Placement(load_id="a",day="Пн",lesson=1)];backend.state["planner"]=p.model_dump()
+                with patch.object(backend,"staff_store",store),patch.object(backend,"_save_state"):
+                    result=backend.planner_rename("subjects",backend.PlannerRename(revision=0,old_name="Математика",new_name="Алгебра"))
+                    self.assertEqual(result["project"]["loads"][0]["subject"],"Алгебра")
+                    result=backend.planner_rename("rooms",backend.PlannerRename(revision=1,old_name="101",new_name="103"))
+                    self.assertEqual(result["project"]["loads"][0]["room"],"103")
+                    self.assertEqual(result["project"]["placements"][0]["load_id"],"a")
+                    with self.assertRaises(backend.HTTPException):backend.planner_rename("rooms",backend.PlannerRename(revision=2,old_name="103",new_name="102"))
+                    with self.assertRaises(backend.HTTPException):backend.planner_rename("rooms",backend.PlannerRename(revision=1,old_name="103",new_name="104"))
+            finally:
+                backend.state.clear();backend.state.update(old)
+
     def test_planner_rename_updates_loads_and_class_leadership(self):
         old=copy.deepcopy(backend.state)
         with tempfile.TemporaryDirectory() as folder:

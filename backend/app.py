@@ -72,6 +72,8 @@ state: dict = {
     "planner_class_imported": False,
     "planner_teachers_imported": False,
     "planner_initials_normalized": False,
+    "planner_subjects_imported": False,
+    "planner_rooms_imported": False,
 }
 
 _revoked_tokens: set[str] = set()
@@ -89,7 +91,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -439,6 +441,67 @@ def import_schedule_teachers(_: None = Depends(require_admin)) -> dict:
         return {"added": added, "project": _planner_project().model_dump()}
 
 
+def _import_schedule_catalog(kind: str) -> list[str]:
+    if kind not in ("subjects", "rooms"):
+        raise ValueError("Неизвестный справочник")
+    names = {}
+    sources = ("subjects",) if kind == "subjects" else ("subjects", "teachers")
+    for source in sources:
+        for lessons in (state.get(source) or {}).get("grid", {}).values():
+            for cells in lessons.values():
+                for cell in cells.values():
+                    for value in cell.get("names" if kind == "subjects" else "rooms", []):
+                        name = " ".join(str(value).split())
+                        if not name or (kind == "subjects" and name.casefold() in {"классный час", "сфу", "экскурсия"}):
+                            continue
+                        names.setdefault(name.casefold(), name)
+    project = _planner_project()
+    catalog = getattr(project, kind)
+    existing = {" ".join(item.name.split()).casefold() for item in catalog}
+    added = []
+    for key in sorted(names):
+        name = names[key]
+        if key in existing:
+            continue
+        if len(catalog) >= 200 or len(name) > 80:
+            raise ValueError("Невозможно перенести весь справочник: превышен предел конструктора или длина названия")
+        catalog.append(planner.Named(name=name))
+        existing.add(key); added.append(name)
+    if added:
+        project.revision += 1
+        state["planner"] = project.model_dump()
+    return added
+
+
+@app.on_event("startup")
+def migrate_schedule_catalogs():
+    with _planner_lock:
+        for kind, sources in (("subjects", ("subjects",)), ("rooms", ("subjects", "teachers"))):
+            flag = f"planner_{kind}_imported"
+            if state.get(flag) or not any(any((state.get(source) or {}).get("grid", {}).values()) for source in sources):
+                continue
+            try:
+                _import_schedule_catalog(kind)
+            except ValueError:
+                continue
+            state[flag] = True
+            _save_state()
+
+
+@app.post("/api/admin/planner/import-catalog/{kind}")
+def import_schedule_catalog(kind: str, _: None = Depends(require_admin)) -> dict:
+    if kind not in ("subjects", "rooms"):
+        raise HTTPException(404, "Неизвестный справочник")
+    with _planner_lock:
+        try:
+            added = _import_schedule_catalog(kind)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        if added:
+            _save_state()
+        return {"added": added, "project": _planner_project().model_dump()}
+
+
 @app.on_event("startup")
 def migrate_schedule_classes():
     # One-time migration; do not resurrect a class deliberately deleted later.
@@ -499,7 +562,7 @@ class PlannerRename(BaseModel):
 
 @app.post("/api/admin/planner/rename/{kind}")
 def planner_rename(kind: str, body: PlannerRename, _: None = Depends(require_admin)) -> dict:
-    if kind not in ("classes", "teachers"):
+    if kind not in ("classes", "teachers", "subjects", "rooms"):
         raise HTTPException(404, "Неизвестный справочник")
     name = " ".join(body.new_name.split())
     if not name:
@@ -525,6 +588,10 @@ def planner_rename(kind: str, body: PlannerRename, _: None = Depends(require_adm
                 load.class_name=name
             elif kind == "teachers" and load.teacher == old_name:
                 load.teacher=name
+            elif kind == "subjects" and load.subject == old_name:
+                load.subject=name
+            elif kind == "rooms" and load.room == old_name:
+                load.room=name
         project.revision += 1
         previous=state.get("planner")
         try:

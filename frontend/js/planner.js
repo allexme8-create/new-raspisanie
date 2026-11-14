@@ -2,7 +2,7 @@
 /* Конструктор работает с отдельным черновиком, публикация — только явным действием. */
 const plannerDays=["Пн","Вт","Ср","Чт","Пт","Сб"];
 let plannerProject=null, plannerIssues=[];
-const plannerSearch={classes:"",teachers:""};
+const plannerSearch={classes:"",teachers:"",subjects:"",rooms:""};
 const plannerRoot=$("plannerRoot");
 const optionList=(items,value="name")=>items.map(x=>`<option value="${esc(x[value])}">${esc(x[value])}</option>`).join("");
 const dayOptions=plannerDays.map(d=>`<option>${d}</option>`).join("");
@@ -14,7 +14,7 @@ function plannerRender(){
   const p=plannerProject;
   const openDetails=[...plannerRoot.querySelectorAll("details")].map(d=>d.open);
   const list=(key,format)=>p[key].length?p[key].map((x,i)=>{
-    const editable=key==="classes"||key==="teachers";
+    const editable=["classes","teachers","subjects","rooms"].includes(key);
     const title=editable?`<button type="button" class="planner-name-edit" data-edit-kind="${key}" data-edit-index="${i}" title="Изменить">${format(x)} ✎</button>`:`<span>${format(x)}</span>`;
     const form=editable?`<form class="planner-inline-edit hidden" id="plannerEdit-${key}-${i}"><label class="sr-only" for="plannerEditInput-${key}-${i}">Новое название</label><input id="plannerEditInput-${key}-${i}" maxlength="80" required value="${esc(x.name)}"><button class="btn" type="submit">Сохранить</button><button class="btn secondary" type="button" data-edit-cancel>Отмена</button></form>`:"";
     return `<li class="planner-catalog-item" data-search-name="${esc((x.name||"").toLocaleLowerCase("ru-RU"))}"><div class="planner-item-line">${title}<button type="button" class="planner-remove" data-kind="${key}" data-index="${i}" aria-label="Удалить ${esc(x.name||"запись")}">✕</button></div>${form}</li>`;
@@ -23,14 +23,14 @@ function plannerRender(){
   const nameForm=(type,label)=>`<form data-form="${type}" class="planner-form">${input(`${type}Name`,label,label)}<button class="btn" type="submit">Добавить</button></form>`;
   plannerRoot.innerHTML=`
     <div class="planner-actions planner-main-actions"><button type="button" id="plannerGenerate" class="btn">Автоподбор</button><button type="button" id="plannerPublish" class="btn">Опубликовать</button></div>
-    <details class="planner-tools"><summary>Импорт и обновление</summary><div class="planner-actions"><button type="button" id="plannerRefresh" class="btn secondary">Обновить черновик</button><button type="button" id="plannerImportClasses" class="btn secondary">Импорт классов</button><button type="button" id="plannerImportTeachers" class="btn secondary">Импорт учителей</button></div></details>
+    <details class="planner-tools"><summary>Импорт и обновление</summary><div class="planner-actions"><button type="button" id="plannerRefresh" class="btn secondary">Обновить черновик</button><button type="button" id="plannerImportClasses" class="btn secondary">Импорт классов</button><button type="button" id="plannerImportTeachers" class="btn secondary">Импорт учителей</button><button type="button" id="plannerImportSubjects" class="btn secondary">Импорт предметов</button><button type="button" id="plannerImportRooms" class="btn secondary">Импорт кабинетов</button></div></details>
     <div id="plannerMessage" aria-live="polite"></div>
     <p class="hint">Изменения сохраняются в черновике. Автоподбор сохраняет уже расставленные уроки; публикация заменяет текущее расписание на сайте только после проверки.</p>
     <details open><summary>1. Справочники</summary><div class="planner-grid">
       <details class="planner-category"><summary>Классы · ${p.classes.length}</summary><form data-form="classes" class="planner-form">${input("className","Класс","Например, 5а")}${select("classShift","Смена",'<option value="1">1</option><option value="2">2</option>')}${input("classMax","Максимум уроков в день","7","number",'min="1" max="12" value="7"')}<button class="btn">Добавить</button></form><details class="planner-catalog-list"><summary>Список классов (${p.classes.length})</summary><input class="planner-search" type="search" data-catalog-search="classes" value="${esc(plannerSearch.classes)}" placeholder="Поиск класса" aria-label="Поиск класса"><ul class="planner-list" data-catalog-list="classes">${list("classes",x=>`${esc(x.name)} · ${x.shift}-я смена`)}</ul></details></details>
       <details class="planner-category"><summary>Учителя · ${p.teachers.length}</summary>${nameForm("teachers","ФИО учителя")}<details class="planner-catalog-list"><summary>Список учителей (${p.teachers.length})</summary><input class="planner-search" type="search" data-catalog-search="teachers" value="${esc(plannerSearch.teachers)}" placeholder="Поиск учителя" aria-label="Поиск учителя"><ul class="planner-list" data-catalog-list="teachers">${list("teachers",x=>esc(x.name))}</ul></details><p class="hint">Это справочник расписания, а не учётные записи сотрудников.</p></details>
-      <details class="planner-category"><summary>Предметы · ${p.subjects.length}</summary>${nameForm("subjects","Предмет")}<ul class="planner-list">${list("subjects",x=>esc(x.name))}</ul></details>
-      <details class="planner-category"><summary>Кабинеты · ${p.rooms.length}</summary>${nameForm("rooms","Кабинет")}<ul class="planner-list">${list("rooms",x=>esc(x.name))}</ul></details>
+      <details class="planner-category"><summary>Предметы · ${p.subjects.length}</summary>${nameForm("subjects","Предмет")}<details class="planner-catalog-list"><summary>Список предметов (${p.subjects.length})</summary><input class="planner-search" type="search" data-catalog-search="subjects" value="${esc(plannerSearch.subjects)}" placeholder="Поиск предмета" aria-label="Поиск предмета"><ul class="planner-list" data-catalog-list="subjects">${list("subjects",x=>esc(x.name))}</ul></details></details>
+      <details class="planner-category"><summary>Кабинеты · ${p.rooms.length}</summary>${nameForm("rooms","Кабинет")}<details class="planner-catalog-list"><summary>Список кабинетов (${p.rooms.length})</summary><input class="planner-search" type="search" data-catalog-search="rooms" value="${esc(plannerSearch.rooms)}" placeholder="Поиск кабинета" aria-label="Поиск кабинета"><ul class="planner-list" data-catalog-list="rooms">${list("rooms",x=>esc(x.name))}</ul></details></details>
     </div></details>
     <details><summary>2. Недоступность учителей</summary><p class="hint">Укажите время по звонкам соответствующей смены. Пересечения со второй сменой тоже учитываются.</p><form data-form="unavailable" class="planner-form">${select("unTeacher","Учитель",optionList(p.teachers))}${select("unDay","День",dayOptions)}${select("unShift","Смена",'<option>1</option><option>2</option>')}${select("unLesson","Урок",numberOptions)}<button class="btn">Добавить</button></form><ul class="planner-list">${p.teachers.flatMap((t,ti)=>t.unavailable.map((s,si)=>`<li><span>${esc(t.name)} · ${esc(s.day)} · смена ${s.shift} · урок ${s.lesson}</span><button type="button" class="planner-remove" data-un-teacher="${ti}" data-index="${si}" aria-label="Удалить">✕</button></li>`)).join("")||'<li class="muted">Ограничений нет</li>'}</ul></details>
     <details><summary>3. Учебная нагрузка</summary><p class="hint">Одна запись — один предмет, учитель и кабинет для целого класса. Параллельные группы пока не поддерживаются.</p><form data-form="loads" class="planner-form">${select("loadClass","Класс",optionList(p.classes))}${select("loadSubject","Предмет",optionList(p.subjects))}${select("loadTeacher","Учитель",optionList(p.teachers))}${select("loadRoom","Кабинет",optionList(p.rooms))}${input("loadWeek","Уроков в неделю","1","number",'min="1" max="36" value="1"')}${input("loadDay","Не более в день","1","number",'min="1" max="12" value="1"')}<button class="btn">Добавить</button></form><ul class="planner-list">${list("loads",x=>`${esc(x.class_name)} · ${esc(x.subject)} · ${esc(x.teacher)} · каб. ${esc(x.room)} · ${x.per_week} в неделю (до ${x.max_per_day} в день)`)}</ul></details>
@@ -59,8 +59,9 @@ function plannerRender(){
   });
   plannerRoot.querySelectorAll("[data-kind]").forEach(b=>b.onclick=()=>{
     const kind=b.dataset.kind,index=Number(b.dataset.index),item=plannerProject[kind][index];
-    if(["classes","teachers"].includes(kind)){
-      const used=plannerProject.loads.filter(load=>kind==="classes"?load.class_name===item.name:load.teacher===item.name).length;
+    if(["classes","teachers","subjects","rooms"].includes(kind)){
+      const field={classes:"class_name",teachers:"teacher",subjects:"subject",rooms:"room"}[kind];
+      const used=plannerProject.loads.filter(load=>load[field]===item.name).length;
       if(used){plannerError(new Error(`Нельзя удалить «${item.name}»: есть учебная нагрузка (${used}). Сначала удалите её и связанные уроки.`));return;}
       if(!confirm(`Удалить «${item.name}» из справочника конструктора? Опубликованное расписание и учётные записи не изменятся.`))return;
     }
@@ -76,6 +77,12 @@ function plannerRender(){
     try{const data=await api("/api/admin/planner/import-teachers",{method:"POST"});await plannerLoad();toast(data.added.length?`Добавлено учителей: ${data.added.length}`:"Все учителя из расписания уже добавлены");}
     catch(error){plannerError(error);}
   };
+  for(const [id,kind,label] of [["plannerImportSubjects","subjects","предметов"],["plannerImportRooms","rooms","кабинетов"]]){
+    $(id).onclick=async()=>{
+      try{const data=await api(`/api/admin/planner/import-catalog/${kind}`,{method:"POST"});await plannerLoad();toast(data.added.length?`Добавлено ${label}: ${data.added.length}`:`Все данные уже добавлены`);}
+      catch(error){plannerError(error);}
+    };
+  }
   $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
   $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }
