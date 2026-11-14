@@ -270,22 +270,6 @@ $("saveShiftBtn").onclick=async()=>{
   }finally{ button.disabled=false; }
 };
 
-/* ── загрузка по ссылке Яндекс.Диска ── */
-$("yandexBtn").onclick=async()=>{
-  const url=$("yandexUrl").value.trim();
-  if(!url){ toast("Вставьте ссылку"); return; }
-  const btn=$("yandexBtn"); btn.disabled=true;
-  $("yandexResult").innerHTML=`<div class="alert" style="background:#f4f5fa">Скачиваю файл с Яндекс.Диска…</div>`;
-  try{
-    const data=await api("/api/admin/fetch-yandex",{method:"POST",body:{url}});
-    alertBox("yandexResult",[{ok:true,file:data.file,kind:data.kind,classes:null}]);
-    $("yandexUrl").value="";
-    await loadStatus();
-  }catch(e){
-    $("yandexResult").innerHTML=`<div class="alert err">${esc(e.message)}</div>`;
-  }finally{ btn.disabled=false; }
-};
-
 /* ── автостарт: если токен сохранён, проверяем его ── */
 (async()=>{
   if(token){
