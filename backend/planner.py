@@ -284,6 +284,43 @@ def preference_warnings(project: Project) -> list[str]:
     return warnings
 
 
+def bell_intervals(bells: dict | None) -> dict[str, list[tuple[int, int]]]:
+    # Одинаковые звонки смен считаем один раз; пересекающиеся интервалы
+    # внутри окна объединяются при подсчёте, чтобы не удваивать окно.
+    return {day: sorted({time for shift in (1, 2) for lesson in range(1, 13)
+                        if (time := period(bells, day, shift, lesson))}) for day in DAYS}
+
+
+def gaps_in_day(lessons: list[tuple[int, int]], bell_times: list[tuple[int, int]]) -> int:
+    total=0
+    intervals=sorted(set(lessons))
+    for (_, end), (start, _) in zip(intervals, intervals[1:]):
+        between=[(a,b) for a,b in bell_times if a >= end and b <= start]
+        previous_end=None
+        for a,b in between:
+            if previous_end is None or a >= previous_end:
+                total+=1
+                previous_end=b
+            else:
+                previous_end=max(previous_end,b)
+    return total
+
+
+def teacher_gap_summary(project: Project, bells: dict | None) -> dict:
+    loads={load.id:load for load in project.loads}
+    classes={c.name:c for c in project.classes}
+    grouped={}
+    for placement in project.placements:
+        load=loads.get(placement.load_id)
+        if not load or load.class_name not in classes:continue
+        time=period(bells,placement.day,classes[load.class_name].shift,placement.lesson)
+        if time:grouped.setdefault((load.teacher,placement.day),[]).append(time)
+    periods=bell_intervals(bells)
+    details=[{"teacher":teacher,"day":day,"gaps":count} for (teacher,day),times in sorted(grouped.items())
+             if (count:=gaps_in_day(times,periods[day]))]
+    return {"total":sum(item["gaps"] for item in details),"details":details}
+
+
 def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> tuple[Project | None, str]:
     errors = issues(project, bells)
     if errors:
@@ -315,17 +352,25 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
         daily_class[(load.class_name, p.day, p.lesson)] += 1
         daily_load[(load.id, p.day)] += 1
     remaining.sort(key=lambda load: len(slots[classes[load.class_name].shift]))
+    bell_times = bell_intervals(bells)
+    teacher_days = {}
+    for day, entries in occupied.items():
+        for load, time, _, _ in entries:
+            teacher_days.setdefault((load.teacher,day),[]).append(time)
+    initial_gaps=sum(gaps_in_day(times,bell_times[day]) for (_,day),times in teacher_days.items())
     nodes = 0
     best = None
-    best_cost = float("inf")
-    def search(index: int, cost: int) -> bool:
-        nonlocal nodes, best, best_cost
-        if nodes >= node_limit or cost >= best_cost:
-            return False
+    best_score = (float("inf"), float("inf"))
+    def search(index: int, cost: int, gaps: int) -> bool:
+        nonlocal nodes, best, best_score
         if index == len(remaining):
-            best = work.model_copy(deep=True)
-            best_cost = cost
-            return cost == 0
+            score=(gaps,cost)
+            if score < best_score:
+                best = work.model_copy(deep=True)
+                best_score = score
+            return score == (0,0)
+        if nodes >= node_limit or (best_score[0] == 0 and cost >= best_score[1]):
+            return False
         load = remaining[index]
         cls = classes[load.class_name]
         preferred=teachers[load.teacher].preferred_room
@@ -334,14 +379,16 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
         for day, lesson, time in slots[cls.shift]:
             previous=[(other,day,other_lesson) for other, _, other_lesson, _ in occupied[day]]
             penalty=len(preference_hits(work,load,day,lesson,previous))
+            current=teacher_days.get((load.teacher,day),[])
+            gap_delta=gaps_in_day(current+[time],bell_times[day])-gaps_in_day(current,bell_times[day])
             for room in room_choices:
                 room_penalty=int(bool(preferred and not load.room and room!=preferred))
-                candidates.append((penalty+room_penalty,daily_load[(load.id,day)],lesson,DAYS.index(day),room_choices.index(room),day,time,room))
+                candidates.append((gap_delta,penalty+room_penalty,daily_load[(load.id,day)],lesson,DAYS.index(day),room_choices.index(room),day,time,room))
         candidates.sort()
-        for penalty, _, lesson, _, _, day, time, room in candidates:
+        for gap_delta, penalty, _, lesson, _, _, day, time, room in candidates:
             nodes += 1
             if nodes > node_limit: return False
-            if cost + penalty >= best_cost: continue
+            if best_score[0] == 0 and cost + penalty >= best_score[1]: continue
             if (not daily_class[(load.class_name, day, lesson)] and sum(1 for (name, d, _), count in daily_class.items() if name == load.class_name and d == day and count > 0) >= cls.max_daily) or daily_load[(load.id, day)] >= load.max_per_day:
                 continue
             if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked[load.teacher]):
@@ -354,16 +401,18 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
                 continue
             work.placements.append(Placement(load_id=load.id, day=day, lesson=lesson, room="" if load.room else room))
             occupied[day].append((load, time, lesson, room))
+            teacher_days.setdefault((load.teacher,day),[]).append(time)
             daily_class[(load.class_name, day, lesson)] += 1
             daily_load[(load.id, day)] += 1
-            done=search(index + 1,cost+penalty)
+            done=search(index + 1,cost+penalty,gaps+gap_delta)
+            teacher_days[(load.teacher,day)].pop()
             daily_class[(load.class_name, day, lesson)] -= 1
             daily_load[(load.id, day)] -= 1
             occupied[day].pop()
             work.placements.pop()
             if done: return True
         return False
-    search(0,0)
+    search(0,0,initial_gaps)
     if best is not None: return best, ""
     return None, "Не удалось расставить все уроки в пределах ограничений и лимита поиска. Проверьте звонки, доступность и нагрузку. Черновик не изменён."
 

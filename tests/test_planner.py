@@ -35,6 +35,30 @@ def project():
 
 
 class PlannerTests(unittest.TestCase):
+    def test_teacher_windows_take_priority_over_soft_preferences(self):
+        p=planner.Project(classes=[planner.SchoolClass(name='5а'),planner.SchoolClass(name='6а')],teachers=[planner.Teacher(name='А')],subjects=[planner.Named(name='Математика')],rooms=[planner.Room(name='101')],loads=[planner.Load(id='fixed',class_name='5а',teacher='А',subject='Математика',room='101',per_week=1),planner.Load(id='new',class_name='6а',teacher='А',subject='Математика',room='101',per_week=1)],placements=[planner.Placement(load_id='fixed',day='Пн',lesson=1)],preferences=[planner.Preference(scope='class',scope_value='6а',subject='Математика',kind='avoid_lesson',lesson=2)])
+        schedule={'shifts':{'1':{'Пн':{'1':{'start':'08:00','end':'08:40'},'2':{'start':'09:00','end':'09:40'},'3':{'start':'10:00','end':'10:40'}}}}}
+        result,error=planner.generate(p,schedule);self.assertIsNotNone(result,error)
+        self.assertEqual(next(x.lesson for x in result.placements if x.load_id=='new'),2)
+        self.assertEqual(planner.teacher_gap_summary(result,schedule)['total'],0)
+        self.assertEqual(len(planner.preference_warnings(result)),1)
+        self.assertEqual(p.placements[0].lesson,1);self.assertEqual(len(p.placements),1)
+
+    def test_teacher_windows_unavoidable_fixed_and_cross_shift(self):
+        schedule={'shifts':{'1':{'Пн':{'1':{'start':'08:00','end':'08:40'},'2':{'start':'09:00','end':'09:40'},'3':{'start':'10:00','end':'10:40'}}},'2':{'Пн':{'1':{'start':'09:10','end':'09:30'},'2':{'start':'10:00','end':'10:40'}}}}}
+        p=planner.Project(classes=[planner.SchoolClass(name='5а',shift=1),planner.SchoolClass(name='6а',shift=2)],teachers=[planner.Teacher(name='А')],subjects=[planner.Named(name='Математика')],rooms=[planner.Room(name='101')],loads=[planner.Load(id='a',class_name='5а',teacher='А',subject='Математика',room='101',per_week=1),planner.Load(id='b',class_name='6а',teacher='А',subject='Математика',room='101',per_week=1)],placements=[planner.Placement(load_id='a',day='Пн',lesson=1),planner.Placement(load_id='b',day='Пн',lesson=2)])
+        summary=planner.teacher_gap_summary(p,schedule);self.assertEqual(summary['total'],1);self.assertEqual(summary['details'],[{'teacher':'А','day':'Пн','gaps':1}])
+        result,error=planner.generate(p,schedule);self.assertIsNotNone(result,error);self.assertEqual(planner.teacher_gap_summary(result,schedule)['total'],1)
+        schedule['shifts']['1']['Пн'].pop('2');schedule['shifts']['2']['Пн'].pop('1')
+        self.assertEqual(planner.teacher_gap_summary(p,schedule)['total'],0) # большая перемена не окно без звонков
+        p.placements[1].day='Вт';self.assertEqual(planner.teacher_gap_summary(p,schedule)['total'],0)
+
+    def test_teacher_windows_actual_overlap_and_bound(self):
+        self.assertEqual(planner.gaps_in_day([(480,520),(600,640)],[(540,580),(550,570)]),1)
+        self.assertEqual(planner.gaps_in_day([(480,520),(600,640)],[(520,540),(540,560),(560,580)]),3)
+        p=project();p.loads=p.loads[:1];p.loads[0].per_week=1
+        result,error=planner.generate(p,bells(),node_limit=1);self.assertIsNotNone(result,error)
+
     def test_soft_preferences_scope_search_and_fallback(self):
         p=planner.Project(classes=[planner.SchoolClass(name='5а'),planner.SchoolClass(name='10а')],teachers=[planner.Teacher(name='А')],subjects=[planner.Named(name='Математика')],rooms=[planner.Room(name='101')],loads=[planner.Load(id='a',class_name='5а',teacher='А',subject='Математика',room='101',per_week=1)],preferences=[planner.Preference(scope='grade',scope_value='5',subject='Математика',kind='avoid_lesson',lesson=1)])
         schedule={'shifts':{'1':{'Пн':{'1':{'start':'08:00','end':'08:40'},'2':{'start':'09:00','end':'09:40'}}}}}
@@ -535,6 +559,7 @@ class PlannerTests(unittest.TestCase):
                 with self.assertRaises(backend.HTTPException):
                     backend.planner_publish(backend.PlannerAction(revision=saved["project"]["revision"]))
                 generated = backend.planner_generate(backend.PlannerAction(revision=saved["project"]["revision"]))
+                self.assertEqual(generated["teacher_gaps"]["total"],planner.teacher_gap_summary(planner.Project.model_validate(generated["project"]),bells())["total"])
                 backend.planner_publish(backend.PlannerAction(revision=generated["project"]["revision"]))
                 self.assertEqual(backend.state["second_shift_classes"], ["6а"])
                 self.assertEqual(backend.state["subjects"]["numbering"], "local")

@@ -1022,7 +1022,7 @@ def planner_generate(body: PlannerAction, _: None = Depends(require_admin)) -> d
         generated.revision += 1
         state["planner"] = generated.model_dump()
         _save_state()
-        return {"project": generated.model_dump(), "issues": planner.issues(generated, state.get("bell_schedule"), complete=True)}
+        return {"project": generated.model_dump(), "issues": planner.issues(generated, state.get("bell_schedule"), complete=True), "teacher_gaps": planner.teacher_gap_summary(generated, state.get("bell_schedule"))}
 
 
 @app.post("/api/admin/planner/publish")
