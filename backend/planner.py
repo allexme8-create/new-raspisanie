@@ -42,6 +42,18 @@ class Slot(BaseModel):
         return value
 
 
+class Room(Named):
+    unavailable: list[Slot] = Field(default_factory=list, max_length=144)
+
+    @field_validator("unavailable")
+    @classmethod
+    def unique_unavailable(cls, slots: list[Slot]) -> list[Slot]:
+        keys = [(slot.day, slot.shift, slot.lesson) for slot in slots]
+        if len(keys) != len(set(keys)):
+            raise ValueError("Ограничение кабинета повторяется")
+        return slots
+
+
 class Teacher(Named):
     preferred_room: str = Field(default="", max_length=80)
     unavailable: list[Slot] = Field(default_factory=list, max_length=144)
@@ -83,7 +95,7 @@ class Project(BaseModel):
     teachers: list[Teacher] = Field(default_factory=list, max_length=200)
     groups: list[ClassGroup] = Field(default_factory=list, max_length=2000)
     subjects: list[Named] = Field(default_factory=list, max_length=200)
-    rooms: list[Named] = Field(default_factory=list, max_length=200)
+    rooms: list[Room] = Field(default_factory=list, max_length=200)
     loads: list[Load] = Field(default_factory=list, max_length=10000)
     placements: list[Placement] = Field(default_factory=list, max_length=30000)
 
@@ -148,6 +160,7 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
     loads = {x.id: x for x in project.loads}
     classes = {x.name: x for x in project.classes}
     teachers = {x.name: x for x in project.teachers}
+    rooms = {x.name: x for x in project.rooms}
     counts: Counter = Counter()
     days: dict[tuple[str, str], set[int]] = {}
     subjects: Counter = Counter()
@@ -172,6 +185,12 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
             if slot.day == p.day and unavailable_time and time[0] < unavailable_time[1] and unavailable_time[0] < time[1]:
                 errors.append(f"{label}: учитель {load.teacher} недоступен.")
                 break
+        if room:
+            for slot in rooms[room].unavailable:
+                unavailable_time = period(bells, slot.day, slot.shift, slot.lesson)
+                if slot.day == p.day and unavailable_time and time[0] < unavailable_time[1] and unavailable_time[0] < time[1]:
+                    errors.append(f"{label}: кабинет {room} недоступен.")
+                    break
         for other, other_load, other_time in scheduled:
             if p.day == other.day and time[0] < other_time[1] and other_time[0] < time[1]:
                 shared = []
@@ -197,6 +216,10 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
         for slot in teacher.unavailable:
             if not period(bells, slot.day, slot.shift, slot.lesson):
                 errors.append(f"{teacher.name}: нет звонков для недоступного времени {slot.day}, смена {slot.shift}, урок {slot.lesson}.")
+    for room in project.rooms:
+        for slot in room.unavailable:
+            if not period(bells, slot.day, slot.shift, slot.lesson):
+                errors.append(f"Кабинет {room.name}: нет звонков для недоступного времени {slot.day}, смена {slot.shift}, урок {slot.lesson}.")
     return errors
 
 
@@ -221,6 +244,8 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
                      if period(bells, day, shift, lesson)] for shift in (1, 2)}
     blocked = {t.name: [(s.day, period(bells, s.day, s.shift, s.lesson)) for s in t.unavailable]
                for t in work.teachers}
+    blocked_rooms = {r.name: [(s.day, period(bells, s.day, s.shift, s.lesson)) for s in r.unavailable]
+                     for r in work.rooms}
     occupied = {day: [] for day in DAYS}
     daily_class, daily_load = Counter(), Counter()
     for p in work.placements:
@@ -245,6 +270,8 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
                 if (not daily_class[(load.class_name, day, lesson)] and sum(1 for (name, d, _), count in daily_class.items() if name == load.class_name and d == day and count > 0) >= cls.max_daily) or daily_load[(load.id, day)] >= load.max_per_day:
                     continue
                 if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked[load.teacher]):
+                    continue
+                if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked_rooms[room]):
                     continue
                 if any(time[0] < t[1] and t[0] < time[1] and
                        ((load.class_name == other.class_name and (not load.group or not other.group or load.group.casefold()==other.group.casefold() or time != t or lesson != other_lesson)) or load.teacher == other.teacher or room == other_room)

@@ -471,7 +471,7 @@ def _import_schedule_catalog(kind: str) -> list[str]:
             continue
         if len(catalog) >= 200 or len(name) > 80:
             raise ValueError("Невозможно перенести весь справочник: превышен предел конструктора или длина названия")
-        catalog.append(planner.Named(name=name))
+        catalog.append(planner.Room(name=name) if kind == "rooms" else planner.Named(name=name))
         existing.add(key); added.append(name)
     if added:
         project.revision += 1

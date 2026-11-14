@@ -33,7 +33,7 @@ class LoadImportTests(unittest.TestCase):
     def test_preview_auth_import_accumulate_reimport_and_swap(self):
         old=copy.deepcopy(app.state)
         try:
-            p=planner.Project(classes=[planner.SchoolClass(name=n) for n in ['5а','5б','6а']],teachers=[planner.Teacher(name=n) for n in ['Иванов И.И.','Петров П.П.']],subjects=[planner.Named(name='Ин.яз.'),planner.Named(name='Математика')],rooms=[planner.Named(name='101')])
+            p=planner.Project(classes=[planner.SchoolClass(name=n) for n in ['5а','5б','6а']],teachers=[planner.Teacher(name=n) for n in ['Иванов И.И.','Петров П.П.']],subjects=[planner.Named(name='Ин.яз.'),planner.Named(name='Математика')],rooms=[planner.Room(name='101')])
             app.state['planner']=p.model_dump();app.state['bell_schedule']=None
             with patch.object(app,'_save_state'),TestClient(app.app) as client:
                 url='/api/admin/planner/load-import/preview';h={'Authorization':'Bearer '+app._create_token()}

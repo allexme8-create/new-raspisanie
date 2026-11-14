@@ -35,8 +35,40 @@ def project():
 
 
 class PlannerTests(unittest.TestCase):
+    def test_room_unavailability_cross_shift_generator_and_manual_checks(self):
+        p=planner.Project(classes=[planner.SchoolClass(name='5а',shift=2)],teachers=[planner.Teacher(name='Учитель',preferred_room='101')],subjects=[planner.Named(name='Физика')],rooms=[planner.Room(name='101',unavailable=[planner.Slot(day='Пн',shift=1,lesson=1)]),planner.Room(name='102')],loads=[planner.Load(id='a',class_name='5а',teacher='Учитель',subject='Физика',room='',per_week=1)])
+        schedule={'shifts':{'1':{'Пн':{'1':{'start':'08:00','end':'08:40'}}},'2':{'Пн':{'1':{'start':'08:20','end':'09:00'}}}}}
+        generated,error=planner.generate(p,schedule);self.assertIsNotNone(generated,error)
+        self.assertEqual(generated.placements[0].room,'102');self.assertFalse(planner.issues(generated,schedule))
+        generated.placements[0].room='101';self.assertTrue(any('кабинет 101 недоступен' in x for x in planner.issues(generated,schedule)))
+        p.loads[0].room='101';generated,error=planner.generate(p,schedule);self.assertIsNone(generated)
+        p.rooms[0].unavailable=[];generated,error=planner.generate(p,schedule);self.assertIsNotNone(generated,error)
+        p.rooms[0].unavailable=[planner.Slot(day='Вт',shift=1,lesson=1)]
+        self.assertTrue(any('нет звонков для недоступного времени' in x for x in planner.issues(p,schedule)))
+        self.assertIsNone(planner.generate(p,schedule)[0])
+        with self.assertRaises(ValueError):planner.Room(name='101',unavailable=[{'day':'Пн','shift':1,'lesson':1},{'day':'Пн','shift':1,'lesson':1}])
+
+    def test_room_rules_save_rename_and_map_move(self):
+        old=copy.deepcopy(backend.state)
+        with tempfile.TemporaryDirectory() as folder:
+            store=staff.Store(Path(folder)/'staff.sqlite3');store.init()
+            try:
+                p=project();p.placements=[planner.Placement(load_id='a',day='Пн',lesson=1)];backend.state['planner']=p.model_dump();backend.state['bell_schedule']=bells()
+                p.rooms[0].unavailable=[planner.Slot(day='Пн',shift=1,lesson=2)]
+                with patch.object(backend,'staff_store',store),patch.object(backend,'_save_state'):
+                    saved=backend.planner_save(p);self.assertEqual(saved['project']['rooms'][0]['unavailable'][0]['lesson'],2)
+                    with self.assertRaises(backend.HTTPException) as conflict:backend.planner_move(backend.PlannerMove(revision=1,index=0,day='Пн',lesson=2))
+                    self.assertIn('кабинет 101 недоступен',conflict.exception.detail)
+                    renamed=backend.planner_rename('rooms',backend.PlannerRename(revision=1,old_name='101',new_name='103'))
+                    self.assertEqual(renamed['project']['rooms'][0]['unavailable'][0]['lesson'],2)
+                    modified=backend._planner_project();modified.rooms[0].unavailable=[]
+                    backend.planner_save(modified)
+                    moved=backend.planner_move(backend.PlannerMove(revision=3,index=0,day='Пн',lesson=2))
+                    self.assertEqual(moved['project']['placements'][0]['lesson'],2)
+            finally:backend.state.clear();backend.state.update(old)
+
     def test_preferred_room_autopick_fallback_and_fixed_room(self):
-        p=planner.Project(classes=[planner.SchoolClass(name="5а"),planner.SchoolClass(name="6а")],teachers=[planner.Teacher(name="А",preferred_room="101"),planner.Teacher(name="Б",preferred_room="101")],subjects=[planner.Named(name="Математика")],rooms=[planner.Named(name="101"),planner.Named(name="102")],loads=[planner.Load(id="a",class_name="5а",teacher="А",subject="Математика",room="",per_week=1),planner.Load(id="b",class_name="6а",teacher="Б",subject="Математика",room="",per_week=1)])
+        p=planner.Project(classes=[planner.SchoolClass(name="5а"),planner.SchoolClass(name="6а")],teachers=[planner.Teacher(name="А",preferred_room="101"),planner.Teacher(name="Б",preferred_room="101")],subjects=[planner.Named(name="Математика")],rooms=[planner.Room(name="101"),planner.Room(name="102")],loads=[planner.Load(id="a",class_name="5а",teacher="А",subject="Математика",room="",per_week=1),planner.Load(id="b",class_name="6а",teacher="Б",subject="Математика",room="",per_week=1)])
         one={"shifts":{"1":{"Пн":{"1":{"start":"08:00","end":"08:40"}}}}}
         result,error=planner.generate(p,one);self.assertIsNotNone(result,error)
         placements={x.load_id:x for x in result.placements}
@@ -49,7 +81,7 @@ class PlannerTests(unittest.TestCase):
         p.loads[0].room='102';result,error=planner.generate(p,one);self.assertIsNotNone(result,error)
         placements={x.load_id:x for x in result.placements}
         self.assertEqual(placements['a'].room,'');self.assertEqual(placements['b'].room,'101')
-        p.rooms=[planner.Named(name='101')];p.loads[0].room='';result,error=planner.generate(p,one);self.assertIsNone(result)
+        p.rooms=[planner.Room(name='101')];p.loads[0].room='';result,error=planner.generate(p,one);self.assertIsNone(result)
         self.assertIn('Не удалось',error)
 
     def test_preferred_room_references_and_rename(self):

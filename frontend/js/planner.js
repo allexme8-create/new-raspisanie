@@ -3,6 +3,7 @@
 const plannerDays=["Пн","Вт","Ср","Чт","Пт","Сб"];
 let plannerProject=null, plannerIssues=[];
 let plannerMapClass="",plannerMapSelected=null,plannerMapBusy=false;
+let roomRulesSelected="",roomRulesShift=1;
 const plannerSearch={classes:"",teachers:"",subjects:"",rooms:"",groups:""};
 const plannerRoot=$("plannerRoot");
 const optionList=(items,value="name")=>items.map(x=>`<option value="${esc(x[value])}">${esc(x[value])}</option>`).join("");
@@ -40,6 +41,7 @@ function plannerRender(){
       <details class="planner-category"><summary>Кабинеты · ${p.rooms.length}</summary>${nameForm("rooms","Кабинет")}<details class="planner-catalog-list"><summary>Список кабинетов (${p.rooms.length})</summary><input class="planner-search" type="search" data-catalog-search="rooms" value="${esc(plannerSearch.rooms)}" placeholder="Поиск кабинета" aria-label="Поиск кабинета"><ul class="planner-list" data-catalog-list="rooms">${list("rooms",x=>esc(x.name))}</ul></details></details>
     </div></details>
     <details><summary>2. Недоступность учителей</summary><p class="hint">Укажите время по звонкам соответствующей смены. Пересечения со второй сменой тоже учитываются.</p><form data-form="unavailable" class="planner-form">${select("unTeacher","Учитель",optionList(p.teachers))}${select("unDay","День",dayOptions)}${select("unShift","Смена",'<option>1</option><option>2</option>')}${select("unLesson","Урок",numberOptions)}<button class="btn">Добавить</button></form><ul class="planner-list">${p.teachers.flatMap((t,ti)=>t.unavailable.map((s,si)=>`<li><span>${esc(t.name)} · ${esc(s.day)} · смена ${s.shift} · урок ${s.lesson}</span><button type="button" class="planner-remove" data-un-teacher="${ti}" data-index="${si}" aria-label="Удалить">✕</button></li>`)).join("")||'<li class="muted">Ограничений нет</li>'}</ul></details>
+    <details><summary>Ограничения кабинетов</summary><p class="hint">Выберите кабинет и смену. Нажмите на ячейку, чтобы запретить или снова разрешить занятия в это время; запреты повторяются каждую неделю. Учитываются пересечения времени двух смен. Ранее расставленные уроки не перемещаются — конфликты будут показаны при проверке.</p><div id="roomRulesUI"></div></details>
     <details><summary>3. Учебная нагрузка</summary><details class="load-import"><summary>Загрузить файл нагрузки</summary><p class="hint">CSV, XLS, XLSX, XLSM, ODS или Excel XML (до 10 МБ). Можно последовательно загружать разные предметы. Перед сохранением проверьте все неточные совпадения. Повторная загрузка обновит количество часов для того же класса, предмета и учителя.</p><form id="loadImportForm" class="planner-form"><label>Файл<input type="file" id="loadImportFile" accept=".csv,.xls,.xlsx,.xlsm,.xml,.ods" required></label><button class="btn">Проверить файл</button></form><div id="loadImportPreview"></div></details><p class="hint">Для всего класса оставьте группу пустой. Для параллельных занятий создайте нагрузку для каждой группы с разными названиями, учителями и кабинетами. Используйте одно название для одной и той же группы во всех предметах.</p><form data-form="loads" class="planner-form">${select("loadClass","Класс",optionList(p.classes))}<label>Группа<select id="loadGroup"><option value="">Весь класс</option></select></label>${select("loadSubject","Предмет",optionList(p.subjects))}${select("loadTeacher","Учитель",optionList(p.teachers))}<label>Кабинет нагрузки<select id="loadRoom"><option value="">Автоподбор</option>${optionList(p.rooms)}</select></label>${input("loadWeek","Уроков в неделю","1","number",'min="1" max="36" value="1"')}${input("loadDay","Не более в день","1","number",'min="1" max="12" value="1"')}<button class="btn">Добавить</button></form><ul class="planner-list">${p.loads.map((x,i)=>`<li class="planner-catalog-item"><div class="planner-item-line"><strong>${esc(x.class_name)} · ${esc(x.subject)} · ${esc(x.teacher)} · ${x.per_week} ч/нед</strong><button type="button" class="planner-remove" data-kind="loads" data-index="${i}" aria-label="Удалить нагрузку">✕</button></div><form class="planner-form" data-load-edit="${esc(x.id)}"><label>Группа<select name="group"><option value="">Весь класс</option>${p.groups.filter(g=>g.class_name===x.class_name).map(g=>`<option value="${esc(g.name)}"${g.name===x.group?' selected':''}>${esc(g.name)}</option>`).join("")}</select></label><label>Кабинет<select name="room"><option value="">Не указан</option>${p.rooms.map(r=>`<option value="${esc(r.name)}"${r.name===x.room?' selected':''}>${esc(r.name)}</option>`).join("")}</select></label><button class="btn secondary" type="submit">Сохранить</button></form></li>`).join("")||'<li class="muted">Пока нет записей</li>'}</ul></details>
     <details><summary>4. Расстановка уроков</summary><p class="hint">Добавьте уроки вручную или используйте автоподбор. Номер урока указывается внутри смены. Если в нагрузке закреплён кабинет, для урока необходимо выбрать тот же кабинет или оставить «Как в нагрузке».</p><form data-form="placements" class="planner-form">${select("placeLoad","Нагрузка",loadOptions)}${select("placeDay","День",dayOptions)}${select("placeLesson","Урок",numberOptions)}<label>Кабинет для урока<select id="placeRoom"><option value="">Как в нагрузке</option>${optionList(p.rooms)}</select></label><button class="btn">Поставить</button></form><ul class="planner-list planner-placements">${list("placements",x=>{const load=p.loads.find(l=>l.id===x.load_id);return `${esc(x.day)} · урок ${x.lesson} · ${esc(load?.class_name||"")}${load?.group?` · ${esc(load.group)}`:""} · ${esc(load?.subject||"")} · ${esc(load?.teacher||"")}`;})}</ul></details>
     <div class="planner-check"><b>Проверка перед публикацией</b>${plannerIssues.length?`<ul>${plannerIssues.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:'<p class="tag-ok">Конфликтов и нераспределённой нагрузки нет.</p>'}</div>`;
@@ -48,6 +50,7 @@ function plannerRender(){
   $("plannerMapClass").value=plannerMapClass;
   $("plannerMapClass").onchange=()=>{plannerMapClass=$("plannerMapClass").value;plannerMapSelected=null;renderPlannerMap();};
   renderPlannerMap();
+  renderRoomRules();
   function applyCatalogSearch(input){
     const kind=input.dataset.catalogSearch,query=input.value.trim().toLocaleLowerCase("ru-RU");
     plannerSearch[kind]=input.value;
@@ -121,6 +124,25 @@ function plannerRender(){
   $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
   $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }
+function renderRoomRules(){
+  const root=$("roomRulesUI"),p=plannerProject;
+  if(!p.rooms.length){root.innerHTML='<p class="muted">Сначала добавьте кабинеты в справочник.</p>';return;}
+  if(!p.rooms.some(r=>r.name===roomRulesSelected))roomRulesSelected=p.rooms[0].name;
+  const room=p.rooms.find(r=>r.name===roomRulesSelected),slots=room.unavailable||[];
+  const contains=(day,lesson)=>slots.some(s=>s.day===day&&s.shift===roomRulesShift&&s.lesson===lesson);
+  const numberOptions=Array.from({length:12},(_,i)=>i+1);
+  let html=`<div class="room-rules-controls"><label>Кабинет <select id="roomRulesRoom">${p.rooms.map(r=>`<option value="${esc(r.name)}"${r.name===roomRulesSelected?' selected':''}>${esc(r.name)}${r.unavailable?.length?` · ${r.unavailable.length}`:''}</option>`).join('')}</select></label><label>Смена <select id="roomRulesShift"><option value="1"${roomRulesShift===1?' selected':''}>1</option><option value="2"${roomRulesShift===2?' selected':''}>2</option></select></label></div><p class="hint">Красная ячейка — кабинет недоступен. Всего ограничений для кабинета: ${slots.length}.</p><div class="room-rules-scroll"><div class="room-rules-grid"><span class="room-rules-header">Урок</span>${plannerDays.map(d=>`<span class="room-rules-header">${esc(d)}</span>`).join('')}`;
+  for(const lesson of numberOptions){html+=`<span class="room-rules-number">${lesson}</span>`;for(const day of plannerDays){const blocked=contains(day,lesson);html+=`<button type="button" class="room-rule-cell${blocked?' blocked':''}" data-room-rule-day="${day}" data-room-rule-lesson="${lesson}" aria-pressed="${blocked}" aria-label="${esc(room.name)}, ${day}, смена ${roomRulesShift}, урок ${lesson}: ${blocked?'недоступен':'доступен'}">${blocked?'✕':'+'}</button>`;}}
+  root.innerHTML=html+'</div></div>';
+  $("roomRulesRoom").value=roomRulesSelected;$("roomRulesShift").value=String(roomRulesShift);
+  $("roomRulesRoom").onchange=()=>{roomRulesSelected=$("roomRulesRoom").value;renderRoomRules();};
+  $("roomRulesShift").onchange=()=>{roomRulesShift=Number($("roomRulesShift").value);renderRoomRules();};
+  root.querySelectorAll('[data-room-rule-day]').forEach(button=>button.onclick=()=>{
+    const day=button.dataset.roomRuleDay,lesson=Number(button.dataset.roomRuleLesson),shift=roomRulesShift,name=roomRulesSelected;
+    plannerChange(next=>{const target=next.rooms.find(r=>r.name===name);target.unavailable=target.unavailable||[];const i=target.unavailable.findIndex(s=>s.day===day&&s.shift===shift&&s.lesson===lesson);if(i<0)target.unavailable.push({day,shift,lesson});else target.unavailable.splice(i,1);});
+  });
+}
+
 function suggestImportGroups(rows,existing){
   // Повторяем порядок сохранения на сервере: сначала существующая нагрузка,
   // затем новые строки файла. Сопоставления, ещё не подтверждённые, не учитываются.
