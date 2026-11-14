@@ -16,6 +16,7 @@ Backend «Расписание лицея».
 from __future__ import annotations
 
 import csv
+from collections import Counter
 import io
 import hashlib
 import hmac
@@ -707,6 +708,37 @@ def planner_rename_group(body: PlannerGroupRename, _: None = Depends(require_adm
         item.name=name;item.inferred=False;project.revision+=1
         state["planner"]=project.model_dump();_save_state()
         return {"project":project.model_dump(),"issues":planner.issues(project,state.get("bell_schedule"),complete=True)}
+
+
+class PlannerMove(BaseModel):
+    revision: int = Field(ge=0)
+    index: int = Field(ge=0)
+    day: Literal["Пн", "Вт", "Ср", "Чт", "Пт", "Сб"]
+    lesson: int = Field(ge=1, le=12)
+
+
+@app.post("/api/admin/planner/move")
+def planner_move(body: PlannerMove, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        project = _planner_project()
+        if body.revision != project.revision:
+            raise HTTPException(409, "Черновик изменён в другом окне. Обновите конструктор.")
+        if body.index >= len(project.placements):
+            raise HTTPException(404, "Урок не найден")
+        item = project.placements[body.index]
+        if item.day == body.day and item.lesson == body.lesson:
+            return {"project":project.model_dump(), "issues":planner.issues(project,state.get("bell_schedule"),complete=True)}
+        previous = Counter(planner.issues(project, state.get("bell_schedule")))
+        candidate = project.model_copy(deep=True)
+        candidate.placements[body.index].day = body.day
+        candidate.placements[body.index].lesson = body.lesson
+        new = Counter(planner.issues(candidate, state.get("bell_schedule"))) - previous
+        if new:
+            raise HTTPException(422, "Перенос невозможен: " + next(iter(new)))
+        candidate.revision += 1
+        state["planner"] = candidate.model_dump()
+        _save_state()
+        return {"project":candidate.model_dump(), "issues":planner.issues(candidate,state.get("bell_schedule"),complete=True)}
 
 
 class PlannerAction(BaseModel):

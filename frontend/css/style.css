@@ -359,3 +359,18 @@ footer a{color:var(--muted)}
 
 .lesson-group+.lesson-group{margin-top:8px;padding-top:7px;border-top:1px solid var(--line)}
 .group-name,.teacher-group{display:block;font-size:11px;font-weight:700;color:var(--muted)}
+
+/* Интерактивная карта черновика: горизонтальная прокрутка на телефоне. */
+.planner-map-picker{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700}
+.planner-map-picker select{max-width:100%;min-height:44px}
+.planner-map-scroll{overflow:auto;max-height:70vh;border:1px solid var(--line);border-radius:10px;overscroll-behavior:contain}
+.planner-map-grid{display:grid;grid-template-columns:44px repeat(6,minmax(128px,1fr));min-width:812px;gap:1px;background:var(--line)}
+.planner-map-head,.planner-map-number{background:#e9edf6;padding:8px;text-align:center;font-size:12px;font-weight:700}
+.planner-map-head{position:sticky;top:0;z-index:2}
+.planner-map-number{position:sticky;left:0;z-index:1}
+.planner-map-cell{min-height:74px;background:#f8faff;padding:4px;display:flex;flex-direction:column;gap:4px}
+.planner-map-drop{min-height:30px;width:100%;border:1px dashed #aeb7ca;border-radius:6px;background:#fff;color:#5a6682;font-size:18px;cursor:pointer}
+.planner-map-lesson{touch-action:none;user-select:none;width:100%;border:1px solid #98aade;border-radius:7px;background:#e5edff;padding:6px;text-align:left;cursor:grab;display:flex;flex-direction:column;gap:2px;font:inherit;font-size:12px;overflow-wrap:anywhere}
+.planner-map-lesson span{font-size:11px;color:#425272}.planner-map-lesson.selected{outline:3px solid #4f46e5;outline-offset:1px}.planner-map-lesson.dragging{opacity:.55;cursor:grabbing}
+.planner-map-lesson:focus-visible,.planner-map-drop:focus-visible{outline:3px solid #4f46e5;outline-offset:1px}
+@media(max-width:640px){.planner-map-grid{grid-template-columns:38px repeat(6,minmax(115px,1fr));min-width:728px}.planner-map-drop{min-height:38px}.planner-map-lesson{min-height:44px}}

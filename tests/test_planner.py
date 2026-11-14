@@ -297,6 +297,31 @@ class PlannerTests(unittest.TestCase):
             finally:
                 backend.state.clear();backend.state.update(old)
 
+    def test_map_move_checks_conflicts_groups_and_revision(self):
+        old=copy.deepcopy(backend.state)
+        try:
+            p=project();p.classes=p.classes[:1]
+            p.loads=[planner.Load(id="g1",class_name="5а",subject="Математика",teacher="Учитель",room="101",per_week=2,max_per_day=2,group="1"),planner.Load(id="g2",class_name="5а",subject="Математика",teacher="Другой",room="102",per_week=2,max_per_day=2,group="2")]
+            p.placements=[planner.Placement(load_id="g1",day="Пн",lesson=1),planner.Placement(load_id="g2",day="Пн",lesson=2)]
+            backend.state["planner"]=p.model_dump();backend.state["bell_schedule"]=bells()
+            with patch.object(backend,"_save_state") as save:
+                result=backend.planner_move(backend.PlannerMove(revision=0,index=1,day="Пн",lesson=1))
+                self.assertEqual(result["project"]["placements"][1]["lesson"],1)
+                self.assertEqual(result["project"]["revision"],1)
+                with self.assertRaises(backend.HTTPException) as stale:backend.planner_move(backend.PlannerMove(revision=0,index=1,day="Пн",lesson=2))
+                self.assertEqual(stale.exception.status_code,409)
+                with self.assertRaises(backend.HTTPException) as missing:backend.planner_move(backend.PlannerMove(revision=1,index=3,day="Пн",lesson=2))
+                self.assertEqual(missing.exception.status_code,404)
+                with self.assertRaises(backend.HTTPException) as bells_error:backend.planner_move(backend.PlannerMove(revision=1,index=1,day="Пн",lesson=12))
+                self.assertEqual(bells_error.exception.status_code,422)
+                self.assertEqual(save.call_count,1)
+                current=backend._planner_project();current.loads[1].teacher="Учитель";current.placements[1].lesson=2;backend.state["planner"]=current.model_dump()
+                with self.assertRaises(backend.HTTPException) as conflict:backend.planner_move(backend.PlannerMove(revision=1,index=1,day="Пн",lesson=1))
+                self.assertIn("учитель",conflict.exception.detail)
+                self.assertEqual(backend._planner_project().placements[1].lesson,2)
+        finally:
+            backend.state.clear();backend.state.update(old)
+
     def test_parallel_groups_conflicts_limits_generation_and_publication(self):
         p=project();p.classes=p.classes[:1];p.classes[0].max_daily=1
         p.loads=[planner.Load(id="g1",class_name="5а",subject="Математика",teacher="Учитель",room="101",per_week=1,group="1 группа"),planner.Load(id="g2",class_name="5а",subject="Математика",teacher="Другой",room="102",per_week=1,group="2 группа")]

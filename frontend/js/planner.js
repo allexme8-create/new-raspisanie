@@ -2,6 +2,7 @@
 /* Конструктор работает с отдельным черновиком, публикация — только явным действием. */
 const plannerDays=["Пн","Вт","Ср","Чт","Пт","Сб"];
 let plannerProject=null, plannerIssues=[];
+let plannerMapClass="",plannerMapSelected=null,plannerMapBusy=false;
 const plannerSearch={classes:"",teachers:"",subjects:"",rooms:"",groups:""};
 const plannerRoot=$("plannerRoot");
 const optionList=(items,value="name")=>items.map(x=>`<option value="${esc(x[value])}">${esc(x[value])}</option>`).join("");
@@ -26,6 +27,11 @@ function plannerRender(){
     <details class="planner-tools"><summary>Импорт и обновление</summary><div class="planner-actions"><button type="button" id="plannerRefresh" class="btn secondary">Обновить черновик</button><button type="button" id="plannerImportClasses" class="btn secondary">Импорт классов</button><button type="button" id="plannerImportTeachers" class="btn secondary">Импорт учителей</button><button type="button" id="plannerImportSubjects" class="btn secondary">Импорт предметов</button><button type="button" id="plannerImportRooms" class="btn secondary">Импорт кабинетов</button><button type="button" id="plannerImportGroups" class="btn secondary">Импорт групп</button></div></details>
     <div id="plannerMessage" aria-live="polite"></div>
     <p class="hint">Изменения сохраняются в черновике. Автоподбор сохраняет уже расставленные уроки; публикация заменяет текущее расписание на сайте только после проверки.</p>
+    <details class="planner-map-section" open><summary>Карта расписания</summary>
+      <p class="hint">Черновик выбранного класса. Перетащите урок или нажмите его, затем нажмите нужную ячейку. Изменения попадут на сайт только после публикации.</p>
+      <label class="planner-map-picker">Класс <select id="plannerMapClass">${p.classes.map(c=>`<option value="${esc(c.name)}"${c.name===plannerMapClass?' selected':''}>${esc(c.name)}</option>`).join("")}</select></label>
+      <p id="plannerMapStatus" class="hint" aria-live="polite"></p><div id="plannerMap"></div>
+    </details>
     <details open><summary>1. Справочники</summary><div class="planner-grid">
       <details class="planner-category"><summary>Классы · ${p.classes.length}</summary><form data-form="classes" class="planner-form">${input("className","Класс","Например, 5а")}${select("classShift","Смена",'<option value="1">1</option><option value="2">2</option>')}${input("classMax","Максимум уроков в день","7","number",'min="1" max="12" value="7"')}<button class="btn">Добавить</button></form><details class="planner-catalog-list"><summary>Список классов (${p.classes.length})</summary><input class="planner-search" type="search" data-catalog-search="classes" value="${esc(plannerSearch.classes)}" placeholder="Поиск класса" aria-label="Поиск класса"><ul class="planner-list" data-catalog-list="classes">${list("classes",x=>`${esc(x.name)} · ${x.shift}-я смена`)}</ul></details></details>
       <details class="planner-category"><summary>Учителя · ${p.teachers.length}</summary>${nameForm("teachers","ФИО учителя")}<details class="planner-catalog-list"><summary>Список учителей (${p.teachers.length})</summary><input class="planner-search" type="search" data-catalog-search="teachers" value="${esc(plannerSearch.teachers)}" placeholder="Поиск учителя" aria-label="Поиск учителя"><ul class="planner-list" data-catalog-list="teachers">${list("teachers",x=>esc(x.name))}</ul></details><p class="hint">Это справочник расписания, а не учётные записи сотрудников.</p></details>
@@ -38,6 +44,10 @@ function plannerRender(){
     <details><summary>4. Расстановка уроков</summary><p class="hint">Добавьте уроки вручную или используйте автоподбор. Номер урока указывается внутри смены.</p><form data-form="placements" class="planner-form">${select("placeLoad","Нагрузка",loadOptions)}${select("placeDay","День",dayOptions)}${select("placeLesson","Урок",numberOptions)}<button class="btn">Поставить</button></form><ul class="planner-list planner-placements">${list("placements",x=>{const load=p.loads.find(l=>l.id===x.load_id);return `${esc(x.day)} · урок ${x.lesson} · ${esc(load?.class_name||"")}${load?.group?` · ${esc(load.group)}`:""} · ${esc(load?.subject||"")} · ${esc(load?.teacher||"")}`;})}</ul></details>
     <div class="planner-check"><b>Проверка перед публикацией</b>${plannerIssues.length?`<ul>${plannerIssues.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:'<p class="tag-ok">Конфликтов и нераспределённой нагрузки нет.</p>'}</div>`;
   plannerRoot.querySelectorAll("details").forEach((d,i)=>{if(openDetails[i]!==undefined)d.open=openDetails[i];});
+  if(!p.classes.some(c=>c.name===plannerMapClass))plannerMapClass=p.classes[0]?.name||"";
+  $("plannerMapClass").value=plannerMapClass;
+  $("plannerMapClass").onchange=()=>{plannerMapClass=$("plannerMapClass").value;plannerMapSelected=null;renderPlannerMap();};
+  renderPlannerMap();
   function applyCatalogSearch(input){
     const kind=input.dataset.catalogSearch,query=input.value.trim().toLocaleLowerCase("ru-RU");
     plannerSearch[kind]=input.value;
@@ -97,6 +107,46 @@ function plannerRender(){
   $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
   $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }
+function renderPlannerMap(){
+  const map=$("plannerMap"),status=$("plannerMapStatus"),project=plannerProject;
+  if(!plannerMapClass){map.innerHTML='<p class="muted">Добавьте класс в справочник.</p>';status.textContent="";return;}
+  const loads=new Map(project.loads.map(load=>[load.id,load]));
+  const selected=plannerMapSelected===null?null:project.placements[plannerMapSelected];
+  const selectedLoad=selected?loads.get(selected.load_id):null;
+  status.textContent=selectedLoad?`Выбран урок: ${selectedLoad.subject}${selectedLoad.group?' · '+selectedLoad.group:''}. Нажмите ячейку для переноса.`:"Нажмите на урок или перетащите его в другую ячейку.";
+  let html='<div class="planner-map-scroll"><div class="planner-map-grid"><div class="planner-map-head">Урок</div>'+plannerDays.map(day=>`<div class="planner-map-head">${esc(day)}</div>`).join("");
+  for(let lesson=1;lesson<=12;lesson++){
+    html+=`<div class="planner-map-number">${lesson}</div>`;
+    for(const day of plannerDays){
+      const items=project.placements.map((placement,index)=>({placement,index,load:loads.get(placement.load_id)})).filter(x=>x.load?.class_name===plannerMapClass&&x.placement.day===day&&x.placement.lesson===lesson);
+      html+=`<div class="planner-map-cell" data-map-day="${day}" data-map-lesson="${lesson}"><button type="button" class="planner-map-drop" data-map-target aria-label="Перенести в ${esc(day)}, урок ${lesson}">+</button>${items.map(({index,load})=>`<button type="button" class="planner-map-lesson ${plannerMapSelected===index?'selected':''}" data-map-index="${index}" aria-pressed="${plannerMapSelected===index?'true':'false'}"><strong>${esc(load.subject)}</strong><span>${esc(load.group||"Весь класс")}</span><span>${esc(load.teacher)} · ${esc(load.room)}</span></button>`).join("")}</div>`;
+    }
+  }
+  map.innerHTML=html+'</div></div>';
+  if(!project.placements.some(p=>loads.get(p.load_id)?.class_name===plannerMapClass))status.textContent="В черновике этого класса пока нет расставленных уроков. Добавьте нагрузку и расставьте уроки или используйте автоподбор.";
+  map.querySelectorAll("[data-map-target]").forEach(target=>target.onclick=()=>{
+    const cell=target.closest("[data-map-day]");if(plannerMapSelected!==null&&cell)movePlannerLesson(plannerMapSelected,cell.dataset.mapDay,Number(cell.dataset.mapLesson));
+  });
+  map.querySelectorAll("[data-map-index]").forEach(chip=>{
+    let pointer=null,suppressClick=false;
+    chip.onclick=()=>{if(suppressClick){suppressClick=false;return;}if(plannerMapBusy)return;const index=Number(chip.dataset.mapIndex);plannerMapSelected=plannerMapSelected===index?null:index;renderPlannerMap();};
+    chip.onpointerdown=e=>{if(plannerMapBusy||e.button!==0)return;pointer={id:e.pointerId,x:e.clientX,y:e.clientY,drag:false};chip.setPointerCapture(e.pointerId);};
+    chip.onpointermove=e=>{if(!pointer||e.pointerId!==pointer.id)return;if(Math.hypot(e.clientX-pointer.x,e.clientY-pointer.y)>8){pointer.drag=true;chip.classList.add("dragging");}};
+    chip.onpointercancel=()=>{pointer=null;chip.classList.remove("dragging");};
+    chip.onpointerup=e=>{if(!pointer||e.pointerId!==pointer.id)return;const wasDrag=pointer.drag;pointer=null;chip.classList.remove("dragging");if(!wasDrag)return;
+      suppressClick=true;const target=document.elementFromPoint(e.clientX,e.clientY)?.closest("[data-map-day]");
+      if(target&&map.contains(target))movePlannerLesson(Number(chip.dataset.mapIndex),target.dataset.mapDay,Number(target.dataset.mapLesson));
+      else {status.textContent="Перенос отменён: выберите ячейку на карте.";setTimeout(()=>{suppressClick=false;},0);}
+    };
+  });
+}
+async function movePlannerLesson(index,day,lesson){
+  if(plannerMapBusy)return;plannerMapBusy=true;$("plannerMapStatus").textContent="Сохраняем перенос…";
+  try{const data=await api("/api/admin/planner/move",{method:"POST",body:{revision:plannerProject.revision,index,day,lesson}});
+    plannerProject=data.project;plannerIssues=data.issues;plannerMapSelected=null;plannerRender();$("plannerMapStatus").textContent="Урок перенесён в черновике.";
+  }catch(error){$("plannerMapStatus").textContent=error.message;}finally{plannerMapBusy=false;}
+}
+
 function plannerError(e){const box=$("plannerMessage"); if(box) box.innerHTML=`<div class="alert err">${esc(e.message)}</div>`;}
 async function plannerLoad(){try{const data=await api("/api/admin/planner");plannerProject=data.project;plannerIssues=data.issues;plannerRender();}catch(e){plannerRoot.classList.remove("hidden");plannerRoot.innerHTML=`<div class="alert err">${esc(e.message)}</div>`;}}
 async function plannerChange(update){
