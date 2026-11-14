@@ -116,12 +116,40 @@ function plannerRender(){
   $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
   $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }
+function suggestImportGroups(rows,existing){
+  // Повторяем порядок сохранения на сервере: сначала существующая нагрузка,
+  // затем новые строки файла. Сопоставления, ещё не подтверждённые, не учитываются.
+  const buckets=new Map(),result=rows.map(()=>"");
+  const key=(cls,subject)=>JSON.stringify([cls,subject]);
+  const add=(cls,subject,teacher,group,index)=>{
+    const k=key(cls,subject);if(!buckets.has(k))buckets.set(k,[]);
+    const bucket=buckets.get(k);let item=bucket.find(x=>x.teacher===teacher);
+    if(!item){item={teacher,group:group||"",indices:[]};bucket.push(item);}
+    if(index!==null)item.indices.push(index);
+  };
+  existing.forEach(x=>add(x.class_name,x.subject,x.teacher,x.group,null));
+  rows.forEach((x,i)=>{if(x.class_name&&x.subject&&x.teacher)add(x.class_name,x.subject,x.teacher,"",i);});
+  for(const bucket of buckets.values()){
+    if(bucket.length<2)continue;
+    const used=new Set(bucket.map(x=>x.group.toLocaleLowerCase("ru-RU")).filter(Boolean));
+    for(const item of bucket){
+      if(!item.group){let n=1;while(used.has(`${n} группа`))n++;item.group=`${n} группа`;used.add(item.group);}
+      item.indices.forEach(i=>{result[i]=item.group;});
+    }
+  }
+  return result;
+}
+
 function renderLoadImportPreview(data){
   const root=$("loadImportPreview"),labels={teacher:"Учитель",subject:"Предмет",class_name:"Класс"};
   const field=(row,index,key)=>{const match=row.matches[key];return `<label>${labels[key]}: ${esc(row[key])}<select required data-import-row="${index}" data-import-field="${key}" data-suggestion="${esc(match.suggestion)}"><option value="">${match.suggestion?'Предложение: '+esc(match.suggestion)+' — подтвердите':'Выберите из справочника'}</option>${data.choices[key].map(name=>`<option value="${esc(name)}"${match.value===name?' selected':''}>${esc(name)}</option>`).join('')}</select></label>`;};
-  root.innerHTML=`<p>Найдено записей: ${data.rows.length}. Неточные и неоднозначные совпадения необходимо подтвердить или выбрать вручную. Кабинеты можно назначить после импорта. Текущий автоподбор ограничен 150 уроками в неделю.</p><button type="button" class="btn secondary" id="loadImportAcceptSuggestions">Принять все предложенные совпадения</button><form id="loadImportApply"><div class="load-import-rows">${data.rows.map((row,i)=>`<div class="load-import-row"><strong>Строка ${row.line} · ${row.per_week} ч/нед</strong>${field(row,i,'teacher')}${field(row,i,'class_name')}${field(row,i,'subject')}</div>`).join('')}</div><button class="btn" type="submit">Сохранить нагрузку в черновик</button></form>`;
-  $("loadImportAcceptSuggestions").onclick=()=>{if(!confirm("Вы проверили все предложенные совпадения? Они будут выбраны для сохранения."))return;root.querySelectorAll('[data-suggestion]').forEach(el=>{if(!el.value&&el.dataset.suggestion)el.value=el.dataset.suggestion;});};
-  $("loadImportApply").onsubmit=async e=>{e.preventDefault();const rows=data.rows.map(row=>({per_week:row.per_week}));root.querySelectorAll('[data-import-row]').forEach(el=>{rows[Number(el.dataset.importRow)][el.dataset.importField]=el.value;});
+  root.innerHTML=`<p>Найдено записей: ${data.rows.length}. Неточные и неоднозначные совпадения необходимо подтвердить или выбрать вручную. Для одного класса и предмета у разных учителей предлагаются группы по порядку; существующие назначения сохраняются. После импорта группы можно переставить. Кабинеты можно назначить после импорта. Текущий автоподбор ограничен 150 уроками в неделю.</p><button type="button" class="btn secondary" id="loadImportAcceptSuggestions">Принять все предложенные совпадения</button><form id="loadImportApply"><div class="load-import-rows">${data.rows.map((row,i)=>`<div class="load-import-row"><strong>Строка ${row.line} · ${row.per_week} ч/нед</strong>${field(row,i,'teacher')}${field(row,i,'class_name')}${field(row,i,'subject')}<span class="load-import-group" data-import-group="${i}" aria-live="polite"></span></div>`).join('')}</div><button class="btn" type="submit">Сохранить нагрузку в черновик</button></form>`;
+  const selectedRows=()=>{const rows=data.rows.map(row=>({per_week:row.per_week}));root.querySelectorAll('[data-import-row]').forEach(el=>{rows[Number(el.dataset.importRow)][el.dataset.importField]=el.value;});return rows;};
+  const updateGroups=()=>{const rows=selectedRows(),groups=suggestImportGroups(rows,plannerProject?.loads||[]);root.querySelectorAll('[data-import-group]').forEach(el=>{const i=Number(el.dataset.importGroup),row=rows[i];el.textContent=!row.teacher||!row.subject||!row.class_name?"Группа: подтвердите сопоставления":groups[i]?`Предлагается: ${groups[i]}`:"Весь класс (другой учитель не указан)";});};
+  root.querySelectorAll('[data-import-row]').forEach(el=>{el.onchange=updateGroups;});
+  $("loadImportAcceptSuggestions").onclick=()=>{if(!confirm("Вы проверили все предложенные совпадения? Они будут выбраны для сохранения."))return;root.querySelectorAll('[data-suggestion]').forEach(el=>{if(!el.value&&el.dataset.suggestion)el.value=el.dataset.suggestion;});updateGroups();};
+  updateGroups();
+  $("loadImportApply").onsubmit=async e=>{e.preventDefault();const rows=selectedRows();
     if(rows.some(row=>!row.teacher||!row.subject||!row.class_name)){toast("Выберите все совпадения");return;}
     if(!confirm(`Сохранить ${rows.length} записей нагрузки в черновик?`))return;
     try{const result=await api("/api/admin/planner/load-import/apply",{method:"POST",body:{revision:data.revision,rows}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast(`Добавлено: ${result.added}, обновлено: ${result.updated}`);}catch(error){plannerError(error);}
