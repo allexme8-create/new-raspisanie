@@ -356,3 +356,6 @@ footer a{color:var(--muted)}
   .planner-actions .btn{min-height:44px}
   .planner-check{padding:9px}
 }
+
+.lesson-group+.lesson-group{margin-top:8px;padding-top:7px;border-top:1px solid var(--line)}
+.group-name,.teacher-group{display:block;font-size:11px;font-weight:700;color:var(--muted)}

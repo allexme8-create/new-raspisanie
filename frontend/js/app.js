@@ -268,6 +268,8 @@ function cellLabel(cell){
 function cellFor(cls,day,lesson){
   const t=state.teachers?.grid[day]?.[lesson]?.[cls];
   const s=state.subjects?.grid[day]?.[lesson]?.[cls];
+  const groups=Array.isArray(s?.groups)?s.groups:Array.isArray(t?.groups)?t.groups:[];
+  if(groups.some(g=>g.group))return groups.map(g=>`<div class="lc lesson-group"><div class="group-name">${esc(g.group||"Весь класс")}</div><div class="subj">${esc(g.subject||"")}</div><div class="teach">${esc(g.teacher||"")}</div>${g.room?`<div class="rb"><span class="room-badge">${esc(g.room)}</span></div>`:""}</div>`).join("");
   const tText=cellLabel(t),sText=cellLabel(s);
   if(!tText && !sText) return "";
   let title,sub="";
@@ -355,6 +357,11 @@ function teacherDayRows(name,dayName){
       const c=state.teachers?.grid[dayName]?.[entry.raw]?.[cls];
       if(!c||!c.names.includes(name)) continue;
       const s=state.subjects?.grid[dayName]?.[entry.raw]?.[cls];
+      const groups=Array.isArray(c.groups)?c.groups:[];
+      if(groups.some(g=>g.group)){
+        for(const g of groups.filter(g=>g.teacher===name))rows.push({day:dayName,timeShift:entry.timeShift,l:entry.lesson,displayLesson:entry.displayLesson,order:entry.order,beforeSecondShift:entry.beforeSecondShift,cls,shift,subj:g.subject||"",group:g.group||"",rooms:g.room?[g.room]:[],time:entry.time});
+        continue;
+      }
       const teacherIndex=c.names.indexOf(name), teacherCount=c.names.length;
       const subjectNames=s&&!SERVICE.has(s.raw)?(s.names||[]):[];
       let subj="";
@@ -372,7 +379,7 @@ function teacherDayRows(name,dayName){
 }
 const trowHTML=r=>`<div class="trow" ${lessonAttributes(r.day,r.timeShift,r.l)}>
   ${lessonMarker(r.displayLesson??r.l,r.time)}
-  <span class="tcls">${esc(r.cls)}</span>
+  <span class="tcls">${esc(r.cls)}${r.group?`<small class="teacher-group">${esc(r.group)}</small>`:""}</span>
   <span class="tsubj">${r.subj?esc(r.subj):'<span class="muted">—</span>'}</span>
   <span class="trooms">${r.rooms.map(x=>`<span class="room-badge">${esc(x)}</span>`).join(" ")||'<span class="muted">без каб.</span>'}</span>
 </div>`;
@@ -540,12 +547,15 @@ function roomOccupancyAt(now){
       const teach=t&&!SERVICE.has(t.raw)?cellLabel(t):"";
       const who=[subj,teach].filter(Boolean).join(" · ");
       for(const room of rooms){
+        const groupRecords=Array.isArray(s?.groups)?s.groups:[];
+        const roomGroups=groupRecords.filter(g=>roomKey(g.room)===roomKey(room));
+        const roomWho=roomGroups.length?roomGroups.map(g=>[g.group,g.subject,g.teacher].filter(Boolean).join(" · ")).join("; "):who;
         const info=byRoom[roomKey(room)]??(byRoom[roomKey(room)]={active:[],next:null,unknown:false});
         if(!valid){info.unknown=true;continue;}
         if(start<=minute&&minute<end){
           const existing=info.active.find(item=>item.cls===cls);
-          if(existing){if(who&&!existing.who.includes(who))existing.who.push(who);}
-          else info.active.push({cls,who:who?[who]:[]});
+          if(existing){if(roomWho&&!existing.who.includes(roomWho))existing.who.push(roomWho);}
+          else info.active.push({cls,who:roomWho?[roomWho]:[]});
         }else if(start>minute&&(info.next===null||start<info.next.minutes)){
           info.next={minutes:start,label:period.start};
         }

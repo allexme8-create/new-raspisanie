@@ -270,6 +270,26 @@ class PlannerTests(unittest.TestCase):
         self.assertEqual(subjects["numbering"], "local")
         self.assertEqual(teachers["grid"]["Пн"]["1"]["5а"]["rooms"], ["101"])
 
+    def test_parallel_groups_conflicts_limits_generation_and_publication(self):
+        p=project();p.classes=p.classes[:1];p.classes[0].max_daily=1
+        p.loads=[planner.Load(id="g1",class_name="5а",subject="Математика",teacher="Учитель",room="101",per_week=1,group="1 группа"),planner.Load(id="g2",class_name="5а",subject="Математика",teacher="Другой",room="102",per_week=1,group="2 группа")]
+        p.placements=[planner.Placement(load_id="g1",day="Пн",lesson=1),planner.Placement(load_id="g2",day="Пн",lesson=1)]
+        self.assertEqual(planner.issues(p,bells(),complete=True),[])
+        teacher_grid,subject_grid=planner.public_grids(p)
+        cell=subject_grid["grid"]["Пн"]["1"]["5а"]
+        self.assertEqual([g["group"] for g in cell["groups"]],["1 группа","2 группа"])
+        self.assertEqual(cell["names"],["Математика","Математика"])
+        self.assertEqual(teacher_grid["grid"]["Пн"]["1"]["5а"]["rooms"],["101","102"])
+        p.loads[1].group="1 ГРУППА";self.assertTrue(any("группа" in e for e in planner.issues(p,bells())))
+        p.loads[1].group="";self.assertTrue(any("группа" in e for e in planner.issues(p,bells())))
+        p.loads[1].group="2 группа";p.loads[1].teacher="Учитель";self.assertTrue(any("учитель" in e for e in planner.issues(p,bells())))
+        p.loads[1].teacher="Другой";p.loads[1].room="101";self.assertTrue(any("кабинет" in e for e in planner.issues(p,bells())))
+        p.loads[1].room="102";p.placements=[]
+        b={"shifts":{"1":{"Пн":{"1":{"start":"08:00","end":"08:40"}}},"2":{}}}
+        generated,error=planner.generate(p,b)
+        self.assertIsNotNone(generated,error);self.assertEqual([(x.day,x.lesson) for x in generated.placements],[("Пн",1),("Пн",1)])
+        self.assertEqual(planner.issues(generated,b,complete=True),[])
+
     def test_daily_limits_and_missing_bells(self):
         p = project()
         p.classes[0].max_daily = 1

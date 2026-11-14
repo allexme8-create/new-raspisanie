@@ -49,6 +49,12 @@ class Load(BaseModel):
     room: str
     per_week: int = Field(ge=1, le=36)
     max_per_day: int = Field(default=1, ge=1, le=12)
+    group: str = Field(default="", max_length=80)
+
+    @field_validator("group")
+    @classmethod
+    def clean_group(cls, value: str) -> str:
+        return " ".join(value.split())
 
 
 class Placement(BaseModel):
@@ -116,7 +122,7 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
     classes = {x.name: x for x in project.classes}
     teachers = {x.name: x for x in project.teachers}
     counts: Counter = Counter()
-    days: Counter = Counter()
+    days: dict[tuple[str, str], set[int]] = {}
     subjects: Counter = Counter()
     scheduled = []
     for p in project.placements:
@@ -124,7 +130,7 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
         cls = classes[load.class_name]
         label = f"{p.day}, урок {p.lesson}, {load.class_name}"
         counts[load.id] += 1
-        days[(load.class_name, p.day)] += 1
+        days.setdefault((load.class_name, p.day), set()).add(p.lesson)
         subjects[(load.id, p.day)] += 1
         time = period(bells, p.day, cls.shift, p.lesson)
         if not time:
@@ -139,14 +145,14 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
         for other, other_load, other_time in scheduled:
             if p.day == other.day and time[0] < other_time[1] and other_time[0] < time[1]:
                 shared = []
-                if load.class_name == other_load.class_name: shared.append("класс")
+                if load.class_name == other_load.class_name and (not load.group or not other_load.group or load.group.casefold() == other_load.group.casefold() or p.lesson != other.lesson): shared.append("класс или группа")
                 if load.teacher == other_load.teacher: shared.append("учитель")
                 if load.room == other_load.room: shared.append("кабинет")
                 if shared:
                     errors.append(f"{label}: конфликт ({', '.join(shared)}) с {other_load.class_name}, урок {other.lesson}.")
         scheduled.append((p, load, time))
-    for (name, day), count in days.items():
-        if count > classes[name].max_daily:
+    for (name, day), lessons in days.items():
+        if len(lessons) > classes[name].max_daily:
             errors.append(f"{day}, {name}: превышен дневной предел уроков.")
     for (load_id, day), count in subjects.items():
         if count > loads[load_id].max_per_day:
@@ -186,8 +192,8 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
     daily_class, daily_load = Counter(), Counter()
     for p in work.placements:
         load = loads[p.load_id]
-        occupied[p.day].append((load, period(bells, p.day, classes[load.class_name].shift, p.lesson)))
-        daily_class[(load.class_name, p.day)] += 1
+        occupied[p.day].append((load, period(bells, p.day, classes[load.class_name].shift, p.lesson), p.lesson))
+        daily_class[(load.class_name, p.day, p.lesson)] += 1
         daily_load[(load.id, p.day)] += 1
     remaining.sort(key=lambda load: len(slots[classes[load.class_name].shift]))
     nodes = 0
@@ -200,20 +206,20 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
         for day, lesson, time in choices:
             nodes += 1
             if nodes > node_limit: return False
-            if daily_class[(load.class_name, day)] >= cls.max_daily or daily_load[(load.id, day)] >= load.max_per_day:
+            if (not daily_class[(load.class_name, day, lesson)] and sum(1 for (name, d, _), count in daily_class.items() if name == load.class_name and d == day and count > 0) >= cls.max_daily) or daily_load[(load.id, day)] >= load.max_per_day:
                 continue
             if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked[load.teacher]):
                 continue
             if any(time[0] < t[1] and t[0] < time[1] and
-                   (load.class_name == other.class_name or load.teacher == other.teacher or load.room == other.room)
-                   for other, t in occupied[day]):
+                   ((load.class_name == other.class_name and (not load.group or not other.group or load.group.casefold()==other.group.casefold() or time != t or lesson != other_lesson)) or load.teacher == other.teacher or load.room == other.room)
+                   for other, t, other_lesson in occupied[day]):
                 continue
             work.placements.append(Placement(load_id=load.id, day=day, lesson=lesson))
-            occupied[day].append((load, time))
-            daily_class[(load.class_name, day)] += 1
+            occupied[day].append((load, time, lesson))
+            daily_class[(load.class_name, day, lesson)] += 1
             daily_load[(load.id, day)] += 1
             if search(index + 1): return True
-            daily_class[(load.class_name, day)] -= 1
+            daily_class[(load.class_name, day, lesson)] -= 1
             daily_load[(load.id, day)] -= 1
             occupied[day].pop()
             work.placements.pop()
@@ -228,8 +234,12 @@ def public_grids(project: Project) -> tuple[dict, dict]:
     teachers, subjects = {"classes": classes, "grid": {}, "numbering": "local"}, {"classes": classes, "grid": {}, "numbering": "local"}
     for placement in project.placements:
         load = loads[placement.load_id]
+        record={"group":load.group,"teacher":load.teacher,"subject":load.subject,"room":load.room}
         for grid, name in ((teachers, load.teacher), (subjects, load.subject)):
-            grid["grid"].setdefault(placement.day, {}).setdefault(str(placement.lesson), {})[load.class_name] = {
-                "raw": name, "names": [name], "rooms": [load.room]
-            }
+            cells=grid["grid"].setdefault(placement.day, {}).setdefault(str(placement.lesson), {})
+            cell=cells.setdefault(load.class_name, {"raw":"", "names":[], "rooms":[], "groups":[]})
+            cell["names"].append(name)
+            cell["rooms"].append(load.room)
+            cell["groups"].append(record.copy())
+            cell["raw"] = ", ".join(cell["names"])
     return teachers, subjects

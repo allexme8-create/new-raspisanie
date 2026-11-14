@@ -196,6 +196,18 @@ vm.runInContext(`Date=FixedDate`,context);
 assert.match(result.week,/data-lesson-day="Пн"/);
 assert.match(result.split,/data-lesson-start=/);
 
+// Данные групп показывают правильного учителя и кабинет в классе и у каждого учителя.
+vm.runInContext(`{
+ const savedT=state.teachers,savedS=state.subjects,savedClasses=state.classes,savedShifts=state.secondShiftClasses;
+ const groups=[{group:'1 группа',teacher:'Иванова ИИ',subject:'Английский',room:'101'},{group:'2 группа',teacher:'Петрова ПП',subject:'Английский',room:'102'}];
+ state.classes=['5а'];state.secondShiftClasses=[];
+ state.teachers={numbering:'local',grid:{Пн:{'1':{'5а':{names:['Иванова ИИ','Петрова ПП'],rooms:['101','102'],groups}}}}};
+ state.subjects={numbering:'local',grid:{Пн:{'1':{'5а':{names:['Английский','Английский'],rooms:['101','102'],groups}}}}};
+ globalThis.groupCell=cellFor('5а','Пн','1');globalThis.groupTeacher=teacherDayRows('Петрова ПП','Пн')[0];globalThis.groupRooms=roomOccupancyAt(new Date(2026,10,9,8,30)).byRoom;
+ state.teachers=savedT;state.subjects=savedS;state.classes=savedClasses;state.secondShiftClasses=savedShifts;
+}`,context);
+assert.match(context.groupCell,/1 группа/);assert.match(context.groupCell,/2 группа/);assert.match(context.groupCell,/Иванова ИИ/);assert.equal(context.groupTeacher.group,'2 группа');assert.deepEqual(Array.from(context.groupTeacher.rooms),['102']);assert.match(context.groupRooms['101'].active[0].who[0],/Иванова ИИ/);assert.doesNotMatch(context.groupRooms['101'].active[0].who[0],/Петрова ПП/);
+
 // Во время пересечения расписаний двух смен показываются оба номера урока.
 vm.runInContext(`
   Date = class extends FixedDate { constructor(...args){ args.length?super(...args):super(2026,10,9,13,50,0,0); } };
