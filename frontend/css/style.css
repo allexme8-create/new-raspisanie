@@ -325,3 +325,11 @@ footer a{color:var(--muted)}
 .planner-catalog-list .planner-remove{min-width:40px;min-height:40px}
 .planner-grid section h3{margin:10px 0 4px}
 @media(max-width:640px){.planner-grid{grid-template-columns:1fr;gap:4px}.planner-actions{gap:5px}.planner-actions .btn{font-size:12px;padding:8px}.planner-grid .planner-form{gap:6px;margin:5px 0}.planner-grid .planner-form label{flex:1 1 90px}}
+
+.planner-catalog-item{display:block!important}
+.planner-item-line{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%}
+.planner-name-edit{border:0;background:none;padding:8px 2px;text-align:left;color:var(--acc);font:inherit;cursor:pointer;overflow-wrap:anywhere;min-height:40px}
+.planner-inline-edit{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0 8px}
+.planner-inline-edit input{flex:1 1 120px;min-width:0;padding:8px;font:inherit;border:1px solid var(--line);border-radius:8px}
+.planner-inline-edit .btn{width:auto;padding:8px}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}

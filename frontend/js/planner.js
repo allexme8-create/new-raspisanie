@@ -12,7 +12,12 @@ const input=(id,label,placeholder,type="text",extra="")=>field(id,label,`<input 
 function plannerRender(){
   const p=plannerProject;
   const openDetails=[...plannerRoot.querySelectorAll("details")].map(d=>d.open);
-  const list=(key,format)=>p[key].length?p[key].map((x,i)=>`<li><span>${format(x)}</span><button type="button" class="planner-remove" data-kind="${key}" data-index="${i}" aria-label="Удалить">✕</button></li>`).join(""):'<li class="muted">Пока нет записей</li>';
+  const list=(key,format)=>p[key].length?p[key].map((x,i)=>{
+    const editable=key==="classes"||key==="teachers";
+    const title=editable?`<button type="button" class="planner-name-edit" data-edit-kind="${key}" data-edit-index="${i}" title="Изменить">${format(x)} ✎</button>`:`<span>${format(x)}</span>`;
+    const form=editable?`<form class="planner-inline-edit hidden" id="plannerEdit-${key}-${i}"><label class="sr-only" for="plannerEditInput-${key}-${i}">Новое название</label><input id="plannerEditInput-${key}-${i}" maxlength="80" required value="${esc(x.name)}"><button class="btn" type="submit">Сохранить</button><button class="btn secondary" type="button" data-edit-cancel>Отмена</button></form>`:"";
+    return `<li class="planner-catalog-item"><div class="planner-item-line">${title}<button type="button" class="planner-remove" data-kind="${key}" data-index="${i}" aria-label="Удалить ${esc(x.name||"запись")}">✕</button></div>${form}</li>`;
+  }).join(""):'<li class="muted">Пока нет записей</li>';
   const loadOptions=p.loads.map(x=>`<option value="${esc(x.id)}">${esc(`${x.class_name} · ${x.subject} · ${x.teacher} · ${x.room}`)}</option>`).join("");
   const nameForm=(type,label)=>`<form data-form="${type}" class="planner-form">${input(`${type}Name`,label,label)}<button class="btn" type="submit">Добавить</button></form>`;
   plannerRoot.innerHTML=`
@@ -30,7 +35,19 @@ function plannerRender(){
     <details open><summary>4. Расстановка уроков</summary><p class="hint">Добавьте уроки вручную или используйте автоподбор. Номер урока указывается внутри смены.</p><form data-form="placements" class="planner-form">${select("placeLoad","Нагрузка",loadOptions)}${select("placeDay","День",dayOptions)}${select("placeLesson","Урок",numberOptions)}<button class="btn">Поставить</button></form><ul class="planner-list planner-placements">${list("placements",x=>{const load=p.loads.find(l=>l.id===x.load_id);return `${esc(x.day)} · урок ${x.lesson} · ${esc(load?.class_name||"")} · ${esc(load?.subject||"")} · ${esc(load?.teacher||"")}`;})}</ul></details>
     <div class="planner-check"><b>Проверка перед публикацией</b>${plannerIssues.length?`<ul>${plannerIssues.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:'<p class="tag-ok">Конфликтов и нераспределённой нагрузки нет.</p>'}</div>`;
   plannerRoot.querySelectorAll("details").forEach((d,i)=>{if(openDetails[i]!==undefined)d.open=openDetails[i];});
-  plannerRoot.querySelectorAll("form").forEach(form=>form.onsubmit=plannerSubmit);
+  plannerRoot.querySelectorAll("form[data-form]").forEach(form=>form.onsubmit=plannerSubmit);
+  plannerRoot.querySelectorAll("[data-edit-kind]").forEach(button=>button.onclick=()=>{
+    const kind=button.dataset.editKind,index=Number(button.dataset.editIndex),form=$(`plannerEdit-${kind}-${index}`),input=$(`plannerEditInput-${kind}-${index}`);
+    form.classList.remove("hidden");input.focus();input.select();
+    form.querySelector("[data-edit-cancel]").onclick=()=>form.classList.add("hidden");
+    form.onsubmit=async e=>{
+      e.preventDefault();const newName=input.value.trim();if(!newName){input.reportValidity();return;}
+      form.querySelectorAll("button").forEach(b=>b.disabled=true);
+      try{const data=await api(`/api/admin/planner/rename/${kind}`,{method:"POST",body:{revision:plannerProject.revision,old_name:plannerProject[kind][index].name,new_name:newName}});
+        plannerProject=data.project;plannerIssues=data.issues;plannerRender();document.dispatchEvent(new Event("planner-catalog-changed"));}
+      catch(error){form.querySelectorAll("button").forEach(b=>b.disabled=false);plannerError(error);}
+    };
+  });
   plannerRoot.querySelectorAll("[data-kind]").forEach(b=>b.onclick=()=>{
     const kind=b.dataset.kind,index=Number(b.dataset.index),item=plannerProject[kind][index];
     if(["classes","teachers"].includes(kind)){

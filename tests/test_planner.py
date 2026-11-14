@@ -97,6 +97,31 @@ class PlannerTests(unittest.TestCase):
             for old_path in ("/teacher", "/Director", "/associate"):
                 self.assertEqual(client.get(old_path).status_code, 404)
 
+    def test_planner_rename_updates_loads_and_class_leadership(self):
+        old=copy.deepcopy(backend.state)
+        with tempfile.TemporaryDirectory() as folder:
+            store=staff.Store(Path(folder)/"staff.sqlite3");store.init()
+            with store.connect() as db:
+                db.execute("INSERT INTO users (id,email,role,password_hash,must_change,active,created_at,homeroom_class) VALUES (?,?,?, ?,0,1,?,?)",("t","t@example.com","teacher","hash","2026-01-01","5а"))
+                db.execute("INSERT INTO duty_assignments(day,slot,user_id,class_name) VALUES (?,?,?,?)",("2026-01-01",1,"t","5а"))
+            try:
+                backend.state["planner"]=project().model_dump()
+                with patch.object(backend,"staff_store",store),patch.object(backend,"_save_state"):
+                    with self.assertRaises(backend.HTTPException):
+                        backend.planner_rename("classes",backend.PlannerRename(revision=2,old_name="5а",new_name="5б"))
+                    result=backend.planner_rename("classes",backend.PlannerRename(revision=0,old_name="5а",new_name="5б"))
+                    self.assertEqual(result["project"]["loads"][0]["class_name"],"5б")
+                    with store.connect() as db:
+                        self.assertEqual(db.execute("SELECT homeroom_class FROM users").fetchone()[0],"5б")
+                        self.assertEqual(db.execute("SELECT class_name FROM duty_assignments").fetchone()[0],"5а")
+                    result=backend.planner_rename("teachers",backend.PlannerRename(revision=1,old_name="Учитель",new_name="Иванов ИИ"))
+                    self.assertEqual(result["project"]["teachers"][0]["name"],"Иванов И.И.")
+                    self.assertEqual(result["project"]["loads"][0]["teacher"],"Иванов И.И.")
+                    self.assertEqual(backend.normalize_teacher_initials("Петров А. Б."),"Петров А.Б.")
+                    self.assertEqual(backend.normalize_teacher_initials("Петров Антон Борисович"),"Петров Антон Борисович")
+            finally:
+                backend.state.clear();backend.state.update(old)
+
     def test_import_schedule_teachers_once_without_duplicates_or_service_rows(self):
         old=copy.deepcopy(backend.state)
         try:
@@ -106,14 +131,14 @@ class PlannerTests(unittest.TestCase):
             with patch.object(backend,"_save_state") as save:
                 backend.migrate_schedule_teachers()
                 names=[x.name for x in backend._planner_project().teachers]
-                self.assertEqual(names,["Учитель","Другой","Иванов ИИ","Петрова АА"])
+                self.assertEqual(names,["Учитель","Другой","Иванов И.И.","Петрова А.А."])
                 self.assertTrue(backend.state["planner_teachers_imported"])
                 self.assertEqual(len(backend._planner_project().loads),2)
                 self.assertEqual(save.call_count,1)
-                backend.state["planner"]["teachers"]=[x for x in backend.state["planner"]["teachers"] if x["name"]!="Иванов ИИ"]
+                backend.state["planner"]["teachers"]=[x for x in backend.state["planner"]["teachers"] if x["name"]!="Иванов И.И."]
                 backend.migrate_schedule_teachers()
-                self.assertNotIn("Иванов ИИ",[x.name for x in backend._planner_project().teachers])
-                self.assertEqual(backend.import_schedule_teachers()["added"],["Иванов ИИ"])
+                self.assertNotIn("Иванов И.И.",[x.name for x in backend._planner_project().teachers])
+                self.assertEqual(backend.import_schedule_teachers()["added"],["Иванов И.И."])
                 self.assertEqual(backend.import_schedule_teachers()["added"],[])
         finally:
             backend.state.clear();backend.state.update(old)

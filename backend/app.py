@@ -71,6 +71,7 @@ state: dict = {
     "planner": None,
     "planner_class_imported": False,
     "planner_teachers_imported": False,
+    "planner_initials_normalized": False,
 }
 
 _revoked_tokens: set[str] = set()
@@ -88,7 +89,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -346,6 +347,43 @@ def _import_schedule_classes() -> list[str]:
     return added
 
 
+def normalize_teacher_initials(name: str) -> str:
+    name = " ".join(name.split())
+    match = re.fullmatch(r"(.+?)\s+([А-ЯЁA-Z](?:\.?\s*[А-ЯЁA-Z]){0,2}\.?)", name)
+    if not match:
+        return name
+    letters = re.findall(r"[А-ЯЁA-Z]", match.group(2))
+    return match.group(1) + " " + "".join(letter + "." for letter in letters)
+
+
+def normalize_project_teachers(project: planner.Project) -> None:
+    changes = {teacher.name: normalize_teacher_initials(teacher.name) for teacher in project.teachers}
+    if len({name.casefold() for name in changes.values()}) != len(changes):
+        raise ValueError("Учителя совпадают после добавления точек к инициалам. Исправьте повторяющиеся имена.")
+    for teacher in project.teachers:
+        teacher.name = changes[teacher.name]
+    for load in project.loads:
+        load.teacher = changes.get(load.teacher, normalize_teacher_initials(load.teacher))
+
+
+@app.on_event("startup")
+def migrate_teacher_initials():
+    with _planner_lock:
+        if state.get("planner_initials_normalized"):
+            return
+        project = _planner_project()
+        before = project.model_dump()
+        try:
+            normalize_project_teachers(project)
+        except ValueError:
+            return
+        if project.model_dump() != before:
+            project.revision += 1
+            state["planner"] = project.model_dump()
+        state["planner_initials_normalized"] = True
+        _save_state()
+
+
 def _import_schedule_teachers() -> list[str]:
     """Добавить имена из опубликованной сетки в справочник, не меняя учётные записи."""
     source = state.get("teachers") or {}
@@ -357,11 +395,11 @@ def _import_schedule_teachers() -> list[str]:
                     name = str(raw).strip()
                     if not name or name in {"Классный час", "СФУ", "Экскурсия"}:
                         continue
-                    if source.get("numbering") != "local" and not re.fullmatch(r"[А-ЯЁ][а-яё-]+(?:\s+[А-ЯЁ]{1,3}\.?)?", name):
+                    if source.get("numbering") != "local" and not re.fullmatch(r"[А-ЯЁ][а-яё-]+(?:\s+(?:[А-ЯЁ]\.?){1,3})?", name):
                         continue
-                    names.add(name)
+                    names.add(normalize_teacher_initials(name))
     project = _planner_project()
-    existing = {teacher.name.casefold() for teacher in project.teachers}
+    existing = {normalize_teacher_initials(teacher.name).casefold() for teacher in project.teachers}
     added = []
     for name in sorted(names, key=str.casefold):
         if name.casefold() in existing:
@@ -434,6 +472,10 @@ def planner_save(project: planner.Project, _: None = Depends(require_admin)) -> 
     with _planner_lock:
         if project.revision != _planner_project().revision:
             raise HTTPException(status_code=409, detail="Черновик изменён в другом окне. Обновите конструктор перед сохранением.")
+        try:
+            normalize_project_teachers(project)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         errors = planner.references(project)
         if errors:
             raise HTTPException(status_code=422, detail=" ".join(errors[:5]))
@@ -447,6 +489,55 @@ def planner_save(project: planner.Project, _: None = Depends(require_admin)) -> 
         state["planner"] = project.model_dump()
         _save_state()
         return {"project": project.model_dump(), "issues": planner.issues(project, state.get("bell_schedule"), complete=True)}
+
+
+class PlannerRename(BaseModel):
+    revision: int = Field(ge=0)
+    old_name: str = Field(min_length=1, max_length=80)
+    new_name: str = Field(min_length=1, max_length=80)
+
+
+@app.post("/api/admin/planner/rename/{kind}")
+def planner_rename(kind: str, body: PlannerRename, _: None = Depends(require_admin)) -> dict:
+    if kind not in ("classes", "teachers"):
+        raise HTTPException(404, "Неизвестный справочник")
+    name = " ".join(body.new_name.split())
+    if not name:
+        raise HTTPException(422, "Название не может быть пустым")
+    if kind == "teachers":
+        name = normalize_teacher_initials(name)
+    with _planner_lock:
+        project = _planner_project()
+        if body.revision != project.revision:
+            raise HTTPException(409, "Черновик изменён в другом окне. Обновите конструктор.")
+        entries = getattr(project, kind)
+        item = next((x for x in entries if x.name == body.old_name), None)
+        if not item:
+            raise HTTPException(404, "Запись не найдена")
+        if any(x is not item and x.name.casefold() == name.casefold() for x in entries):
+            raise HTTPException(422, "Такая запись уже есть в справочнике")
+        if name == item.name:
+            return {"project":project.model_dump(),"issues":planner.issues(project,state.get("bell_schedule"),complete=True)}
+        old_name=item.name
+        item.name=name
+        for load in project.loads:
+            if kind == "classes" and load.class_name == old_name:
+                load.class_name=name
+            elif kind == "teachers" and load.teacher == old_name:
+                load.teacher=name
+        project.revision += 1
+        previous=state.get("planner")
+        try:
+            with staff_store.connect() as db:
+                db.execute("BEGIN IMMEDIATE")
+                if kind == "classes":
+                    db.execute("UPDATE users SET homeroom_class=? WHERE role='teacher' AND active=1 AND homeroom_class=?", (name,old_name))
+                state["planner"] = project.model_dump()
+                _save_state()
+        except Exception:
+            state["planner"] = previous
+            raise
+        return {"project":project.model_dump(),"issues":planner.issues(project,state.get("bell_schedule"),complete=True)}
 
 
 class PlannerAction(BaseModel):
