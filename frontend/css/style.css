@@ -333,3 +333,26 @@ footer a{color:var(--muted)}
 .planner-inline-edit input{flex:1 1 120px;min-width:0;padding:8px;font:inherit;border:1px solid var(--line);border-radius:8px}
 .planner-inline-edit .btn{width:auto;padding:8px}
 .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+/* Мобильный конструктор: короткие разделы и крупные элементы управления. */
+#plannerRoot{min-width:0}
+#plannerRoot .planner-tools{padding:6px 0}
+#plannerRoot .planner-category{padding:5px 0}
+#plannerRoot .planner-category>summary{padding:8px 2px;min-height:40px}
+.planner-search{width:100%;min-width:0;min-height:42px;margin:8px 0 0;padding:8px 10px;border:1px solid var(--line);border-radius:9px;font:inherit;font-size:16px}
+.planner-main-actions .btn{min-height:44px}
+#plannerRoot .planner-list{max-height:280px;overflow:auto;overscroll-behavior:contain}
+#plannerRoot .planner-remove{min-width:44px;min-height:44px}
+#plannerRoot .planner-name-edit{min-height:44px}
+@media(max-width:640px){
+  #plannerRoot details{padding:8px 0}
+  #plannerRoot summary{min-height:40px;padding:8px 0}
+  #plannerRoot .planner-form{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  #plannerRoot .planner-form label{min-width:0}
+  #plannerRoot .planner-form .btn{min-height:44px;align-self:end}
+  #plannerRoot .planner-form label:has(select){grid-column:span 2}
+  #plannerRoot .planner-inline-edit input{font-size:16px;min-height:44px}
+  #plannerRoot .planner-inline-edit .btn{min-height:44px}
+  .planner-actions .btn{min-height:44px}
+  .planner-check{padding:9px}
+}
