@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=overview-map-1">
+<link rel="stylesheet" href="/css/style.css?v=lesson-colors-1">
 </head>
 <body>
 
@@ -62,6 +62,7 @@
       <summary><h2>Конструктор расписания</h2></summary>
       <details class="published-map-section" id="publishedMapSection">
         <summary><strong>Карта текущего расписания</strong></summary>
+        <p class="hint">Цвет карточки зависит от предмета; близкие цвета могут повторяться. На общей карте снятые уроки в черновике отмечены красным, перенесённые — зелёным.</p>
         <p class="hint">Переносите уроки мышью или пальцем либо выберите урок и нажмите «+». Все параллельные группы ячейки переносятся вместе. Изменения сохраняются отдельно и появятся на сайте только после публикации.</p>
         <details id="overviewMapSection"><summary><strong>Общая карта: классы и учителя</strong></summary><p class="hint">Строки — классы или учителя, столбцы — уроки недели. Выберите урок и ячейку «+» либо перетащите карточку. В одной ячейке параллельные группы переносятся вместе. Красным зачёркнуты снятые уроки, зелёным показаны новые положения в черновике.</p>
           <div class="published-map-controls"><label>Строки <select id="overviewMode"><option value="classes">Классы</option><option value="teachers">Учителя</option></select></label><label>День <select id="overviewDay"><option value="">Вся неделя</option><option>Пн</option><option>Вт</option><option>Ср</option><option>Чт</option><option>Пт</option><option>Сб</option></select></label><label>Поиск <input type="search" id="overviewSearch" placeholder="Класс или учитель"></label><button type="button" id="overviewRefresh" class="btn secondary">Обновить карту</button></div>
@@ -146,8 +147,9 @@
 <div class="toast" id="toast"></div>
 <script src="/js/admin.js?v=admin-upload-2"></script>
 <script src="/js/planner.js?v=class-restrictions-1"></script>
-<script src="/js/published-map.js?v=published-map-1"></script>
-<script src="/js/overview-map.js?v=overview-map-2"></script>
+<script src="/js/lesson-colors.js?v=1"></script>
+<script src="/js/published-map.js?v=published-colors-1"></script>
+<script src="/js/overview-map.js?v=overview-colors-1"></script>
 <script src="/js/staff-admin.js?v=bell-editor-compact-2"></script>
 </body>
 </html>
