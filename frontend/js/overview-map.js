@@ -8,6 +8,7 @@ async function loadOverview(){
 }
 function renderOverview(){
   const data=overviewData,root=$("overviewGrid"),status=$("overviewStatus");if(!data)return;
+  $("overviewPublish").disabled=data.stale||!data.has_changes;
   const teacherMode=$("overviewMode").value==='teachers',dayFilter=$("overviewDay").value,query=$("overviewSearch").value.trim().toLocaleLowerCase('ru-RU');
   const days=dayFilter?[dayFilter]:overviewDays;
   const rows=teacherMode?[...new Set(data.entries.flatMap(e=>e.teachers.names||[]))].sort((a,b)=>a.localeCompare(b,'ru')):data.classes;
@@ -46,6 +47,20 @@ $("overviewClear").onclick=()=>{overviewSelected=null;$("overviewSelected").clas
 $("overviewMapSection").ontoggle=()=>{if($("overviewMapSection").open){loadOverview();loadDatedChanges();}};
 $("overviewMode").onchange=()=>{overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();};
 $("overviewDay").onchange=renderOverview;$("overviewSearch").oninput=renderOverview;$("overviewRefresh").onclick=loadOverview;
+async function overviewCommit(action){
+  if(!overviewData||overviewBusy||(action==='publish'&&(overviewData.stale||!overviewData.has_changes)))return;
+  if(!confirm(action==='publish'?'Опубликовать все изменения карты вместо текущего расписания?':'Отменить все неопубликованные изменения карты?'))return;
+  overviewBusy=true;
+  try{
+    await api(`/api/admin/schedule-map/${action}`,{method:'POST',body:{revision:overviewData.revision}});
+    await loadOverview();
+    if(typeof loadPublishedMap==='function')await loadPublishedMap();
+    if(action==='publish'&&typeof loadStatus==='function')await loadStatus();
+    $("overviewStatus").textContent=action==='publish'?'Расписание опубликовано.':'Изменения карты отменены.';
+  }catch(e){$("overviewStatus").textContent=e.message;}finally{overviewBusy=false;}
+}
+$("overviewReset").onclick=()=>overviewCommit('reset');
+$("overviewPublish").onclick=()=>overviewCommit('publish');
 
 async function loadDatedChanges(){
   try{datedData=await api('/api/admin/dated-schedule-changes');const root=$("datedChangeList");root.innerHTML=datedData.changes.map(c=>`<div class="dated-admin-item"><span>${c.stale?'⚠️ Требует проверки: ':''}<s>${esc(c.source_date)} · ${esc(c.class_name)} · урок ${c.source_lesson} · ${esc(c.subject)} · ${esc(c.teacher)}</s>${c.target_date?` → <b>${esc(c.target_date)} · урок ${c.target_lesson}</b>`:' · отменён'}</span><button type="button" class="btn secondary" data-dated-delete="${esc(c.id)}">Отменить изменение</button></div>`).join('')||'<p class="muted">Изменений на даты нет.</p>';root.querySelectorAll('[data-dated-delete]').forEach(button=>button.onclick=async()=>{if(!confirm('Отменить это разовое изменение?'))return;try{await api(`/api/admin/dated-schedule-changes/${encodeURIComponent(button.dataset.datedDelete)}?revision=${datedData.revision}`,{method:'DELETE'});await loadDatedChanges();$("overviewStatus").textContent='Изменение на дату отменено.';}catch(e){$("overviewStatus").textContent=e.message;}});}
