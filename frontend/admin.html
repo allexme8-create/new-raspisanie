@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=overview-selection-8">
+<link rel="stylesheet" href="/css/style.css?v=overview-single-10">
 </head>
 <body>
 
@@ -64,25 +64,8 @@
         </details>
     <details class="card admin-block">
       <summary><h2>Конструктор расписания</h2></summary>
-      <details class="published-map-section" id="publishedMapSection">
-        <summary><strong>Карта текущего расписания</strong></summary>
-        <p class="hint">Цвет карточки зависит от предмета; близкие цвета могут повторяться. На общей карте снятые уроки в черновике отмечены красным, перенесённые — зелёным.</p>
-        <p class="hint">Переносите уроки мышью или пальцем либо выберите урок и нажмите «+». Все параллельные группы ячейки переносятся вместе. Изменения сохраняются отдельно и появятся на сайте только после публикации.</p>
-
-        <div class="published-map-controls"><label>Класс <select id="publishedMapClass"></select></label><button class="btn secondary" type="button" id="publishedMapRefresh">Обновить карту</button><button class="btn secondary" type="button" id="publishedMapReset">Отменить изменения</button><button class="btn" type="button" id="publishedMapPublish">Опубликовать изменения</button></div>
-        <p class="hint" id="publishedMapStatus" aria-live="polite"></p>
-        <form id="publishedMapEdit" class="planner-form hidden">
-          <p class="hint" id="publishedMapEditTitle"></p>
-          <label>Предметы через запятую<input id="publishedMapSubjects" maxlength="800"></label>
-          <label>Учителя через запятую<input id="publishedMapTeachers" maxlength="800"></label>
-          <label>Кабинеты через запятую<input id="publishedMapRooms" maxlength="800"></label>
-          <button class="btn" type="submit">Сохранить исправления</button>
-          <button class="btn secondary" type="button" id="publishedMapEditClose">Закрыть</button>
-        </form>
-        <div id="publishedMap"></div>
-      </details>
       <button class="btn secondary planner-toggle" id="plannerOpen" type="button">Открыть конструктор</button>
-      <p class="hint">Создавайте черновик независимо от опубликованного расписания. Для проверки и подбора сначала загрузите расписание звонков.</p>
+      <p class="hint">Здесь создаётся новое расписание в отдельном черновике. Для исправления текущего расписания используйте «Общую карту классов и учителей». Для проверки и подбора сначала загрузите расписание звонков.</p>
       <div id="plannerRoot" class="hidden"></div>
     </details>
     <details class="card admin-block">
@@ -150,8 +133,7 @@
 <script src="/js/drag-feedback.js?v=1"></script>
 <script src="/js/planner.js?v=catalog-file-drag-1"></script>
 <script src="/js/lesson-colors.js?v=1"></script>
-<script src="/js/published-map.js?v=published-drag-1"></script>
-<script src="/js/overview-map.js?v=overview-teacher-9"></script>
+<script src="/js/overview-map.js?v=overview-single-10"></script>
 <script src="/js/staff-admin.js?v=bell-editor-compact-2"></script>
 </body>
 </html>
