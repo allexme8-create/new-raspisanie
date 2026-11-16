@@ -14,7 +14,7 @@ function renderOverview(){
   const rows=teacherMode?[...new Set(data.entries.flatMap(e=>e.teachers.names||[]))].sort((a,b)=>a.localeCompare(b,'ru')):data.classes;
   const filtered=rows.filter(x=>x.toLocaleLowerCase('ru-RU').includes(query));
   status.textContent=data.stale?'Опубликованное расписание изменилось. Отмените старый черновик карты, чтобы загрузить актуальные данные.':data.has_changes?'Изменения сохранены в черновике. Публикация доступна под общей картой.':'Показано текущее расписание. Нажмите карточку, затем ячейку назначения.';
-  let html=`<div class="overview-scroll"><div class="overview-table" style="grid-template-columns: minmax(110px,160px) repeat(${days.length*12},minmax(80px,1fr))"><div class="overview-corner">${teacherMode?'Учитель':'Класс'}</div>`;
+  let html=`<div class="overview-scroll"><div class="overview-table" style="grid-template-columns: ${teacherMode?110:68}px repeat(${days.length*12},64px)"><div class="overview-corner">${teacherMode?'Учитель':'Класс'}</div>`;
   for(const day of days)for(let n=1;n<=12;n++)html+=`<div class="overview-head">${day}<br>${n}</div>`;
   for(const row of filtered){html+=`<div class="overview-row-label">${esc(row)}</div>`;for(const day of days)for(let lesson=1;lesson<=12;lesson++){
     const entries=data.entries.filter(e=>e.day===day&&e.lesson===lesson&&(teacherMode?(e.teachers.names||[]).includes(row):e.class_name===row));
