@@ -311,4 +311,7 @@ vm.runInContext(`roomNow=[2026,10,15,10,0]; renderRooms();`, context);
 assert.match(element("roomsSummary").innerHTML, /Воскресенье/);
 assert.equal((element("roomsGrid").innerHTML.match(/Свободен<\/div>/g)||[]).length,2);
 
+vm.runInContext(`state.datedChanges=[{class_name:'5а',teacher:'Иванова ИИ',subject:'<Физика>',source_date:'2026-11-09',source_lesson:1,target_date:'2026-11-10',target_lesson:2,stale:false}]; globalThis.notice=datedChangesHTML('class','5а');globalThis.teacherNotice=datedChangesHTML('teacher','Иванова ИИ');globalThis.otherNotice=datedChangesHTML('class','6а');state.datedChanges[0].stale=true;globalThis.staleNotice=datedChangesHTML('class','5а');`,context);
+assert.match(context.notice,/<s>/);assert.match(context.notice,/&lt;Физика&gt;/);assert.match(context.notice,/dated-moved/);assert.match(context.teacherNotice,/2026-11-10/);assert.equal(context.otherNotice,'');assert.match(context.staleNotice,/Не действует/);assert.doesNotMatch(context.staleNotice,/<s>/);
+
 console.log("Frontend behavior OK: paired teachers, unique rooms, shift-specific times, live lesson countdown.");

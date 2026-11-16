@@ -3,7 +3,7 @@
 const plannerDays=["Пн","Вт","Ср","Чт","Пт","Сб"];
 let plannerProject=null, plannerIssues=[];
 let plannerMapClass="",plannerMapSelected=null,plannerMapBusy=false;
-let roomRulesSelected="",roomRulesShift=1;
+let roomRulesSelected="",roomRulesShift=1,classRulesSelected="",classRulesShift=1;
 const plannerSearch={classes:"",teachers:"",subjects:"",rooms:"",groups:""};
 const plannerRoot=$("plannerRoot");
 const optionList=(items,value="name")=>items.map(x=>`<option value="${esc(x[value])}">${esc(x[value])}</option>`).join("");
@@ -39,10 +39,10 @@ function plannerRender(){
   plannerRoot.innerHTML=`
     <div id="plannerMessage" aria-live="polite"></div><p class="hint">Заполняйте по шагам. Изменения сохраняются в черновике; публикация — отдельное действие. Для автоподбора загрузите расписание звонков.</p><button type="button" id="plannerRefresh" class="btn secondary planner-inline-import">Обновить черновик</button>
     <details><summary>1. Настройка кабинетов · ${p.rooms.length}</summary><div class="planner-grid">
-      <button type="button" id="plannerImportRooms" class="btn secondary planner-inline-import">Импорт из расписания</button>${nameForm("rooms","Кабинет")}<details class="planner-catalog-list"><summary>Список кабинетов (${p.rooms.length})</summary><input class="planner-search" type="search" data-catalog-search="rooms" value="${esc(plannerSearch.rooms)}" placeholder="Поиск кабинета" aria-label="Поиск кабинета"><ul class="planner-list" data-catalog-list="rooms">${list("rooms",x=>esc(x.name))}</ul></details>
+      ${nameForm("rooms","Кабинет")}<details class="planner-catalog-list"><summary>Список кабинетов (${p.rooms.length})</summary><input class="planner-search" type="search" data-catalog-search="rooms" value="${esc(plannerSearch.rooms)}" placeholder="Поиск кабинета" aria-label="Поиск кабинета"><ul class="planner-list" data-catalog-list="rooms">${list("rooms",x=>esc(x.name))}</ul></details>
     </div></details>
     <details><summary>2. Учителя · ${p.teachers.length}</summary><div class="planner-grid">
-      <button type="button" id="plannerImportTeachers" class="btn secondary planner-inline-import">Импорт из расписания</button>${nameForm("teachers","ФИО учителя")}<details class="planner-catalog-list"><summary>Список учителей (${p.teachers.length})</summary><input class="planner-search" type="search" data-catalog-search="teachers" value="${esc(plannerSearch.teachers)}" placeholder="Поиск учителя" aria-label="Поиск учителя"><ul class="planner-list" data-catalog-list="teachers">${list("teachers",x=>esc(x.name))}</ul></details><details class="planner-catalog-list"><summary>Приоритетные кабинеты учителей</summary><p class="hint">При автоподборе предпочитается кабинет учителя; если он занят, подбирается другой из справочника. Кабинет, явно указанный в нагрузке, обязателен и имеет преимущество.</p>${p.teachers.map((teacher,i)=>`<form class="planner-form" data-teacher-room="${i}"><label>${esc(teacher.name)}<select name="room"><option value="">Без предпочтения</option>${p.rooms.map(r=>`<option value="${esc(r.name)}"${r.name===teacher.preferred_room?' selected':''}>${esc(r.name)}</option>`).join("")}</select></label><button class="btn secondary" type="submit">Сохранить</button></form>`).join("")}</details><p class="hint">Это справочник расписания, а не учётные записи сотрудников.</p>
+      ${nameForm("teachers","ФИО учителя")}<details class="planner-catalog-list"><summary>Список учителей (${p.teachers.length})</summary><input class="planner-search" type="search" data-catalog-search="teachers" value="${esc(plannerSearch.teachers)}" placeholder="Поиск учителя" aria-label="Поиск учителя"><ul class="planner-list" data-catalog-list="teachers">${list("teachers",x=>esc(x.name))}</ul></details><details class="planner-catalog-list"><summary>Приоритетные кабинеты учителей</summary><p class="hint">При автоподборе предпочитается кабинет учителя; если он занят, подбирается другой из справочника. Кабинет, явно указанный в нагрузке, обязателен и имеет преимущество.</p>${p.teachers.map((teacher,i)=>`<form class="planner-form" data-teacher-room="${i}"><label>${esc(teacher.name)}<select name="room"><option value="">Без предпочтения</option>${p.rooms.map(r=>`<option value="${esc(r.name)}"${r.name===teacher.preferred_room?' selected':''}>${esc(r.name)}</option>`).join("")}</select></label><button class="btn secondary" type="submit">Сохранить</button></form>`).join("")}</details><p class="hint">Это справочник расписания, а не учётные записи сотрудников.</p>
     </div></details>
     <details><summary>3. Формирование нагрузки · ${p.loads.length}</summary><p class="hint">Сначала заполните классы и предметы, затем загрузите файл или добавьте нагрузку вручную.</p><div class="planner-grid">
       <details class="planner-category"><summary>Классы · ${p.classes.length}</summary><button type="button" id="plannerImportClasses" class="btn secondary planner-inline-import">Импорт из расписания</button><form data-form="classes" class="planner-form">${input("className","Класс","Например, 5а")}${select("classShift","Смена",'<option value="1">1</option><option value="2">2</option>')}${input("classMax","Максимум уроков в день","7","number",'min="1" max="12" value="7"')}<button class="btn">Добавить</button></form><details class="planner-catalog-list"><summary>Список классов (${p.classes.length})</summary><input class="planner-search" type="search" data-catalog-search="classes" value="${esc(plannerSearch.classes)}" placeholder="Поиск класса" aria-label="Поиск класса"><ul class="planner-list" data-catalog-list="classes">${list("classes",x=>`${esc(x.name)} · ${x.shift}-я смена`)}</ul></details></details>
@@ -53,6 +53,7 @@ function plannerRender(){
     </details>
     <details><summary>4. Ограничения и предпочтения</summary>
     <details><summary>Недоступность учителей</summary><p class="hint">Укажите время по звонкам соответствующей смены. Пересечения со второй сменой тоже учитываются.</p><form data-form="unavailable" class="planner-form">${select("unTeacher","Учитель",optionList(p.teachers))}${select("unDay","День",dayOptions)}${select("unShift","Смена",'<option>1</option><option>2</option>')}${select("unLesson","Урок",numberOptions)}<button class="btn">Добавить</button></form><ul class="planner-list">${p.teachers.flatMap((t,ti)=>t.unavailable.map((s,si)=>`<li><span>${esc(t.name)} · ${esc(s.day)} · смена ${s.shift} · урок ${s.lesson}</span><button type="button" class="planner-remove" data-un-teacher="${ti}" data-index="${si}" aria-label="Удалить">✕</button></li>`)).join("")||'<li class="muted">Ограничений нет</li>'}</ul></details>
+    <details><summary>Недоступность классов</summary><p class="hint">Выберите класс и смену, отметьте крестиком уроки, когда класс недоступен. Ограничение повторяется каждую неделю и учитывает пересечения смен по звонкам.</p><div id="classRulesUI"></div></details>
     <details><summary>Ограничения кабинетов</summary><p class="hint">Выберите кабинет и смену. Нажмите на ячейку, чтобы запретить или снова разрешить занятия в это время; запреты повторяются каждую неделю. Учитываются пересечения времени двух смен. Ранее расставленные уроки не перемещаются — конфликты будут показаны при проверке.</p><div id="roomRulesUI"></div></details>
     <details><summary>Предпочтения по урокам · ${p.preferences.length}</summary><p class="hint">Мягкие правила: автоподбор старается соблюдать их в пределах лимита поиска, но может отступить. «Перед» означает непосредственно предыдущий урок в тот же день. Нарушения показаны отдельно и не блокируют публикацию.</p><form data-form="preferences" class="planner-form">${select("prefScope","Кому",'<optgroup label="Параллель">'+Array.from({length:11},(_,i)=>`<option value="grade:${i+1}">${i+1} классы</option>`).join("")+'</optgroup><optgroup label="Класс">'+p.classes.map(c=>`<option value="class:${esc(c.name)}">${esc(c.name)}</option>`).join("")+'</optgroup>')}${select("prefSubject","Предмет",optionList(p.subjects))}${select("prefKind","Предпочтение",'<option value="avoid_lesson">Не ставить на номер урока</option><option value="avoid_before">Не ставить непосредственно перед предметом</option>')}<label id="prefLessonWrap">Номер урока<select id="prefLesson">${numberOptions}</select></label><label id="prefNextWrap" class="hidden">Следующий предмет<select id="prefNext">${optionList(p.subjects)}</select></label><button class="btn" type="submit">Добавить правило</button></form><ul class="planner-list">${p.preferences.map((rule,i)=>`<li><label><input type="checkbox" data-pref-toggle="${i}"${rule.enabled?' checked':''}> ${esc(rule.scope==='grade'?rule.scope_value+' классы':rule.scope_value)} · ${esc(rule.subject)} ${rule.kind==='avoid_lesson'?`не ставить уроком ${rule.lesson}`:`не ставить непосредственно перед ${esc(rule.next_subject)}`}</label><button type="button" class="planner-remove" data-kind="preferences" data-index="${i}" aria-label="Удалить правило">✕</button></li>`).join("")||'<li class="muted">Нет предпочтений</li>'}</ul></details>
     </details>
@@ -70,6 +71,7 @@ function plannerRender(){
   $("plannerMapClass").onchange=()=>{plannerMapClass=$("plannerMapClass").value;plannerMapSelected=null;renderPlannerMap();};
   renderPlannerMap();
   renderRoomRules();
+  renderClassRules();
   function applyCatalogSearch(input){
     const kind=input.dataset.catalogSearch,query=input.value.trim().toLocaleLowerCase("ru-RU");
     plannerSearch[kind]=input.value;
@@ -109,16 +111,9 @@ function plannerRender(){
     try{const data=await api("/api/admin/planner/import-classes",{method:"POST"});await plannerLoad();document.dispatchEvent(new Event("planner-catalog-changed"));toast(data.added.length?`Добавлено классов: ${data.added.length}`:"Все классы из расписания уже добавлены");}
     catch(error){plannerError(error);}
   };
-  $("plannerImportTeachers").onclick=async()=>{
-    try{const data=await api("/api/admin/planner/import-teachers",{method:"POST"});await plannerLoad();toast(data.added.length?`Добавлено учителей: ${data.added.length}`:"Все учителя из расписания уже добавлены");}
-    catch(error){plannerError(error);}
+  $("plannerImportSubjects").onclick=async()=>{
+    try{const data=await api("/api/admin/planner/import-catalog/subjects",{method:"POST"});await plannerLoad();toast(data.added.length?`Добавлено предметов: ${data.added.length}`:"Все данные уже добавлены");}catch(error){plannerError(error);}
   };
-  for(const [id,kind,label] of [["plannerImportSubjects","subjects","предметов"],["plannerImportRooms","rooms","кабинетов"]]){
-    $(id).onclick=async()=>{
-      try{const data=await api(`/api/admin/planner/import-catalog/${kind}`,{method:"POST"});await plannerLoad();toast(data.added.length?`Добавлено ${label}: ${data.added.length}`:`Все данные уже добавлены`);}
-      catch(error){plannerError(error);}
-    };
-  }
   $("plannerImportGroups").onclick=async()=>{
     try{const data=await api("/api/admin/planner/import-groups",{method:"POST"});await plannerLoad();toast(data.added.length?`Добавлено групп: ${data.added.length}`:"Новые группы не найдены");}catch(error){plannerError(error);}
   };
@@ -164,6 +159,19 @@ function renderRoomRules(){
     const day=button.dataset.roomRuleDay,lesson=Number(button.dataset.roomRuleLesson),shift=roomRulesShift,name=roomRulesSelected;
     plannerChange(next=>{const target=next.rooms.find(r=>r.name===name);target.unavailable=target.unavailable||[];const i=target.unavailable.findIndex(s=>s.day===day&&s.shift===shift&&s.lesson===lesson);if(i<0)target.unavailable.push({day,shift,lesson});else target.unavailable.splice(i,1);});
   });
+}
+
+function renderClassRules(){
+  const root=$("classRulesUI"),p=plannerProject;
+  if(!p.classes.length){root.innerHTML='<p class="muted">Сначала добавьте классы.</p>';return;}
+  if(!p.classes.some(c=>c.name===classRulesSelected)){classRulesSelected=p.classes[0].name;classRulesShift=p.classes[0].shift;}
+  const cls=p.classes.find(c=>c.name===classRulesSelected),slots=cls.unavailable||[];
+  let html=`<div class="room-rules-controls"><label>Класс <select id="classRulesClass">${p.classes.map(c=>`<option value="${esc(c.name)}"${c.name===classRulesSelected?' selected':''}>${esc(c.name)}${c.unavailable?.length?` · ${c.unavailable.length}`:''}</option>`).join('')}</select></label><label>Смена <select id="classRulesShift"><option value="1">1</option><option value="2">2</option></select></label></div><p class="hint">✕ — недоступен, + — разрешён.</p><div class="room-rules-scroll"><div class="room-rules-grid"><span class="room-rules-header">Урок</span>${plannerDays.map(d=>`<span class="room-rules-header">${esc(d)}</span>`).join('')}`;
+  for(let n=1;n<=12;n++){html+=`<span class="room-rules-number">${n}</span>`;for(const day of plannerDays){const blocked=slots.some(s=>s.day===day&&s.shift===classRulesShift&&s.lesson===n);html+=`<button type="button" class="room-rule-cell${blocked?' blocked':''}" data-class-rule-day="${day}" data-class-rule-lesson="${n}" aria-pressed="${blocked}" aria-label="${esc(cls.name)}, ${day}, смена ${classRulesShift}, урок ${n}: ${blocked?'недоступен':'доступен'}">${blocked?'✕':'+'}</button>`;}}
+  root.innerHTML=html+'</div></div>';$("classRulesClass").value=classRulesSelected;$("classRulesShift").value=String(classRulesShift);
+  $("classRulesClass").onchange=()=>{classRulesSelected=$("classRulesClass").value;classRulesShift=p.classes.find(c=>c.name===classRulesSelected)?.shift||1;renderClassRules();};
+  $("classRulesShift").onchange=()=>{classRulesShift=Number($("classRulesShift").value);renderClassRules();};
+  root.querySelectorAll('[data-class-rule-day]').forEach(button=>button.onclick=()=>{const day=button.dataset.classRuleDay,lesson=Number(button.dataset.classRuleLesson),shift=classRulesShift,name=classRulesSelected;plannerChange(next=>{const c=next.classes.find(x=>x.name===name);c.unavailable=c.unavailable||[];const i=c.unavailable.findIndex(s=>s.day===day&&s.shift===shift&&s.lesson===lesson);if(i<0)c.unavailable.push({day,shift,lesson});else c.unavailable.splice(i,1);});});
 }
 
 function suggestImportGroups(rows,existing){

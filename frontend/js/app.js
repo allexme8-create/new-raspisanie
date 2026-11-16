@@ -15,7 +15,7 @@ const state={
   classSel:DEF_DAY, teacherSel:DEF_DAY, favDay:DEF_DAY,
   roomOnlyFree:false,
   bellSchedule:null, secondShiftClasses:[],
-  updatedAt:null
+  updatedAt:null, datedChanges:[]
 };
 
 const FAV_KEY="schedule_favorites_v1";
@@ -202,6 +202,7 @@ async function loadSchedule(){
     state.teachers=data.teachers||null;
     state.subjects=data.subjects||null;
     state.bellSchedule=data.bell_schedule||null;
+    state.datedChanges=Array.isArray(data.dated_changes)?data.dated_changes:[];
     state.secondShiftClasses=Array.isArray(data.second_shift_classes)?data.second_shift_classes:[];
     renderDutyBanner();
     state.updatedAt=data.updated_at?formatDate(data.updated_at):null;
@@ -403,6 +404,11 @@ function rebuildAll(){
   if(state.curTeacher && !state.teacherNames.includes(state.curTeacher)) state.curTeacher=null;
   renderClassArea(); renderTeacherArea(); renderRoomsArea(); renderFavArea();
 }
+function datedChangesHTML(kind,name){
+  const changes=state.datedChanges.filter(c=>kind==='class'?c.class_name===name:c.teacher===name);
+  if(!changes.length)return '';
+  return `<section class="dated-public"><strong>Изменения на даты</strong><p class="hint">Действующие разовые изменения имеют преимущество перед обычным недельным расписанием; устаревшие не действуют.</p>${changes.map(c=>`<div class="dated-public-item">${c.stale?'<strong class="dated-stale">Не действует, требует уточнения после обновления расписания: </strong>':''}${c.stale?'':'<s>'}${esc(c.source_date)} · ${esc(c.class_name)} · урок ${esc(c.source_lesson)} · ${esc(c.subject)} · ${esc(c.teacher)}${c.stale?'':'</s>'}${c.target_date?` <span class="${c.stale?'dated-stale':'dated-moved'}">→ ${esc(c.target_date)} · урок ${esc(c.target_lesson)}</span>`:` <span class="${c.stale?'dated-stale':'dated-cancel'}">· отменён</span>`}</div>`).join('')}</section>`;
+}
 function renderClassArea(){
   const box=$("classArea");
   if(!hasData()){ box.innerHTML=noData(); return; }
@@ -412,7 +418,7 @@ function renderClassArea(){
     box.querySelectorAll("[data-cls]").forEach(b=>b.onclick=()=>{state.curClass=b.dataset.cls;renderClassArea();});
     return;
   }
-  box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeClass" type="button">← Все классы</button><strong>Класс ${esc(state.curClass)}</strong></div><div class="lesson-live hidden" id="classCurrentLesson" aria-live="polite"></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="classDuty" aria-live="polite"></div></section><div id="classPanel"></div>`;
+  box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeClass" type="button">← Все классы</button><strong>Класс ${esc(state.curClass)}</strong></div><div class="lesson-live hidden" id="classCurrentLesson" aria-live="polite"></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="classDuty" aria-live="polite"></div></section>${datedChangesHTML('class',state.curClass)}<div id="classPanel"></div>`;
   renderDutyBanner();renderCurrentLesson();
   $("changeClass").onclick=()=>{state.curClass=null;renderClassArea();};
   renderClassPanel();
@@ -476,7 +482,7 @@ function renderTeacherArea(){
     return;
   }
   if(state.curTeacher){
-    box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeTeacher" type="button">← Все учителя</button><strong class="schedule-teacher-name">${esc(state.curTeacher)}</strong></div><div class="lesson-live hidden" id="teacherCurrentLesson" aria-live="polite"></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="teacherDuty" aria-live="polite"></div></section><div id="teacherPanel"></div>`;
+    box.innerHTML=`<div class="schedule-heading"><button class="change-selection" id="changeTeacher" type="button">← Все учителя</button><strong class="schedule-teacher-name">${esc(state.curTeacher)}</strong></div><div class="lesson-live hidden" id="teacherCurrentLesson" aria-live="polite"></div><section class="duty-public" aria-label="Дежурство сегодня"><h3>Дежурство сегодня</h3><div id="teacherDuty" aria-live="polite"></div></section>${datedChangesHTML('teacher',state.curTeacher)}<div id="teacherPanel"></div>`;
     renderDutyBanner();renderCurrentLesson();
     $("changeTeacher").onclick=()=>{state.curTeacher=null;state.teacherQuery="";renderTeacherArea();$("teacherSearch").focus();};
     renderTeacherPanel();
@@ -568,6 +574,7 @@ function renderRoomsArea(){
   const box=$("roomsArea");
   if(!hasData()){ box.innerHTML=noData(); return; }
   box.innerHTML=`
+    ${state.datedChanges.length?'<p class="dated-stale">Статусы кабинетов рассчитаны по обычному недельному расписанию и не учитывают изменения на конкретные даты. Проверьте уведомления в расписании класса или учителя.</p>':''}
     <div class="rooms-controls">
       <label class="chk"><input type="checkbox" id="onlyFree" ${state.roomOnlyFree?'checked':''}> только свободные</label>
     </div>

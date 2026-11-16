@@ -24,6 +24,14 @@ class Named(BaseModel):
 class SchoolClass(Named):
     shift: int = Field(default=1, ge=1, le=2)
     max_daily: int = Field(default=7, ge=1, le=12)
+    unavailable: list[Slot] = Field(default_factory=list, max_length=144)
+
+    @field_validator("unavailable")
+    @classmethod
+    def unique_unavailable(cls, slots):
+        keys=[(s.day,s.shift,s.lesson) for s in slots]
+        if len(keys)!=len(set(keys)): raise ValueError("Ограничение класса повторяется")
+        return slots
 
 
 class ClassGroup(Named):
@@ -208,6 +216,11 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
         if not time:
             errors.append(f"{label}: нет времени звонков для {cls.shift}-й смены.")
             continue
+        for slot in cls.unavailable:
+            unavailable_time = period(bells, slot.day, slot.shift, slot.lesson)
+            if slot.day == p.day and unavailable_time and time[0] < unavailable_time[1] and unavailable_time[0] < time[1]:
+                errors.append(f"{label}: класс {cls.name} недоступен.")
+                break
         teacher = teachers[load.teacher]
         for slot in teacher.unavailable:
             unavailable_time = period(bells, slot.day, slot.shift, slot.lesson)
@@ -245,6 +258,10 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
         for slot in teacher.unavailable:
             if not period(bells, slot.day, slot.shift, slot.lesson):
                 errors.append(f"{teacher.name}: нет звонков для недоступного времени {slot.day}, смена {slot.shift}, урок {slot.lesson}.")
+    for cls in project.classes:
+        for slot in cls.unavailable:
+            if not period(bells, slot.day, slot.shift, slot.lesson):
+                errors.append(f"Класс {cls.name}: нет звонков для недоступного времени {slot.day}, смена {slot.shift}, урок {slot.lesson}.")
     for room in project.rooms:
         for slot in room.unavailable:
             if not period(bells, slot.day, slot.shift, slot.lesson):
@@ -342,6 +359,8 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
                      if period(bells, day, shift, lesson)] for shift in (1, 2)}
     blocked = {t.name: [(s.day, period(bells, s.day, s.shift, s.lesson)) for s in t.unavailable]
                for t in work.teachers}
+    blocked_classes = {c.name: [(s.day, period(bells, s.day, s.shift, s.lesson)) for s in c.unavailable]
+                       for c in work.classes}
     blocked_rooms = {r.name: [(s.day, period(bells, s.day, s.shift, s.lesson)) for s in r.unavailable]
                      for r in work.rooms}
     occupied = {day: [] for day in DAYS}
@@ -390,6 +409,8 @@ def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> t
             if nodes > node_limit: return False
             if best_score[0] == 0 and cost + penalty >= best_score[1]: continue
             if (not daily_class[(load.class_name, day, lesson)] and sum(1 for (name, d, _), count in daily_class.items() if name == load.class_name and d == day and count > 0) >= cls.max_daily) or daily_load[(load.id, day)] >= load.max_per_day:
+                continue
+            if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked_classes[load.class_name]):
                 continue
             if any(d == day and time[0] < t[1] and t[0] < time[1] for d, t in blocked[load.teacher]):
                 continue

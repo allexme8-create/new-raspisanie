@@ -28,7 +28,7 @@ import secrets
 import time
 import threading
 import urllib.parse
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -80,6 +80,8 @@ state: dict = {
     "planner_rooms_imported": False,
     "planner_groups_imported": False,
     "schedule_map_draft": None,
+    "dated_schedule_changes": [],
+    "dated_schedule_revision": 0,
 }
 
 _revoked_tokens: set[str] = set()
@@ -97,7 +99,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported", "planner_groups_imported", "schedule_map_draft"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported", "planner_groups_imported", "schedule_map_draft", "dated_schedule_changes", "dated_schedule_revision"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -313,6 +315,7 @@ def get_schedule() -> JSONResponse:
             "subjects": state["subjects"],
             "bell_schedule": {"shifts": bell["shifts"]} if bell else None,
             "second_shift_classes": _second_shift_classes(),
+            "dated_changes": public_dated_changes(),
             "updated_at": state["updated_at"],
         }
     )
@@ -851,6 +854,16 @@ def check_map_conflicts(data, class_name, day, shift, lesson, teacher_cell, subj
         raise HTTPException(422,"Для выбранного дня и урока нет времени звонков.")
     names={normalize_teacher_initials(x).casefold() for x in teacher_cell.get("names",[]) if x and x not in {"Классный час","СФУ","Экскурсия"}}
     rooms={" ".join(x.split()).casefold() for cell in (teacher_cell,subject_cell) for x in cell.get("rooms",[]) if x}
+    project=_planner_project()
+    resources=[("класс",x.name,x.unavailable) for x in project.classes if x.name==class_name]
+    resources += [("учитель",x.name,x.unavailable) for x in project.teachers if normalize_teacher_initials(x.name).casefold() in names]
+    resources += [("кабинет",x.name,x.unavailable) for x in project.rooms if " ".join(x.name.split()).casefold() in rooms]
+    for label,name,unavailable in resources:
+        for slot in unavailable:
+            if slot.day!=day:continue
+            blocked=planner.period(data.get("bell_schedule"),slot.day,slot.shift,slot.lesson)
+            if blocked is None:raise HTTPException(422,f"Нельзя проверить ограничение: нет звонков для {label} {name}.")
+            if start<blocked[1] and blocked[0]<end:raise HTTPException(409,f"Ограничение: {label} {name} недоступен.")
     classes={c for kind in ("teachers","subjects") for c in (data.get(kind) or {}).get("classes",[])}
     for cls in classes-{class_name}:
         for other in schedule_map.entries(data,cls):
@@ -874,12 +887,21 @@ class MapMove(BaseModel):
 
 
 @app.get("/api/admin/schedule-map")
-def read_schedule_map(class_name: str = "", _: None = Depends(require_admin)) -> dict:
+def read_schedule_map(class_name: str = "", all_entries: bool = False, _: None = Depends(require_admin)) -> dict:
     with _planner_lock:
         draft,stale=map_current();data=draft["data"]
         classes=list(dict.fromkeys(c for kind in ("teachers","subjects") for c in (data.get(kind) or {}).get("classes",[])))
         if class_name and class_name not in classes: raise HTTPException(404,"Класс не найден")
-        return {"revision":draft["revision"],"stale":stale,"classes":classes,"entries":schedule_map.entries(data,class_name) if class_name else [],"has_changes":bool(state.get("schedule_map_draft"))}
+        if all_entries:
+            current=[{**entry,"class_name":cls} for cls in classes for entry in schedule_map.entries(data,cls)]
+            published=schedule_map.snapshot(state)
+            original=[{**entry,"class_name":cls} for cls in classes for entry in schedule_map.entries(published,cls)]
+            key=lambda e:(e["class_name"],e["day"],e["raw"])
+            original_by_key={key(e):e for e in original};current_by_key={key(e):e for e in current}
+            entries=[{**e,"change":"added" if original_by_key.get(key(e))!=e else ""} for e in current]
+            entries += [{**e,"change":"removed"} for e in original if current_by_key.get(key(e))!=e]
+        else: entries=schedule_map.entries(data,class_name) if class_name else []
+        return {"revision":draft["revision"],"stale":stale,"classes":classes,"entries":entries,"has_changes":bool(state.get("schedule_map_draft"))}
 
 
 @app.post("/api/admin/schedule-map/move")
@@ -910,6 +932,129 @@ def move_schedule_map(body: MapMove, _: None = Depends(require_admin)) -> dict:
         updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data}
         state["schedule_map_draft"]=updated;_save_state()
         return {"revision":updated["revision"],"ok":True}
+
+
+class MapRemove(BaseModel):
+    revision: int = Field(ge=0)
+    class_name: str = Field(min_length=1,max_length=80)
+    day: Literal["Пн","Вт","Ср","Чт","Пт","Сб"]
+    raw: str = Field(pattern=r"^\d{1,2}$")
+    teacher: str = Field(min_length=1,max_length=80)
+
+
+@app.post("/api/admin/schedule-map/remove")
+def remove_schedule_map_lesson(body: MapRemove, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        draft,stale=map_current()
+        if stale or body.revision!=draft["revision"]:raise HTTPException(409,"Расписание или карта изменились. Обновите данные.")
+        data=copy.deepcopy(draft["data"])
+        entry=next((e for e in schedule_map.entries(data,body.class_name) if e["day"]==body.day and e["raw"]==body.raw),None)
+        if not entry:raise HTTPException(404,"Урок не найден")
+        names=entry["teachers"].get("names",[]);groups=entry["teachers"].get("groups",[]) or entry["subjects"].get("groups",[])
+        if len(names)!=1 or names[0]!=body.teacher or len(groups)>1:
+            raise HTTPException(422,"В ячейке несколько учителей или групп. Чтобы не удалить чужой урок, измените её в конструкторе групп.")
+        for kind in ("teachers","subjects"):
+            if data.get(kind):schedule_map.putcell(data,kind,body.day,body.raw,body.class_name,None)
+        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data}
+        state["schedule_map_draft"]=updated;_save_state();return {"revision":updated["revision"],"ok":True}
+
+
+def public_dated_changes():
+    fingerprint=map_fingerprint(schedule_map.snapshot(state))
+    return [{k:v for k,v in entry.items() if k not in ("cells","base")} | {"stale": entry.get("base")!=fingerprint} for entry in state.get("dated_schedule_changes",[])]
+
+
+def dated_projection(data, day_date, changes):
+    """Снимок недельного расписания с исключениями для одного календарного дня."""
+    result=copy.deepcopy(data)
+    for change in changes:
+        if change["source_date"]==day_date:
+            for kind in ("teachers","subjects"):
+                if result.get(kind): schedule_map.putcell(result,kind,change["day"],change["raw"],change["class_name"],None)
+    for change in changes:
+        if change.get("target_date")==day_date:
+            for kind in ("teachers","subjects"):
+                if result.get(kind):schedule_map.putcell(result,kind,change["target_day"],change["target_raw"],change["class_name"],copy.deepcopy(change["cells"].get(kind)))
+    return result
+
+
+class DatedChange(BaseModel):
+    revision: int = Field(ge=0)
+    class_name: str = Field(min_length=1,max_length=80)
+    day: Literal["Пн","Вт","Ср","Чт","Пт","Сб"]
+    raw: str = Field(pattern=r"^\d{1,2}$")
+    teacher: str = Field(min_length=1,max_length=80)
+    source_date: date
+    target_date: date | None = None
+    target_lesson: int | None = Field(default=None,ge=1,le=12)
+
+
+@app.get("/api/admin/dated-schedule-changes")
+def get_dated_changes(_: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        return {"revision":state.get("dated_schedule_revision",0),"changes":public_dated_changes()}
+
+
+@app.post("/api/admin/dated-schedule-changes")
+def create_dated_change(body: DatedChange, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        if state.get("schedule_map_draft"):raise HTTPException(409,"Сначала опубликуйте или отмените изменения недельной карты.")
+        if body.revision!=state.get("dated_schedule_revision",0):raise HTTPException(409,"Изменения на даты обновились. Загрузите список заново.")
+        source_day=body.source_date.weekday()
+        if source_day>=6 or schedule_map.DAYS[source_day]!=body.day:raise HTTPException(422,"Дата не совпадает с днём выбранного урока.")
+        if (body.target_date is None)!=(body.target_lesson is None):raise HTTPException(422,"Для переноса укажите дату и номер урока.")
+        if body.target_date and body.target_date.weekday()>=6:raise HTTPException(422,"Перенос на воскресенье не поддерживается.")
+        data=schedule_map.snapshot(state);base=map_fingerprint(data);changes=state.get("dated_schedule_changes",[])
+        if any(x.get("base")!=base for x in changes):raise HTTPException(409,"Недельное расписание изменилось: проверьте и удалите устаревшие изменения на даты.")
+        if len(changes)>=2000:raise HTTPException(422,"Достигнут предел изменений на даты.")
+        source=body.source_date.isoformat();projected=dated_projection(data,source,changes)
+        entry=next((e for e in schedule_map.entries(projected,body.class_name) if e["day"]==body.day and e["raw"]==body.raw),None)
+        if not entry:raise HTTPException(404,"Урок на эту дату не найден или уже изменён.")
+        names=entry["teachers"].get("names",[]);groups=entry["teachers"].get("groups",[]) or entry["subjects"].get("groups",[])
+        if len(names)!=1 or names[0]!=body.teacher or len(groups)>1:raise HTTPException(422,"Урок с несколькими учителями или группами нельзя изменить отдельно без проверки структуры.")
+        # Источником может быть только обычный урок, не результат другого переноса.
+        if any(x.get("target_date")==source and x["class_name"]==body.class_name and x.get("target_raw")==body.raw for x in changes):raise HTTPException(409,"Сначала отмените предыдущий перенос этого урока.")
+        cells={kind:copy.deepcopy(schedule_map.getcell(projected,kind,body.day,body.raw,body.class_name)) for kind in ("teachers","subjects")}
+        target_date=body.target_date.isoformat() if body.target_date else None;target_day=target_raw=None
+        if target_date:
+            target_day=schedule_map.DAYS[body.target_date.weekday()]
+            destination=dated_projection(data,target_date,changes)
+            if target_date==source:
+                for kind in ("teachers","subjects"):
+                    if destination.get(kind):schedule_map.putcell(destination,kind,body.day,body.raw,body.class_name,None)
+            target_raw=schedule_map.destination(destination,body.class_name,target_day,body.target_lesson)
+            if source==target_date and body.raw==target_raw:raise HTTPException(422,"Выберите другое время или дату.")
+            for kind in ("teachers","subjects"):
+                existing=schedule_map.getcell(destination,kind,target_day,target_raw,body.class_name) or {}
+                if existing.get("names") or existing.get("raw") or existing.get("rooms"):raise HTTPException(409,"У класса уже есть урок в это время.")
+            shift=2 if body.class_name in (data.get("second_shift_classes") or []) else 1
+            check_map_conflicts(destination,body.class_name,target_day,shift,body.target_lesson,entry["teachers"],entry["subjects"])
+        item={"id":secrets.token_hex(16),"base":base,"class_name":body.class_name,"teacher":body.teacher,"subject":", ".join(entry["subjects"].get("names",[])),"source_date":source,"day":body.day,"raw":body.raw,"source_lesson":entry["lesson"],"target_date":target_date,"target_day":target_day,"target_lesson":body.target_lesson,"target_raw":target_raw,"cells":cells}
+        state["dated_schedule_changes"]=[*changes,item];state["dated_schedule_revision"]=body.revision+1;_touch_updated_at();_save_state()
+        return {"revision":body.revision+1,"changes":public_dated_changes()}
+
+
+class DatedReset(BaseModel):
+    revision: int = Field(ge=0)
+
+
+@app.post("/api/admin/dated-schedule-changes/reset")
+def reset_dated_changes(body: DatedReset, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        if body.revision != state.get("dated_schedule_revision",0):raise HTTPException(409,"Изменения на даты обновились. Загрузите список заново.")
+        state["dated_schedule_changes"]=[];state["dated_schedule_revision"]=body.revision+1;_touch_updated_at();_save_state()
+        return {"revision":body.revision+1,"changes":[]}
+
+
+@app.delete("/api/admin/dated-schedule-changes/{change_id}")
+def delete_dated_change(change_id: str, revision: int, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        if revision!=state.get("dated_schedule_revision",0):raise HTTPException(409,"Изменения на даты обновились. Загрузите список заново.")
+        changes=state.get("dated_schedule_changes",[]);item=next((x for x in changes if x["id"]==change_id),None)
+        if not item:raise HTTPException(404,"Изменение не найдено")
+        days={item["source_date"],item.get("target_date")}-{None}
+        if any(x is not item and days & {x["source_date"],x.get("target_date")} for x in changes):raise HTTPException(409,"Сначала отмените другие изменения на те же даты, чтобы не создать конфликт.")
+        state["dated_schedule_changes"]=[x for x in changes if x["id"]!=change_id];state["dated_schedule_revision"]=revision+1;_touch_updated_at();_save_state();return {"revision":revision+1,"changes":public_dated_changes()}
 
 
 class MapEdit(BaseModel):

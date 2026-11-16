@@ -35,6 +35,32 @@ def project():
 
 
 class PlannerTests(unittest.TestCase):
+    def test_class_unavailable_across_shifts_and_autopick(self):
+        p=project();p.loads=p.loads[:1];p.loads[0].per_week=1;p.classes[0].unavailable=[planner.Slot(day='Пн',shift=2,lesson=1)];p.placements=[planner.Placement(load_id='a',day='Пн',lesson=1)]
+        self.assertTrue(any('класс 5а недоступен' in x for x in planner.issues(p,bells())))
+        p.placements=[];r,error=planner.generate(p,bells());self.assertIsNotNone(r,error)
+        self.assertFalse(any('недоступен' in x for x in planner.issues(r,bells())))
+        self.assertFalse(r.placements[0].day=='Пн' and r.placements[0].lesson==1)
+        p.classes[0].unavailable.append(planner.Slot(day='Сб',shift=2,lesson=12));self.assertTrue(any('Класс 5а: нет звонков' in x for x in planner.issues(p,bells())))
+        with self.assertRaises(ValueError):planner.SchoolClass(name='5а',unavailable=[{'day':'Пн','shift':1,'lesson':1}]*2)
+
+    def test_overview_map_changes_and_safe_remove(self):
+        old=copy.deepcopy(backend.state)
+        try:
+            def cell(names,rooms):return {'names':names,'raw':', '.join(names),'rooms':rooms}
+            backend.state['teachers']={'classes':['5а'],'numbering':'local','grid':{'Пн':{'1':{'5а':cell(['Учитель'],['101'])},'2':{'5а':cell(['Учитель','Другой'],['101','102'])}}}}
+            backend.state['subjects']={'classes':['5а'],'numbering':'local','grid':{'Пн':{'1':{'5а':cell(['Физика'],['101'])},'2':{'5а':cell(['Физика'],['101','102'])}}}}
+            backend.state['second_shift_classes']=[];backend.state['bell_schedule']=bells();backend.state['schedule_map_draft']=None
+            with patch.object(backend,'_save_state'):
+                all_before=backend.read_schedule_map(all_entries=True);self.assertEqual(len(all_before['entries']),2)
+                with self.assertRaises(backend.HTTPException):backend.remove_schedule_map_lesson(backend.MapRemove(revision=0,class_name='5а',day='Пн',raw='2',teacher='Учитель'))
+                backend.remove_schedule_map_lesson(backend.MapRemove(revision=0,class_name='5а',day='Пн',raw='1',teacher='Учитель'))
+                overview=backend.read_schedule_map(all_entries=True);self.assertEqual(len([x for x in overview['entries'] if x['change']=='removed']),1)
+                self.assertEqual(backend.state['teachers']['grid']['Пн']['1']['5а']['names'],['Учитель'])
+                with self.assertRaises(backend.HTTPException):backend.remove_schedule_map_lesson(backend.MapRemove(revision=0,class_name='5а',day='Пн',raw='2',teacher='Учитель'))
+                backend.reset_schedule_map(backend.MapPublish(revision=1));self.assertEqual(len(backend.read_schedule_map(all_entries=True)['entries']),2)
+        finally:backend.state.clear();backend.state.update(old)
+
     def test_teacher_windows_take_priority_over_soft_preferences(self):
         p=planner.Project(classes=[planner.SchoolClass(name='5а'),planner.SchoolClass(name='6а')],teachers=[planner.Teacher(name='А')],subjects=[planner.Named(name='Математика')],rooms=[planner.Room(name='101')],loads=[planner.Load(id='fixed',class_name='5а',teacher='А',subject='Математика',room='101',per_week=1),planner.Load(id='new',class_name='6а',teacher='А',subject='Математика',room='101',per_week=1)],placements=[planner.Placement(load_id='fixed',day='Пн',lesson=1)],preferences=[planner.Preference(scope='class',scope_value='6а',subject='Математика',kind='avoid_lesson',lesson=2)])
         schedule={'shifts':{'1':{'Пн':{'1':{'start':'08:00','end':'08:40'},'2':{'start':'09:00','end':'09:40'},'3':{'start':'10:00','end':'10:40'}}}}}
