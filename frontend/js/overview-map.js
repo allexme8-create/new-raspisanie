@@ -2,6 +2,7 @@
 /* Общая карта текущего расписания использует тот же черновик, что и карта класса. */
 let overviewData=null,overviewSelected=null,overviewBusy=false,datedData=null;
 const overviewDays=['Пн','Вт','Ср','Чт','Пт','Сб'];
+const overviewDayNames={'Пн':'Понедельник','Вт':'Вторник','Ср':'Среда','Чт':'Четверг','Пт':'Пятница','Сб':'Суббота'};
 async function loadOverview(){
   try{overviewData=await api('/api/admin/schedule-map?all_entries=true');overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();}
   catch(e){$("overviewStatus").textContent=e.message;}
@@ -18,7 +19,11 @@ function renderOverview(){
   const filtered=rows.filter(x=>x.toLocaleLowerCase('ru-RU').includes(query));
   status.textContent=data.stale?'Опубликованное расписание изменилось. Отмените старый черновик карты, чтобы загрузить актуальные данные.':data.has_changes?'Изменения сохранены в черновике. Публикация доступна под общей картой.':'Показано текущее расписание. Нажмите карточку, затем ячейку назначения.';
   let html=`<div class="overview-scroll"><div class="overview-table" style="grid-template-columns: ${teacherMode?110:68}px repeat(${slots.length},64px)"><div class="overview-corner">${teacherMode?'Учитель':'Класс'}</div>`;
-  for(const {day,lesson} of slots)html+=`<div class="overview-head">${day}<br>${lesson}</div>`;
+  for(const day of days){
+    const count=slots.filter(slot=>slot.day===day).length;
+    if(count)html+=`<div class="overview-day-head" style="grid-column:span ${count}" title="${overviewDayNames[day]}">${overviewDayNames[day]}</div>`;
+  }
+  for(const {lesson} of slots)html+=`<div class="overview-head">${lesson}</div>`;
   for(const row of filtered){html+=`<div class="overview-row-label">${esc(row)}</div>`;for(const {day,lesson} of slots){
     const entries=data.entries.filter(e=>e.day===day&&e.lesson===lesson&&(teacherMode?(e.teachers.names||[]).includes(row):e.class_name===row));
     html+=`<div class="overview-cell" data-overview-row="${esc(row)}" data-overview-day="${day}" data-overview-lesson="${lesson}"><button type="button" class="overview-target" data-overview-target aria-label="${esc(row)}, ${day}, урок ${lesson}">+</button>${entries.map(e=>`<button type="button" class="overview-lesson ${lessonColorClass(e.subjects.names,e.subjects.raw)} ${e.change==='removed'?'removed':e.change==='added'?'changed':''}" data-overview-class="${esc(e.class_name)}" data-overview-day-src="${esc(e.day)}" data-overview-raw="${esc(e.raw)}" data-overview-row-src="${esc(row)}" data-overview-change="${esc(e.change||'')}"><strong>${esc((e.subjects.names||[]).join(', ')||e.subjects.raw||'Урок')}</strong><span>${esc(teacherMode?e.class_name:(e.teachers.names||[]).join(', '))}</span><span>${esc([...new Set([...(e.teachers.rooms||[]),...(e.subjects.rooms||[])])].join(', '))}</span>${e.before_shift?'<span>до смены</span>':''}</button>`).join('')}</div>`;

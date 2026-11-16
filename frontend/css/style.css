@@ -394,3 +394,6 @@ footer a{color:var(--muted)}
 
 /* Empty destination controls appear only while a lesson is selected. */
 .overview-target{display:none}.overview-selecting .overview-target{display:block}
+
+/* Two fixed-height sticky header rows keep the day labels above lesson numbers. */
+.overview-corner{grid-row:span 2}.overview-day-head{position:sticky;top:0;z-index:4;height:28px;box-sizing:border-box;padding:5px 3px;background:#e7eef9;font-size:12px;font-weight:700;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.overview-head{top:29px;height:28px;box-sizing:border-box;text-align:center}
