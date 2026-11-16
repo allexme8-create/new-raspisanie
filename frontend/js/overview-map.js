@@ -15,7 +15,11 @@ function renderOverview(){
   // Keep columns shared across all rows; a hidden empty slot can still be exposed for moves.
   const slots=days.flatMap(day=>Array.from({length:12},(_,i)=>({day,lesson:i+1})).filter(slot=>$("overviewShowEmpty").checked||data.entries.some(e=>e.day===slot.day&&e.lesson===slot.lesson)));
   root.classList.toggle('overview-selecting',Boolean(overviewSelected));
-  const rows=teacherMode?[...new Set(data.entries.flatMap(e=>e.teachers.names||[]))].sort((a,b)=>a.localeCompare(b,'ru')):data.classes;
+  const teachers=[...new Set(data.entries.flatMap(e=>e.teachers.names||[]))].sort((a,b)=>a.localeCompare(b,'ru'));
+  const teacherSelect=$("overviewTeacher"),selectedTeacher=teachers.includes(teacherSelect.value)?teacherSelect.value:'';
+  teacherSelect.innerHTML='<option value="">Все учителя</option>'+teachers.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('');
+  teacherSelect.value=selectedTeacher;$("overviewTeacherField").classList.toggle('hidden',!teacherMode);
+  const rows=teacherMode?(selectedTeacher?[selectedTeacher]:teachers):data.classes;
   const filtered=rows.filter(x=>x.toLocaleLowerCase('ru-RU').includes(query));
   status.textContent=data.stale?'Опубликованное расписание изменилось. Отмените старый черновик карты, чтобы загрузить актуальные данные.':data.has_changes?'Изменения сохранены в черновике. Публикация доступна под общей картой.':'Показано текущее расписание. Нажмите карточку, затем ячейку назначения.';
   let html=`<div class="overview-scroll"><div class="overview-table" style="grid-template-columns: ${teacherMode?110:68}px repeat(${slots.length},64px)"><div class="overview-corner">${teacherMode?'Учитель':'Класс'}</div>`;
@@ -77,6 +81,7 @@ $("overviewEdit").onsubmit=async e=>{e.preventDefault();if(!overviewSelected||ov
 $("overviewClear").onclick=()=>{overviewPending=null;$("overviewRoomChoice").classList.add("hidden");overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();};
 $("overviewMapSection").ontoggle=()=>{if($("overviewMapSection").open){loadOverview();loadDatedChanges();}};
 $("overviewMode").onchange=()=>{overviewPending=null;$("overviewRoomChoice").classList.add("hidden");overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();};
+$("overviewTeacher").onchange=()=>{overviewPending=null;overviewSelected=null;$("overviewSearch").value='';$("overviewRoomChoice").classList.add('hidden');$("overviewSelected").classList.add('hidden');renderOverview();};
 $("overviewShowEmpty").onchange=renderOverview;$("overviewDay").onchange=renderOverview;$("overviewSearch").oninput=renderOverview;$("overviewRefresh").onclick=loadOverview;
 async function overviewCommit(action){
   if(!overviewData||overviewBusy||(action==='publish'&&(overviewData.stale||!overviewData.has_changes)))return;
