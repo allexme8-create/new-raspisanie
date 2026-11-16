@@ -1,10 +1,10 @@
 "use strict";
 /* Общая карта текущего расписания использует тот же черновик, что и карта класса. */
-let overviewData=null,overviewSelected=null,overviewBusy=false,datedData=null;
+let overviewData=null,overviewSelected=null,overviewBusy=false,datedData=null,overviewPending=null;
 const overviewDays=['Пн','Вт','Ср','Чт','Пт','Сб'];
 const overviewDayNames={'Пн':'Понедельник','Вт':'Вторник','Ср':'Среда','Чт':'Четверг','Пт':'Пятница','Сб':'Суббота'};
 async function loadOverview(){
-  try{overviewData=await api('/api/admin/schedule-map?all_entries=true');overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();}
+  try{overviewData=await api('/api/admin/schedule-map?all_entries=true');overviewSelected=null;overviewPending=null;$("overviewRoomChoice").classList.add('hidden');$("overviewSelected").classList.add('hidden');renderOverview();}
   catch(e){$("overviewStatus").textContent=e.message;}
 }
 function renderOverview(){
@@ -41,21 +41,39 @@ function renderOverview(){
   });
 }
 function chooseOverview(source){
-  overviewSelected=source;const e=overviewData.entries.find(e=>e.class_name===source.class_name&&e.day===source.day&&e.raw===source.raw&&e.change!=='removed');if(!e)return;
+  overviewPending=null;$("overviewRoomChoice").classList.add("hidden");overviewSelected=source;const e=overviewData.entries.find(e=>e.class_name===source.class_name&&e.day===source.day&&e.raw===source.raw&&e.change!=='removed');if(!e)return;
   $("overviewSelectionLabel").textContent=`${source.class_name} · ${source.day} · урок ${e.lesson}: ${(e.subjects.names||[]).join(', ')} · ${(e.teachers.names||[]).join(', ')}`;
   $("overviewSubjects").value=(e.subjects.names||[]).join(', ');$("overviewTeachers").value=(e.teachers.names||[]).join(', ');$("overviewRooms").value=[...new Set([...(e.subjects.rooms||[]),...(e.teachers.rooms||[])])].join(', ');
   renderOverview();
   $("overviewRemove").disabled=(e.teachers.names||[]).length!==1;$("overviewSelected").classList.remove('hidden');$("overviewStatus").textContent='Урок выбран. Свободные ячейки в этой строке выделены зелёным. Нажмите «+» или исправьте данные выше; занятость учителей и кабинетов проверяется при переносе.';
 }
 async function overviewMove(source,cell){
-  if(overviewBusy||overviewData.stale)return;if(cell.dataset.overviewRow!==source.row){$("overviewStatus").textContent='Переносите урок только внутри строки выбранного класса или учителя.';return;}
-  overviewBusy=true;try{await api('/api/admin/schedule-map/move',{method:'POST',body:{revision:overviewData.revision,class_name:source.class_name,day:source.day,raw:source.raw,target_day:cell.dataset.overviewDay,target_lesson:Number(cell.dataset.overviewLesson)}});await loadOverview();if(typeof loadPublishedMap==='function')await loadPublishedMap();$("overviewStatus").textContent='Урок перенесён в черновике; опубликуйте изменения ниже.';}catch(e){$("overviewStatus").textContent=e.message;}finally{overviewBusy=false;}
+  if(overviewBusy||overviewData.stale)return;
+  if(cell.dataset.overviewRow!==source.row){$("overviewStatus").textContent='Переносите урок только внутри строки выбранного класса или учителя.';return;}
+  const request={revision:overviewData.revision,class_name:source.class_name,day:source.day,raw:source.raw,target_day:cell.dataset.overviewDay,target_lesson:Number(cell.dataset.overviewLesson)};
+  overviewPending=null;$("overviewRoomChoice").classList.add('hidden');overviewBusy=true;
+  try{
+    const result=await api('/api/admin/schedule-map/available-rooms',{method:'POST',body:request});
+    overviewPending=request;
+    $("overviewRoomChoiceLabel").textContent=`${source.class_name} · ${request.target_day} · урок ${request.target_lesson}`;
+    $("overviewRoomSelect").innerHTML='<option value="">Оставить прежний кабинет</option>'+result.rooms.map(room=>`<option value="${esc(room)}">${esc(room)}</option>`).join('');
+    $("overviewRoomHint").textContent=result.can_change?(result.rooms.length?'Показаны кабинеты, свободные по времени и ограничениям. Учитель и класс проверяются при переносе.':'Свободных кабинетов в справочнике и расписании не найдено. Можно попробовать оставить прежний.'):'Урок содержит несколько групп, учителей или кабинетов: перенос возможен только с прежними кабинетами.';
+    $("overviewRoomChoice").classList.remove('hidden');$("overviewRoomChoice").scrollIntoView?.({block:"nearest",behavior:"smooth"});$("overviewStatus").textContent='Выберите кабинет и подтвердите перенос.';
+  }catch(e){$("overviewStatus").textContent=e.message;}finally{overviewBusy=false;}
 }
+$("overviewMoveCancel").onclick=()=>{overviewPending=null;$("overviewRoomChoice").classList.add('hidden');};
+$("overviewMoveConfirm").onclick=async()=>{
+  if(!overviewPending||overviewBusy)return;
+  const request={...overviewPending},room=$("overviewRoomSelect").value;if(room)request.room=room;
+  overviewBusy=true;
+  try{await api('/api/admin/schedule-map/move',{method:'POST',body:request});await loadOverview();if(typeof loadPublishedMap==='function')await loadPublishedMap();$("overviewStatus").textContent='Урок перенесён в черновике; опубликуйте изменения ниже.';}
+  catch(e){$("overviewStatus").textContent=e.message;}finally{overviewBusy=false;}
+};
 $("overviewRemove").onclick=async()=>{if(!overviewSelected||overviewBusy||overviewData.stale)return;const entry=overviewData.entries.find(e=>e.class_name===overviewSelected.class_name&&e.day===overviewSelected.day&&e.raw===overviewSelected.raw&&e.change!=='removed');const teacher=entry?.teachers?.names?.[0];if(!teacher||!confirm(`Снять урок ${teacher} у класса ${overviewSelected.class_name} из недельного черновика?`))return;overviewBusy=true;try{await api('/api/admin/schedule-map/remove',{method:'POST',body:{revision:overviewData.revision,class_name:overviewSelected.class_name,day:overviewSelected.day,raw:overviewSelected.raw,teacher}});await loadOverview();if(typeof loadPublishedMap==='function')await loadPublishedMap();$("overviewStatus").textContent='Урок снят в черновике; опубликуйте изменения ниже.';}catch(e){$("overviewStatus").textContent=e.message;}finally{overviewBusy=false;}};
 $("overviewEdit").onsubmit=async e=>{e.preventDefault();if(!overviewSelected||overviewBusy||overviewData.stale)return;const list=id=>$(id).value.split(',').map(x=>x.trim()).filter(Boolean);overviewBusy=true;try{await api('/api/admin/schedule-map/edit',{method:'POST',body:{revision:overviewData.revision,class_name:overviewSelected.class_name,day:overviewSelected.day,raw:overviewSelected.raw,teachers:list('overviewTeachers'),subjects:list('overviewSubjects'),rooms:list('overviewRooms')}});await loadOverview();if(typeof loadPublishedMap==='function')await loadPublishedMap();$("overviewStatus").textContent='Изменения сохранены в черновике.';}catch(err){$("overviewStatus").textContent=err.message;}finally{overviewBusy=false;}};
-$("overviewClear").onclick=()=>{overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();};
+$("overviewClear").onclick=()=>{overviewPending=null;$("overviewRoomChoice").classList.add("hidden");overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();};
 $("overviewMapSection").ontoggle=()=>{if($("overviewMapSection").open){loadOverview();loadDatedChanges();}};
-$("overviewMode").onchange=()=>{overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();};
+$("overviewMode").onchange=()=>{overviewPending=null;$("overviewRoomChoice").classList.add("hidden");overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();};
 $("overviewShowEmpty").onchange=renderOverview;$("overviewDay").onchange=renderOverview;$("overviewSearch").oninput=renderOverview;$("overviewRefresh").onclick=loadOverview;
 async function overviewCommit(action){
   if(!overviewData||overviewBusy||(action==='publish'&&(overviewData.stale||!overviewData.has_changes)))return;

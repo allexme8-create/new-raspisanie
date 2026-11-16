@@ -929,6 +929,7 @@ class MapMove(BaseModel):
     raw: str = Field(pattern=r"^\d{1,2}$")
     target_day: Literal["Пн","Вт","Ср","Чт","Пт","Сб"]
     target_lesson: int = Field(ge=1,le=12)
+    room: str | None = Field(default=None, min_length=1, max_length=80)
 
 
 @app.get("/api/admin/schedule-map")
@@ -949,6 +950,39 @@ def read_schedule_map(class_name: str = "", all_entries: bool = False, _: None =
         return {"revision":draft["revision"],"stale":stale,"classes":classes,"entries":entries,"has_changes":bool(state.get("schedule_map_draft"))}
 
 
+def map_can_change_room(entry):
+    rooms={" ".join(r.split()).casefold() for k in ("teachers", "subjects") for r in entry[k].get("rooms", []) if r}
+    return len(entry["teachers"].get("names", [])) <= 1 and len(rooms) <= 1 and all(len(entry[k].get("groups", [])) <= 1 for k in ("teachers", "subjects"))
+
+
+@app.post("/api/admin/schedule-map/available-rooms")
+def available_map_rooms(body: MapMove, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        draft,stale=map_current()
+        if stale or body.revision != draft["revision"]: raise HTTPException(409,"Расписание или карта изменились. Обновите данные.")
+        data=draft["data"]
+        classes={c for kind in ("teachers","subjects") for c in (data.get(kind) or {}).get("classes",[])}
+        if body.class_name not in classes: raise HTTPException(404,"Класс не найден")
+        entry=next((e for e in schedule_map.entries(data,body.class_name) if e["day"]==body.day and e["raw"]==body.raw),None)
+        if not entry: raise HTTPException(404,"Урок не найден")
+        if not map_can_change_room(entry): return {"rooms":[],"can_change":False}
+        shift=2 if body.class_name in (data.get("second_shift_classes") or []) else 1
+        p=schedule_map.period(data,shift,body.target_day,body.target_lesson)
+        start,end=schedule_map.clock(p.get("start")),schedule_map.clock(p.get("end"))
+        if start is None or end is None or start>=end: raise HTTPException(422,"Для выбранного дня и урока нет времени звонков.")
+        names=[r.name for r in _planner_project().rooms]
+        names += [r for cls in classes for e in schedule_map.entries(data,cls) for kind in ("teachers","subjects") for r in e[kind].get("rooms",[]) if r]
+        names=list({" ".join(name.split()).casefold():" ".join(name.split()) for name in names if name and name.strip()}.values())
+        free=[]
+        for room in names:
+            try: check_map_conflicts(data,body.class_name,body.target_day,shift,body.target_lesson,{"names":[],"rooms":[room]},{})
+            except HTTPException as error:
+                if error.status_code == 409: continue
+                raise
+            free.append(room)
+        return {"rooms":sorted(free,key=str.casefold),"can_change":True}
+
+
 @app.post("/api/admin/schedule-map/move")
 def move_schedule_map(body: MapMove, _: None = Depends(require_admin)) -> dict:
     with _planner_lock:
@@ -961,17 +995,27 @@ def move_schedule_map(body: MapMove, _: None = Depends(require_admin)) -> dict:
         entry=next((e for e in schedule_map.entries(data,body.class_name) if e["day"]==body.day and e["raw"]==body.raw),None)
         if not entry: raise HTTPException(404,"Урок не найден")
         target_raw=schedule_map.destination(data,body.class_name,body.target_day,body.target_lesson)
-        if body.day==body.target_day and body.raw==target_raw:
+        same=body.day==body.target_day and body.raw==target_raw
+        if same and body.room is None:
             return {"revision":draft["revision"],"ok":True}
+        if body.room is not None:
+            room=" ".join(body.room.split())
+            if not room: raise HTTPException(422,"Укажите кабинет")
+            if not map_can_change_room(entry): raise HTTPException(422,"Нельзя заменить один кабинет для нескольких групп или учителей.")
+            for kind in ("teachers","subjects"):
+                cell=entry[kind]
+                groups=[{**g,"room":room} for g in cell.get("groups",[])]
+                entry[kind]={**cell,"rooms":[room],"raw":", ".join(cell.get("names",[])) or cell.get("raw", "")}
+                if "groups" in cell: entry[kind]["groups"]=groups
         for kind in ("teachers","subjects"):
             existing=schedule_map.getcell(data,kind,body.target_day,target_raw,body.class_name) or {}
-            if existing.get("names") or existing.get("raw") or existing.get("rooms"):
+            if not same and (existing.get("names") or existing.get("raw") or existing.get("rooms")):
                 raise HTTPException(409,"Ячейка занята. Сначала перенесите урок из неё.")
         shift=2 if body.class_name in (data.get("second_shift_classes") or []) else 1
         check_map_conflicts(data,body.class_name,body.target_day,shift,body.target_lesson,entry["teachers"],entry["subjects"])
         for kind in ("teachers","subjects"):
             if data.get(kind):
-                cell=schedule_map.getcell(data,kind,body.day,body.raw,body.class_name)
+                cell=entry[kind] if body.room is not None else schedule_map.getcell(data,kind,body.day,body.raw,body.class_name)
                 schedule_map.putcell(data,kind,body.day,body.raw,body.class_name,None)
                 schedule_map.putcell(data,kind,body.target_day,target_raw,body.class_name,cell)
         updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data}

@@ -464,6 +464,34 @@ class PlannerTests(unittest.TestCase):
             finally:
                 backend.state.clear();backend.state.update(old)
 
+    def test_map_available_rooms_and_atomic_move(self):
+        old=copy.deepcopy(backend.state)
+        try:
+            def cell(name,room): return {"names":[name],"raw":name,"rooms":[room]}
+            classes=["5а","6а"]
+            backend.state["teachers"]={"classes":classes,"numbering":"local","grid":{"Пн":{"1":{"5а":cell("Учитель","101"),"6а":cell("Другой","102")}}}}
+            backend.state["subjects"]={"classes":classes,"numbering":"local","grid":{"Пн":{"1":{"5а":cell("Физика","101"),"6а":cell("Химия","102")}}}}
+            backend.state["second_shift_classes"]=["6а"];backend.state["bell_schedule"]=bells();backend.state["schedule_map_draft"]=None
+            backend.state["planner"]=planner.Project(rooms=[planner.Room(name="101"),planner.Room(name="102"),planner.Room(name="103"),planner.Room(name="104",unavailable=[planner.Slot(day="Пн",shift=1,lesson=1)])]).model_dump()
+            request=backend.MapMove(revision=0,class_name="5а",day="Пн",raw="1",target_day="Пн",target_lesson=1)
+            with patch.object(backend,"_save_state"):
+                result=backend.available_map_rooms(request)
+                self.assertEqual(result["rooms"],["101","103"])
+                request.room="102"
+                with self.assertRaises(backend.HTTPException):backend.move_schedule_map(request)
+                self.assertIsNone(backend.state["schedule_map_draft"])
+                backend.state["teachers"]["grid"]["Пн"]["1"]["5а"]["names"].append("Второй")
+                self.assertFalse(backend.available_map_rooms(request)["can_change"])
+                with self.assertRaises(backend.HTTPException): backend.move_schedule_map(request)
+                backend.state["teachers"]["grid"]["Пн"]["1"]["5а"]["names"].pop()
+                request.room="103";backend.move_schedule_map(request)
+                current=backend.read_schedule_map("5а")["entries"][0]
+                self.assertEqual(current["teachers"]["rooms"],["103"]);self.assertEqual(current["subjects"]["rooms"],["103"])
+                with self.assertRaises(backend.HTTPException):backend.available_map_rooms(request)
+                backend.publish_schedule_map(backend.MapPublish(revision=1))
+                self.assertEqual(backend.state["teachers"]["grid"]["Пн"]["1"]["5а"]["rooms"],["103"])
+        finally:backend.state.clear();backend.state.update(old)
+
     def test_published_schedule_map_moves_edits_publishes_and_detects_stale(self):
         old=copy.deepcopy(backend.state)
         try:
