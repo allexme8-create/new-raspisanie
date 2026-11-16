@@ -27,7 +27,8 @@ function renderOverview(){
   for(const row of filtered){html+=`<div class="overview-row-label">${esc(row)}</div>`;for(const {day,lesson} of slots){
     const entries=data.entries.filter(e=>e.day===day&&e.lesson===lesson&&(teacherMode?(e.teachers.names||[]).includes(row):e.class_name===row));
     const available=overviewSelected&&overviewSelected.row===row&&!entries.some(e=>e.change!=='removed');
-    html+=`<div class="overview-cell ${available?'overview-available':''}" data-overview-row="${esc(row)}" data-overview-day="${day}" data-overview-lesson="${lesson}"><button type="button" class="overview-target" data-overview-target aria-label="${esc(row)}, ${day}, урок ${lesson}">+</button>${entries.map(e=>`<button type="button" class="overview-lesson ${lessonColorClass(e.subjects.names,e.subjects.raw)} ${e.change==='removed'?'removed':e.change==='added'?'changed':''}" data-overview-class="${esc(e.class_name)}" data-overview-day-src="${esc(e.day)}" data-overview-raw="${esc(e.raw)}" data-overview-row-src="${esc(row)}" data-overview-change="${esc(e.change||'')}"><strong>${esc((e.subjects.names||[]).join(', ')||e.subjects.raw||'Урок')}</strong><span>${esc(teacherMode?e.class_name:(e.teachers.names||[]).join(', '))}</span><span>${esc([...new Set([...(e.teachers.rooms||[]),...(e.subjects.rooms||[])])].join(', '))}</span>${e.before_shift?'<span>до смены</span>':''}</button>`).join('')}</div>`;
+    const destination=overviewPending&&overviewPending.row===row&&overviewPending.target_day===day&&overviewPending.target_lesson===lesson;
+    html+=`<div class="overview-cell ${available?'overview-available':''} ${destination?'overview-destination':''}" data-overview-row="${esc(row)}" data-overview-day="${day}" data-overview-lesson="${lesson}"><button type="button" class="overview-target" data-overview-target aria-label="${esc(row)}, ${day}, урок ${lesson}">+</button>${entries.map(e=>`<button type="button" class="overview-lesson ${lessonColorClass(e.subjects.names,e.subjects.raw)} ${e.change==='removed'?'removed':e.change==='added'?'changed':''} ${overviewSelected&&overviewSelected.row===row&&overviewSelected.class_name===e.class_name&&overviewSelected.day===e.day&&overviewSelected.raw===e.raw&&e.change!=='removed'?'overview-source':''}" data-overview-class="${esc(e.class_name)}" data-overview-day-src="${esc(e.day)}" data-overview-raw="${esc(e.raw)}" data-overview-row-src="${esc(row)}" data-overview-change="${esc(e.change||'')}"><strong>${esc((e.subjects.names||[]).join(', ')||e.subjects.raw||'Урок')}</strong><span>${esc(teacherMode?e.class_name:(e.teachers.names||[]).join(', '))}</span><span>${esc([...new Set([...(e.teachers.rooms||[]),...(e.subjects.rooms||[])])].join(', '))}</span>${e.before_shift?'<span>до смены</span>':''}</button>`).join('')}</div>`;
   }}root.innerHTML=slots.length?html+'</div></div>':'<p class="muted">Уроков за выбранный период нет. Чтобы увидеть пустые часы, включите их показ.</p>';
   root.querySelectorAll('[data-overview-target]').forEach(button=>button.onclick=()=>{const cell=button.closest('[data-overview-row]');if(overviewSelected&&cell)overviewMove(overviewSelected,cell);});
   root.querySelectorAll('[data-overview-class]').forEach(button=>{
@@ -51,20 +52,22 @@ async function overviewMove(source,cell){
   if(overviewBusy||overviewData.stale)return;
   if(cell.dataset.overviewRow!==source.row){$("overviewStatus").textContent='Переносите урок только внутри строки выбранного класса или учителя.';return;}
   const request={revision:overviewData.revision,class_name:source.class_name,day:source.day,raw:source.raw,target_day:cell.dataset.overviewDay,target_lesson:Number(cell.dataset.overviewLesson)};
-  overviewPending=null;$("overviewRoomChoice").classList.add('hidden');overviewBusy=true;
+  overviewPending=null;$("overviewRoomChoice").classList.add('hidden');
+  clearOverviewDestination();cell.classList.add('overview-destination');overviewBusy=true;
   try{
     const result=await api('/api/admin/schedule-map/available-rooms',{method:'POST',body:request});
-    overviewPending=request;
+    overviewPending={...request,row:source.row};
     $("overviewRoomChoiceLabel").textContent=`${source.class_name} · ${request.target_day} · урок ${request.target_lesson}`;
     $("overviewRoomSelect").innerHTML='<option value="">Оставить прежний кабинет</option>'+result.rooms.map(room=>`<option value="${esc(room)}">${esc(room)}</option>`).join('');
     $("overviewRoomHint").textContent=result.can_change?(result.rooms.length?'Показаны кабинеты, свободные по времени и ограничениям. Учитель и класс проверяются при переносе.':'Свободных кабинетов в справочнике и расписании не найдено. Можно попробовать оставить прежний.'):'Урок содержит несколько групп, учителей или кабинетов: перенос возможен только с прежними кабинетами.';
     $("overviewRoomChoice").classList.remove('hidden');$("overviewRoomChoice").scrollIntoView?.({block:"nearest",behavior:"smooth"});$("overviewStatus").textContent='Выберите кабинет и подтвердите перенос.';
-  }catch(e){$("overviewStatus").textContent=e.message;}finally{overviewBusy=false;}
+  }catch(e){clearOverviewDestination();$("overviewStatus").textContent=e.message;}finally{overviewBusy=false;}
 }
-$("overviewMoveCancel").onclick=()=>{overviewPending=null;$("overviewRoomChoice").classList.add('hidden');};
+function clearOverviewDestination(){ $("overviewGrid").querySelectorAll(".overview-destination").forEach(cell=>cell.classList.remove("overview-destination")); }
+$("overviewMoveCancel").onclick=()=>{overviewPending=null;clearOverviewDestination();$("overviewRoomChoice").classList.add('hidden');};
 $("overviewMoveConfirm").onclick=async()=>{
   if(!overviewPending||overviewBusy)return;
-  const request={...overviewPending},room=$("overviewRoomSelect").value;if(room)request.room=room;
+  const {row,...request}=overviewPending,room=$("overviewRoomSelect").value;if(room)request.room=room;
   overviewBusy=true;
   try{await api('/api/admin/schedule-map/move',{method:'POST',body:request});await loadOverview();if(typeof loadPublishedMap==='function')await loadPublishedMap();$("overviewStatus").textContent='Урок перенесён в черновике; опубликуйте изменения ниже.';}
   catch(e){$("overviewStatus").textContent=e.message;}finally{overviewBusy=false;}

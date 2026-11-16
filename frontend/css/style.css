@@ -400,3 +400,6 @@ footer a{color:var(--muted)}
 
 /* A free slot in the selected row is a possible destination; conflicts are checked on save. */
 .overview-selecting .overview-cell.overview-available{background:#e0f5e4;box-shadow:inset 0 0 0 2px #65b975}.overview-selecting .overview-available .overview-target{background:#e0f5e4;border:1px solid #65b975;color:#176634}
+
+/* Selected source and destination stand out from green available slots. */
+.overview-lesson.overview-source{outline:3px solid #174aa0;outline-offset:-3px;box-shadow:0 0 0 2px #fff}.overview-cell.overview-destination{background:#dceafe;box-shadow:inset 0 0 0 3px #174aa0}.overview-selecting .overview-cell.overview-destination{background:#dceafe;box-shadow:inset 0 0 0 3px #174aa0}.overview-destination .overview-target{background:#dceafe!important;border-color:#174aa0!important;color:#174aa0!important}
