@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=users-compact-3">
+<link rel="stylesheet" href="/css/style.css?v=planner-sections-4">
 </head>
 <body>
 
@@ -61,14 +61,21 @@
       <div id="staffUsersList"></div>
       </details>
     </details>
-        <details class="card admin-block" id="overviewMapSection"><summary><h2>Общая карта классов и учителей</h2></summary><p class="hint">Строки — классы или учителя, столбцы — уроки недели. Выберите урок и ячейку «+» либо перетащите карточку. В одной ячейке параллельные группы переносятся вместе. Красным зачёркнуты снятые уроки, зелёным показаны новые положения в черновике.</p>
+    <details class="card admin-block" id="scheduleConstructorSection">
+      <summary><h2>Конструктор расписания</h2></summary>
+        <details class="planner-admin-section" id="overviewMapSection"><summary><strong>Общая карта классов и учителей</strong></summary><p class="hint">Строки — классы или учителя, столбцы — уроки недели. Выберите урок и ячейку «+» либо перетащите карточку. В одной ячейке параллельные группы переносятся вместе. Красным зачёркнуты снятые уроки, зелёным показаны новые положения в черновике.</p>
           <div class="published-map-controls"><label>Строки <select id="overviewMode"><option value="classes">Классы</option><option value="teachers">Учителя</option></select></label><label id="overviewTeacherField" class="hidden">Учитель <select id="overviewTeacher"><option value="">Все учителя</option></select></label><label>День <select id="overviewDay"><option value="">Вся неделя</option><option>Пн</option><option>Вт</option><option>Ср</option><option>Чт</option><option>Пт</option><option>Сб</option></select></label><label>Поиск <input type="search" id="overviewSearch" placeholder="Класс или учитель"></label><label><input type="checkbox" id="overviewShowEmpty"> Показать пустые часы для переноса</label><button type="button" id="overviewRefresh" class="btn secondary">Обновить карту</button></div>
           <p id="overviewStatus" class="hint" aria-live="polite"></p><div id="overviewSelected" class="hidden"><p id="overviewSelectionLabel"></p><button type="button" id="overviewRemove" class="btn secondary">Снять урок у учителя</button><button type="button" id="overviewClear" class="btn secondary">Отменить выбор</button><details><summary>Отмена или перенос на конкретную дату</summary><p class="hint">Для выбранного урока укажите исходную дату. Чтобы перенести, укажите также новую дату и номер урока; если не указывать — урок будет отменён только на исходную дату. Изменение сразу видно посетителям, обычная неделя не изменяется.</p><form id="datedChangeForm" class="planner-form"><label>Исходная дата<input type="date" id="datedSource" required></label><label>Новая дата (необязательно)<input type="date" id="datedTarget"></label><label>Новый номер урока<input type="number" id="datedLesson" min="1" max="12"></label><button class="btn" type="submit">Сохранить изменение на дату</button></form></details><details><summary>Исправить данные урока</summary><form id="overviewEdit" class="planner-form"><label>Предметы через запятую<input id="overviewSubjects" maxlength="800"></label><label>Учителя через запятую<input id="overviewTeachers" maxlength="800"></label><label>Кабинеты через запятую<input id="overviewRooms" maxlength="800"></label><button class="btn" type="submit">Сохранить в черновик</button></form></details></div><details><summary>Изменения на конкретные даты</summary><p class="hint">Изменения на даты публикуются сразу. При обновлении недельного расписания их необходимо проверить: устаревшие не действуют: их нужно отменить и создать заново.</p><button type="button" class="btn secondary" id="datedReset">Отменить все изменения на даты</button><div id="datedChangeList"></div></details><div id="overviewRoomChoice" class="hidden" aria-live="polite"><p id="overviewRoomChoiceLabel"></p><label>Кабинет на выбранный урок <select id="overviewRoomSelect"></select></label><p id="overviewRoomHint" class="hint"></p><button type="button" id="overviewMoveConfirm" class="btn">Перенести урок</button> <button type="button" id="overviewMoveCancel" class="btn secondary">Отмена</button></div><div id="overviewGrid"></div><div class="published-map-controls"><button type="button" id="overviewReset" class="btn secondary">Отменить изменения карты</button><button type="button" id="overviewPublish" class="btn">Опубликовать изменения</button></div>
         </details>
-    <details class="card admin-block">
-      <summary><h2>Конструктор расписания</h2></summary>
+    <details class="planner-admin-section" id="secondShiftSection">
+      <summary><strong>Классы второй смены</strong></summary>
+      <p class="hint">Отметьте классы, которые учатся во вторую смену. Для них номера уроков начинаются заново с первого и берётся время из блока «2 смена».</p>
+      <div class="shift-class-list" id="shiftClassList"><p class="muted">Сначала загрузите расписание уроков.</p></div>
+      <button class="btn" id="saveShiftBtn" type="button" disabled>Сохранить классы второй смены</button>
+      <div id="shiftSettingsResult" style="margin-top:10px"></div>
+    </details>
       <button class="btn secondary planner-toggle" id="plannerOpen" type="button">Открыть конструктор</button>
-      <p class="hint">Здесь создаётся новое расписание в отдельном черновике. Для исправления текущего расписания используйте «Общую карту классов и учителей». Для проверки и подбора сначала загрузите расписание звонков.</p>
+      <p class="hint">Здесь создаётся новое расписание в отдельном черновике. Для исправления текущего расписания откройте «Общую карту классов и учителей» выше. Для проверки и подбора сначала загрузите расписание звонков.</p>
       <div id="plannerRoot" class="hidden"></div>
     </details>
     <details class="card admin-block">
@@ -120,13 +127,7 @@
       <div id="bellUploadResult" style="margin-top:10px"></div>
     </details>
 
-    <details class="card admin-block">
-      <summary><h2>Классы второй смены</h2></summary>
-      <p class="hint">Отметьте классы, которые учатся во вторую смену. Для них номера уроков начинаются заново с первого и берётся время из блока «2 смена».</p>
-      <div class="shift-class-list" id="shiftClassList"><p class="muted">Сначала загрузите расписание уроков.</p></div>
-      <button class="btn" id="saveShiftBtn" type="button" disabled>Сохранить классы второй смены</button>
-      <div id="shiftSettingsResult" style="margin-top:10px"></div>
-    </details>
+
 
   </div>
 </main>

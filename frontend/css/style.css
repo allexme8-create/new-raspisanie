@@ -404,3 +404,5 @@ footer a{color:var(--muted)}
 
 /* Compact, independently expandable user list and create form. */
 .staff-compact-section{border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:8px}.staff-compact-section>summary,.staff-user-entry>summary{cursor:pointer}.staff-compact-section>summary{font-weight:700}.staff-user-list li{display:block;padding:0}.staff-user-entry>summary{padding:9px 2px;overflow-wrap:anywhere}.staff-user-entry .staff-user-details{padding:2px 4px 10px}.staff-user-entry .staff-user-details .hint{margin:4px 0}.staff-user-actions{margin-top:8px}
+
+.planner-admin-section{border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0}.planner-admin-section>summary{cursor:pointer;color:var(--acc)}
