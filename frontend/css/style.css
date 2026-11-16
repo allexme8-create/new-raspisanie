@@ -389,3 +389,5 @@ footer a{color:var(--muted)}
 
 /* Пастельные цвета предметов; состояния изменений остаются красным и зелёным. */
 .lesson-color-0{--lesson-color:#dbeafe}.lesson-color-1{--lesson-color:#fce7f3}.lesson-color-2{--lesson-color:#fef3c7}.lesson-color-3{--lesson-color:#e9d5ff}.lesson-color-4{--lesson-color:#cffafe}.lesson-color-5{--lesson-color:#ffedd5}.lesson-color-6{--lesson-color:#e0e7ff}.lesson-color-7{--lesson-color:#f5dce6}.lesson-color-8{--lesson-color:#d9f3ed}.lesson-color-9{--lesson-color:#f3e8cf}.lesson-color-10{--lesson-color:#e5e4fa}.lesson-color-11{--lesson-color:#fce2d7}.lesson-color-12{--lesson-color:#d6eefa}.lesson-color-13{--lesson-color:#eee2f5}
+
+.catalog-file-import{border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0}.catalog-file-import>summary{cursor:pointer;font-weight:700}.catalog-file-import ul{max-height:200px;overflow:auto;font-size:13px}.planner-map-lesson.dragging,.overview-lesson.dragging{position:relative;z-index:20;opacity:.88;box-shadow:0 7px 20px rgba(20,40,80,.35);cursor:grabbing;will-change:transform}

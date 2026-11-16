@@ -33,9 +33,9 @@ function renderPublishedMap(){
     const selected=()=>({day:chip.dataset.pubSourceDay,raw:chip.dataset.pubSource});
     chip.onclick=()=>{if(suppress){suppress=false;return;}if(publishedMapBusy||data.stale)return;publishedMapSelected=selected();openPublishedMapEdit();renderPublishedMap();};
     chip.onpointerdown=e=>{if(e.button!==0||publishedMapBusy||data.stale)return;pointer={id:e.pointerId,x:e.clientX,y:e.clientY,drag:false};chip.setPointerCapture(e.pointerId);};
-    chip.onpointermove=e=>{if(pointer&&pointer.id===e.pointerId&&Math.hypot(e.clientX-pointer.x,e.clientY-pointer.y)>8){pointer.drag=true;chip.classList.add('dragging');}};
-    chip.onpointercancel=()=>{pointer=null;chip.classList.remove('dragging');};
-    chip.onpointerup=e=>{if(!pointer||pointer.id!==e.pointerId)return;const drag=pointer.drag;pointer=null;chip.classList.remove('dragging');if(!drag)return;suppress=true;const cell=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-pub-day]');if(cell&&map.contains(cell))movePublishedMap(selected(),cell.dataset.pubDay,Number(cell.dataset.pubLesson));else {status.textContent='Перенос отменён.';setTimeout(()=>{suppress=false},0);}};
+    chip.onpointermove=e=>{if(pointer&&pointer.id===e.pointerId&&Math.hypot(e.clientX-pointer.x,e.clientY-pointer.y)>8){pointer.drag=true;moveDragCard(chip,e.clientX-pointer.x,e.clientY-pointer.y);}};
+    chip.onpointercancel=()=>{pointer=null;finishDragCard(chip);};
+    chip.onpointerup=e=>{if(!pointer||pointer.id!==e.pointerId)return;const drag=pointer.drag;pointer=null;if(!drag){finishDragCard(chip);return;}suppress=true;const cell=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-pub-day]');finishDragCard(chip);setTimeout(()=>{suppress=false},0);if(cell&&map.contains(cell))movePublishedMap(selected(),cell.dataset.pubDay,Number(cell.dataset.pubLesson));else {status.textContent='Перенос отменён.';setTimeout(()=>{suppress=false},0);}};
   });
 }
 function openPublishedMapEdit(){

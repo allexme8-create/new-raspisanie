@@ -25,9 +25,9 @@ function renderOverview(){
     const source=()=>({class_name:button.dataset.overviewClass,day:button.dataset.overviewDaySrc,raw:button.dataset.overviewRaw,row:button.dataset.overviewRowSrc});
     button.onclick=()=>{if(suppress){suppress=false;return;}if(button.dataset.overviewChange==='removed'||data.stale||overviewBusy)return;chooseOverview(source());};
     button.onpointerdown=e=>{if(e.button!==0||data.stale||button.dataset.overviewChange==='removed'||overviewBusy)return;pointer={id:e.pointerId,x:e.clientX,y:e.clientY,drag:false};button.setPointerCapture(e.pointerId);};
-    button.onpointermove=e=>{if(pointer&&pointer.id===e.pointerId&&Math.hypot(e.clientX-pointer.x,e.clientY-pointer.y)>8){pointer.drag=true;button.classList.add('dragging');}};
-    button.onpointercancel=()=>{pointer=null;button.classList.remove('dragging');};
-    button.onpointerup=e=>{if(!pointer||pointer.id!==e.pointerId)return;const drag=pointer.drag;pointer=null;button.classList.remove('dragging');if(!drag)return;suppress=true;const cell=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-overview-row]');if(cell&&root.contains(cell))overviewMove(source(),cell);else{status.textContent='Перенос отменён.';setTimeout(()=>{suppress=false},0);}};
+    button.onpointermove=e=>{if(pointer&&pointer.id===e.pointerId&&Math.hypot(e.clientX-pointer.x,e.clientY-pointer.y)>8){pointer.drag=true;moveDragCard(button,e.clientX-pointer.x,e.clientY-pointer.y);}};
+    button.onpointercancel=()=>{pointer=null;finishDragCard(button);};
+    button.onpointerup=e=>{if(!pointer||pointer.id!==e.pointerId)return;const drag=pointer.drag;pointer=null;if(!drag){finishDragCard(button);return;}suppress=true;const cell=document.elementFromPoint(e.clientX,e.clientY)?.closest('[data-overview-row]');finishDragCard(button);setTimeout(()=>{suppress=false},0);if(cell&&root.contains(cell))overviewMove(source(),cell);else{status.textContent='Перенос отменён.';setTimeout(()=>{suppress=false},0);}};
   });
 }
 function chooseOverview(source){

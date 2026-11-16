@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field
 import github_backup
 import planner
 import load_import
+import catalog_file
 import schedule_map
 import staff
 from schedule_parser import (
@@ -633,6 +634,50 @@ def planner_save(project: planner.Project, _: None = Depends(require_admin)) -> 
         state["planner"] = project.model_dump()
         _save_state()
         return {"project": project.model_dump(), "issues": planner.issues(project, state.get("bell_schedule"), complete=True)}
+
+
+@app.post("/api/admin/planner/catalog-file/{kind}/preview")
+async def preview_catalog_file(kind: str, file: UploadFile = File(...), _: None = Depends(require_admin)) -> dict:
+    if kind not in ("teachers","rooms"):raise HTTPException(404,"Неизвестный справочник")
+    filename=file.filename or ""
+    if filename.rsplit(".",1)[-1].lower() not in {"csv","xls","xlsx","xlsm","xml","ods"}:raise HTTPException(422,"Поддерживаются CSV, XLS, XLSX, XLSM, ODS и Excel XML.")
+    buf=await file.read(10*1024*1024+1)
+    if len(buf)>10*1024*1024:raise HTTPException(413,"Файл больше 10 МБ.")
+    try:names=catalog_file.parse(buf,filename,kind)
+    except (ParseError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
+    if kind=="teachers":names=[normalize_teacher_initials(name) for name in names]
+    with _planner_lock:
+        p=_planner_project();seen={x.name.casefold() for x in getattr(p,kind)};added=[];duplicates=[]
+        for name in names:
+            if name.casefold() in seen:duplicates.append(name)
+            else:added.append(name);seen.add(name.casefold())
+        if len(getattr(p,kind))+len(added)>200:raise HTTPException(422,"В справочнике допускается не более 200 записей; сократите файл перед загрузкой.")
+        return {"revision":p.revision,"added":added,"duplicates":duplicates}
+
+
+class CatalogFileImport(BaseModel):
+    revision: int = Field(ge=0)
+    names: list[str] = Field(min_length=1,max_length=200)
+
+
+@app.post("/api/admin/planner/catalog-file/{kind}/apply")
+def apply_catalog_file(kind: str, body: CatalogFileImport, _: None = Depends(require_admin)) -> dict:
+    if kind not in ("teachers","rooms"):raise HTTPException(404,"Неизвестный справочник")
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Проверьте файл заново.")
+        existing={x.name.casefold() for x in getattr(p,kind)};added=[]
+        for raw in body.names:
+            name=" ".join(raw.split())
+            if kind=="teachers":name=normalize_teacher_initials(name)
+            if not name or len(name)>80:raise HTTPException(422,"Проверьте названия в таблице.")
+            if name.casefold() not in existing:
+                getattr(p,kind).append(planner.Teacher(name=name) if kind=="teachers" else planner.Room(name=name))
+                existing.add(name.casefold());added.append(name)
+        if len(getattr(p,kind))>200:raise HTTPException(422,"В справочнике допускается не более 200 записей.")
+        if added:
+            p.revision+=1;state["planner"]=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True),"added":added}
 
 
 @app.post("/api/admin/planner/load-import/preview")
