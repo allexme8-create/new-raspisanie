@@ -26,7 +26,8 @@ function renderOverview(){
   for(const {lesson} of slots)html+=`<div class="overview-head">${lesson}</div>`;
   for(const row of filtered){html+=`<div class="overview-row-label">${esc(row)}</div>`;for(const {day,lesson} of slots){
     const entries=data.entries.filter(e=>e.day===day&&e.lesson===lesson&&(teacherMode?(e.teachers.names||[]).includes(row):e.class_name===row));
-    html+=`<div class="overview-cell" data-overview-row="${esc(row)}" data-overview-day="${day}" data-overview-lesson="${lesson}"><button type="button" class="overview-target" data-overview-target aria-label="${esc(row)}, ${day}, урок ${lesson}">+</button>${entries.map(e=>`<button type="button" class="overview-lesson ${lessonColorClass(e.subjects.names,e.subjects.raw)} ${e.change==='removed'?'removed':e.change==='added'?'changed':''}" data-overview-class="${esc(e.class_name)}" data-overview-day-src="${esc(e.day)}" data-overview-raw="${esc(e.raw)}" data-overview-row-src="${esc(row)}" data-overview-change="${esc(e.change||'')}"><strong>${esc((e.subjects.names||[]).join(', ')||e.subjects.raw||'Урок')}</strong><span>${esc(teacherMode?e.class_name:(e.teachers.names||[]).join(', '))}</span><span>${esc([...new Set([...(e.teachers.rooms||[]),...(e.subjects.rooms||[])])].join(', '))}</span>${e.before_shift?'<span>до смены</span>':''}</button>`).join('')}</div>`;
+    const available=overviewSelected&&overviewSelected.row===row&&!entries.some(e=>e.change!=='removed');
+    html+=`<div class="overview-cell ${available?'overview-available':''}" data-overview-row="${esc(row)}" data-overview-day="${day}" data-overview-lesson="${lesson}"><button type="button" class="overview-target" data-overview-target aria-label="${esc(row)}, ${day}, урок ${lesson}">+</button>${entries.map(e=>`<button type="button" class="overview-lesson ${lessonColorClass(e.subjects.names,e.subjects.raw)} ${e.change==='removed'?'removed':e.change==='added'?'changed':''}" data-overview-class="${esc(e.class_name)}" data-overview-day-src="${esc(e.day)}" data-overview-raw="${esc(e.raw)}" data-overview-row-src="${esc(row)}" data-overview-change="${esc(e.change||'')}"><strong>${esc((e.subjects.names||[]).join(', ')||e.subjects.raw||'Урок')}</strong><span>${esc(teacherMode?e.class_name:(e.teachers.names||[]).join(', '))}</span><span>${esc([...new Set([...(e.teachers.rooms||[]),...(e.subjects.rooms||[])])].join(', '))}</span>${e.before_shift?'<span>до смены</span>':''}</button>`).join('')}</div>`;
   }}root.innerHTML=slots.length?html+'</div></div>':'<p class="muted">Уроков за выбранный период нет. Чтобы увидеть пустые часы, включите их показ.</p>';
   root.querySelectorAll('[data-overview-target]').forEach(button=>button.onclick=()=>{const cell=button.closest('[data-overview-row]');if(overviewSelected&&cell)overviewMove(overviewSelected,cell);});
   root.querySelectorAll('[data-overview-class]').forEach(button=>{
@@ -40,10 +41,11 @@ function renderOverview(){
   });
 }
 function chooseOverview(source){
-  overviewSelected=source;$("overviewGrid").classList.add("overview-selecting");const e=overviewData.entries.find(e=>e.class_name===source.class_name&&e.day===source.day&&e.raw===source.raw&&e.change!=='removed');if(!e)return;
+  overviewSelected=source;const e=overviewData.entries.find(e=>e.class_name===source.class_name&&e.day===source.day&&e.raw===source.raw&&e.change!=='removed');if(!e)return;
   $("overviewSelectionLabel").textContent=`${source.class_name} · ${source.day} · урок ${e.lesson}: ${(e.subjects.names||[]).join(', ')} · ${(e.teachers.names||[]).join(', ')}`;
   $("overviewSubjects").value=(e.subjects.names||[]).join(', ');$("overviewTeachers").value=(e.teachers.names||[]).join(', ');$("overviewRooms").value=[...new Set([...(e.subjects.rooms||[]),...(e.teachers.rooms||[])])].join(', ');
-  $("overviewRemove").disabled=(e.teachers.names||[]).length!==1;$("overviewSelected").classList.remove('hidden');$("overviewStatus").textContent='Урок выбран. Нажмите «+» в той же строке или исправьте его выше.';
+  renderOverview();
+  $("overviewRemove").disabled=(e.teachers.names||[]).length!==1;$("overviewSelected").classList.remove('hidden');$("overviewStatus").textContent='Урок выбран. Свободные ячейки в этой строке выделены зелёным. Нажмите «+» или исправьте данные выше; занятость учителей и кабинетов проверяется при переносе.';
 }
 async function overviewMove(source,cell){
   if(overviewBusy||overviewData.stale)return;if(cell.dataset.overviewRow!==source.row){$("overviewStatus").textContent='Переносите урок только внутри строки выбранного класса или учителя.';return;}

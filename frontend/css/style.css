@@ -397,3 +397,6 @@ footer a{color:var(--muted)}
 
 /* Two fixed-height sticky header rows keep the day labels above lesson numbers. */
 .overview-corner{grid-row:span 2}.overview-day-head{position:sticky;top:0;z-index:4;height:28px;box-sizing:border-box;padding:5px 3px;background:#e7eef9;font-size:12px;font-weight:700;text-align:center;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.overview-head{top:29px;height:28px;box-sizing:border-box;text-align:center}
+
+/* A free slot in the selected row is a possible destination; conflicts are checked on save. */
+.overview-selecting .overview-cell.overview-available{background:#e0f5e4;box-shadow:inset 0 0 0 2px #65b975}.overview-selecting .overview-available .overview-target{background:#e0f5e4;border:1px solid #65b975;color:#176634}
