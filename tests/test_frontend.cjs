@@ -314,4 +314,24 @@ assert.equal((element("roomsGrid").innerHTML.match(/Свободен<\/div>/g)||
 vm.runInContext(`state.datedChanges=[{class_name:'5а',teacher:'Иванова ИИ',subject:'<Физика>',source_date:'2026-11-09',source_lesson:1,target_date:'2026-11-10',target_lesson:2,stale:false}]; globalThis.notice=datedChangesHTML('class','5а');globalThis.teacherNotice=datedChangesHTML('teacher','Иванова ИИ');globalThis.otherNotice=datedChangesHTML('class','6а');state.datedChanges[0].stale=true;globalThis.staleNotice=datedChangesHTML('class','5а');`,context);
 assert.match(context.notice,/<s>/);assert.match(context.notice,/&lt;Физика&gt;/);assert.match(context.notice,/dated-moved/);assert.match(context.teacherNotice,/2026-11-10/);assert.equal(context.otherNotice,'');assert.match(context.staleNotice,/Не действует/);assert.doesNotMatch(context.staleNotice,/<s>/);
 
+vm.runInContext(`
+  state.classes=['5а'];state.secondShiftClasses=[];
+  state.teachers={classes:['5а'],numbering:'local',grid:{Пн:{'2':{'5а':{names:['Иванова'],raw:'Иванова',rooms:['101']}}}}};
+  state.subjects={classes:['5а'],numbering:'local',grid:{Пн:{'2':{'5а':{names:['Физика'],raw:'Физика',rooms:['101']}}}}};
+  state.bellSchedule={shifts:{'1':{Пн:{'1':{start:'08:00',end:'08:40'},'2':{start:'09:00',end:'09:40'}}}}};
+  state.weeklyMoves=[{class_name:'5а',expires_at:Date.now()/1000+60,source:{day:'Пн',raw:'1',lesson:1,shift:1,teachers:{names:['Иванова'],raw:'Иванова',rooms:['101']},subjects:{names:['Физика'],raw:'Физика',rooms:['101']}},target:{day:'Пн',raw:'2',lesson:2,teachers:{names:['Иванова']}}}];
+  state.curClass='5а';state.classSel=0;renderClassBody();globalThis.movedDay=$('classBody').innerHTML;
+  const movedWeekElement={innerHTML:''};renderWeekInto(movedWeekElement,'5а');globalThis.movedWeek=movedWeekElement.innerHTML;
+  globalThis.displayTeacher=teacherShiftGroupHTML(displayTeacherRows('Иванова','Пн'));
+  state.teacherNames=['Иванова'];favs.classes=['5а'];favs.teachers=['Иванова'];state.favDay=0;renderFavArea();globalThis.movedFavorites=$('favArea').innerHTML;
+  globalThis.realLessons=classLessonEntries('5а','Пн').length;
+  globalThis.realTeacher=teacherDayRows('Иванова','Пн').length;
+  globalThis.oldRoomOccupancy=roomOccupancyAt(new FixedDate(2026,10,9,8,20)).byRoom['101'].active.length;
+  state.weeklyMoves[0].expires_at=Date.now()/1000;globalThis.expiredEntries=displayClassEntries('5а','Пн').length;globalThis.expiredTeacher=displayTeacherRows('Иванова','Пн').length;
+`,context);
+assert.match(context.movedDay,/weekly-move-old/);assert.match(context.movedDay,/weekly-move-new/);assert.match(context.movedDay,/уроков: 1/);
+assert.match(context.movedWeek,/weekly-move-old/);assert.match(context.movedWeek,/weekly-move-new/);
+assert.match(context.displayTeacher,/weekly-move-old/);assert.match(context.displayTeacher,/weekly-move-new/);assert.match(context.movedFavorites,/weekly-move-old/);assert.match(context.movedFavorites,/weekly-move-new/);
+assert.equal(context.realLessons,1);assert.equal(context.realTeacher,1);assert.equal(context.oldRoomOccupancy,0);assert.equal(context.expiredEntries,1);assert.equal(context.expiredTeacher,1);
+
 console.log("Frontend behavior OK: paired teachers, unique rooms, shift-specific times, live lesson countdown.");

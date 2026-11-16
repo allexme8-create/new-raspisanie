@@ -1,11 +1,21 @@
 "use strict";
 /* Общая карта текущего расписания использует тот же черновик, что и карта класса. */
-let overviewData=null,overviewSelected=null,overviewBusy=false,datedData=null,overviewPending=null;
+let overviewData=null,overviewSelected=null,overviewBusy=false,datedData=null,overviewPending=null,overviewExpiryTimer=null;
 const overviewDays=['Пн','Вт','Ср','Чт','Пт','Сб'];
 const overviewDayNames={'Пн':'Понедельник','Вт':'Вторник','Ср':'Среда','Чт':'Четверг','Пт':'Пятница','Сб':'Суббота'};
 async function loadOverview(){
-  try{overviewData=await api('/api/admin/schedule-map?all_entries=true');overviewSelected=null;overviewPending=null;$("overviewRoomChoice").classList.add('hidden');$("overviewSelected").classList.add('hidden');renderOverview();}
+  try{overviewData=await api('/api/admin/schedule-map?all_entries=true');overviewSelected=null;overviewPending=null;$("overviewRoomChoice").classList.add('hidden');$("overviewSelected").classList.add('hidden');renderOverview();scheduleOverviewExpiry();}
   catch(e){$("overviewStatus").textContent=e.message;}
+}
+function scheduleOverviewExpiry(){
+  if(overviewExpiryTimer)clearTimeout(overviewExpiryTimer);
+  if(!overviewData?.weekly_expires_at)return;
+  const delay=Math.min(2147483647,Math.max(50,overviewData.weekly_expires_at*1000-Date.now()+50));
+  overviewExpiryTimer=setTimeout(()=>{
+    // Do not discard a selected lesson or an in-flight edit at the deadline.
+    if(overviewSelected||overviewPending||overviewBusy){overviewExpiryTimer=setTimeout(scheduleOverviewExpiry,30000);return;}
+    loadOverview();
+  },delay);
 }
 function renderOverview(){
   const data=overviewData,root=$("overviewGrid"),status=$("overviewStatus");if(!data)return;

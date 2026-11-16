@@ -81,6 +81,7 @@ state: dict = {
     "planner_rooms_imported": False,
     "planner_groups_imported": False,
     "schedule_map_draft": None,
+    "weekly_move_notices": [],
     "dated_schedule_changes": [],
     "dated_schedule_revision": 0,
 }
@@ -100,7 +101,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported", "planner_groups_imported", "schedule_map_draft", "dated_schedule_changes", "dated_schedule_revision"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported", "planner_groups_imported", "schedule_map_draft", "weekly_move_notices", "dated_schedule_changes", "dated_schedule_revision"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -317,6 +318,7 @@ def get_schedule() -> JSONResponse:
             "bell_schedule": {"shifts": bell["shifts"]} if bell else None,
             "second_shift_classes": _second_shift_classes(),
             "dated_changes": public_dated_changes(),
+            "weekly_moves": active_weekly_moves(),
             "updated_at": state["updated_at"],
         }
     )
@@ -892,6 +894,54 @@ def map_current():
     return {"base":map_fingerprint(published),"revision":0,"data":published}, False
 
 
+WEEKLY_MOVE_SECONDS = 7 * 24 * 60 * 60
+
+
+def map_entry_at(data, class_name, day, raw):
+    return next((e for e in schedule_map.entries(data,class_name) if e["day"]==day and e["raw"]==raw),None)
+
+
+def active_weekly_moves(now=None):
+    """Показываем только неистёкшие отметки, относящиеся к актуальной сетке."""
+    now=time.time() if now is None else now
+    data=schedule_map.snapshot(state)
+    result=[]
+    for notice in state.get("weekly_move_notices",[]):
+        if notice.get("expires_at",0)<=now: continue
+        target=notice.get("target",{})
+        current=map_entry_at(data,notice.get("class_name",""),target.get("day"),target.get("raw"))
+        if not current or current.get("teachers")!=target.get("teachers") or current.get("subjects")!=target.get("subjects"): continue
+        result.append(notice)
+    return result
+
+
+def build_weekly_move_notices(draft, now):
+    notices=copy.deepcopy(active_weekly_moves(now))
+    for event in draft.get("move_events",[]):
+        cls=event["class_name"];source=event["source"]
+        index=next((i for i,n in enumerate(notices) if n["class_name"]==cls and n["target"]["day"]==source["day"] and n["target"]["raw"]==source["raw"]),None)
+        if event["type"]=="remove":
+            if index is not None: notices.pop(index)
+            continue
+        if index is None:
+            notice={"class_name":cls,"source":source}
+        else:
+            notice=notices.pop(index)
+        target=event["target"]
+        if (target["day"],target["raw"])==(notice["source"]["day"],notice["source"]["raw"]): continue
+        notice.update(target=target,expires_at=now+WEEKLY_MOVE_SECONDS)
+        notices.append(notice)
+    # An edited or deleted target must not leave an orphaned cancellation marker.
+    result=[]
+    for notice in notices:
+        target=notice["target"]
+        current=map_entry_at(draft["data"],notice["class_name"],target["day"],target["raw"])
+        if current:
+            notice["target"]=current
+            result.append(notice)
+    return result
+
+
 def check_map_conflicts(data, class_name, day, shift, lesson, teacher_cell, subject_cell):
     p=schedule_map.period(data,shift,day,lesson)
     start,end=schedule_map.clock(p.get("start")),schedule_map.clock(p.get("end"))
@@ -946,8 +996,14 @@ def read_schedule_map(class_name: str = "", all_entries: bool = False, _: None =
             original_by_key={key(e):e for e in original};current_by_key={key(e):e for e in current}
             entries=[{**e,"change":"added" if original_by_key.get(key(e))!=e else ""} for e in current]
             entries += [{**e,"change":"removed"} for e in original if current_by_key.get(key(e))!=e]
+            for notice in active_weekly_moves():
+                cls=notice["class_name"];source={**notice["source"],"class_name":cls,"change":"removed"};target=notice["target"]
+                if not any(key(e)==key(source) and e.get("change")=="removed" and e["teachers"]==source["teachers"] and e["subjects"]==source["subjects"] for e in entries): entries.append(source)
+                for e in entries:
+                    if e["class_name"]==cls and e["day"]==target["day"] and e["raw"]==target["raw"] and e.get("change")!="removed": e["change"]="added"
         else: entries=schedule_map.entries(data,class_name) if class_name else []
-        return {"revision":draft["revision"],"stale":stale,"classes":classes,"entries":entries,"has_changes":bool(state.get("schedule_map_draft"))}
+        expirations=[n["expires_at"] for n in active_weekly_moves()]
+        return {"revision":draft["revision"],"stale":stale,"classes":classes,"entries":entries,"has_changes":bool(state.get("schedule_map_draft")),"weekly_expires_at":min(expirations) if expirations else None}
 
 
 def map_can_change_room(entry):
@@ -994,6 +1050,7 @@ def move_schedule_map(body: MapMove, _: None = Depends(require_admin)) -> dict:
         if body.class_name not in valid_classes: raise HTTPException(404,"Класс не найден")
         entry=next((e for e in schedule_map.entries(data,body.class_name) if e["day"]==body.day and e["raw"]==body.raw),None)
         if not entry: raise HTTPException(404,"Урок не найден")
+        original_entry=copy.deepcopy(entry)
         target_raw=schedule_map.destination(data,body.class_name,body.target_day,body.target_lesson)
         same=body.day==body.target_day and body.raw==target_raw
         if same and body.room is None:
@@ -1018,7 +1075,10 @@ def move_schedule_map(body: MapMove, _: None = Depends(require_admin)) -> dict:
                 cell=entry[kind] if body.room is not None else schedule_map.getcell(data,kind,body.day,body.raw,body.class_name)
                 schedule_map.putcell(data,kind,body.day,body.raw,body.class_name,None)
                 schedule_map.putcell(data,kind,body.target_day,target_raw,body.class_name,cell)
-        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data}
+        events=copy.deepcopy(draft.get("move_events",[]))
+        if not same:
+            events.append({"type":"move","class_name":body.class_name,"source":original_entry,"target":{"day":body.target_day,"raw":target_raw}})
+        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data,"move_events":events}
         state["schedule_map_draft"]=updated;_save_state()
         return {"revision":updated["revision"],"ok":True}
 
@@ -1044,7 +1104,9 @@ def remove_schedule_map_lesson(body: MapRemove, _: None = Depends(require_admin)
             raise HTTPException(422,"В ячейке несколько учителей или групп. Чтобы не удалить чужой урок, измените её в конструкторе групп.")
         for kind in ("teachers","subjects"):
             if data.get(kind):schedule_map.putcell(data,kind,body.day,body.raw,body.class_name,None)
-        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data}
+        events=copy.deepcopy(draft.get("move_events",[]))
+        events.append({"type":"remove","class_name":body.class_name,"source":copy.deepcopy(entry)})
+        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data,"move_events":events}
         state["schedule_map_draft"]=updated;_save_state();return {"revision":updated["revision"],"ok":True}
 
 
@@ -1180,7 +1242,7 @@ def edit_schedule_map(body: MapEdit, _: None = Depends(require_admin)) -> dict:
             check_map_conflicts(data,body.class_name,body.day,entry["shift"],entry["lesson"],t,s)
         for kind,cell in (("teachers",t),("subjects",s)):
             if data.get(kind):schedule_map.putcell(data,kind,body.day,body.raw,body.class_name,cell)
-        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data}
+        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data,"move_events":copy.deepcopy(draft.get("move_events",[]))}
         state["schedule_map_draft"]=updated;_save_state();return {"revision":updated["revision"],"ok":True}
 
 
@@ -1203,8 +1265,10 @@ def publish_schedule_map(body: MapPublish, _: None = Depends(require_admin)) -> 
         draft,stale=map_current()
         if stale or draft["revision"]!=body.revision: raise HTTPException(409,"Расписание или карта изменились. Обновите данные.")
         if not state.get("schedule_map_draft"): raise HTTPException(422,"Нет изменений для публикации")
+        notices=build_weekly_move_notices(draft,time.time())
         for kind in ("teachers","subjects"):
             state[kind]=draft["data"][kind]
+        state["weekly_move_notices"]=notices
         state["schedule_map_draft"]=None;_touch_updated_at();_save_state()
         return {"ok":True}
 

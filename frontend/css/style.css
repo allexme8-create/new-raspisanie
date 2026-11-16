@@ -406,3 +406,6 @@ footer a{color:var(--muted)}
 .staff-compact-section{border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:8px}.staff-compact-section>summary,.staff-user-entry>summary{cursor:pointer}.staff-compact-section>summary{font-weight:700}.staff-user-list li{display:block;padding:0}.staff-user-entry>summary{padding:9px 2px;overflow-wrap:anywhere}.staff-user-entry .staff-user-details{padding:2px 4px 10px}.staff-user-entry .staff-user-details .hint{margin:4px 0}.staff-user-actions{margin-top:8px}
 
 .planner-admin-section{border:1px solid var(--line);border-radius:8px;padding:8px;margin:8px 0}.planner-admin-section>summary{cursor:pointer;color:var(--acc)}
+
+/* Published weekly moves are visual notices, never occupied lessons. */
+.weekly-move-old{background:#fbe8e8;border:1px solid #ce6666;border-radius:6px;padding:4px;color:#9b2525;text-decoration:line-through}.weekly-move-old .subj,.weekly-move-old .teach,.weekly-move-old .tcls,.weekly-move-old .tsubj,.weekly-move-old .room-badge{color:#9b2525;text-decoration:line-through}.weekly-move-new{background:#e5f6e9;border:1px solid #72b883;border-radius:6px;padding:4px}.weekly-move-label{display:block;font-size:11px;font-weight:700;color:#78413b}.weekly-move-new>.weekly-move-label{color:#226b35}

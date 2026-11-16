@@ -15,7 +15,7 @@ const state={
   classSel:DEF_DAY, teacherSel:DEF_DAY, favDay:DEF_DAY,
   roomOnlyFree:false,
   bellSchedule:null, secondShiftClasses:[],
-  updatedAt:null, datedChanges:[]
+  updatedAt:null, datedChanges:[], weeklyMoves:[]
 };
 
 const FAV_KEY="schedule_favorites_v1";
@@ -203,6 +203,8 @@ async function loadSchedule(){
     state.subjects=data.subjects||null;
     state.bellSchedule=data.bell_schedule||null;
     state.datedChanges=Array.isArray(data.dated_changes)?data.dated_changes:[];
+    state.weeklyMoves=Array.isArray(data.weekly_moves)?data.weekly_moves:[];
+    scheduleWeeklyMoveExpiry();
     state.secondShiftClasses=Array.isArray(data.second_shift_classes)?data.second_shift_classes:[];
     renderDutyBanner();
     state.updatedAt=data.updated_at?formatDate(data.updated_at):null;
@@ -269,6 +271,9 @@ function cellLabel(cell){
 function cellFor(cls,day,lesson){
   const t=state.teachers?.grid[day]?.[lesson]?.[cls];
   const s=state.subjects?.grid[day]?.[lesson]?.[cls];
+  return cellFromData(t,s);
+}
+function cellFromData(t,s){
   const groups=Array.isArray(s?.groups)?s.groups:Array.isArray(t?.groups)?t.groups:[];
   if(groups.some(g=>g.group))return groups.map(g=>`<div class="lc lesson-group"><div class="group-name">${esc(g.group||"Весь класс")}</div><div class="subj">${esc(g.subject||"")}</div><div class="teach">${esc(g.teacher||"")}</div>${g.room?`<div class="rb"><span class="room-badge">${esc(g.room)}</span></div>`:""}</div>`).join("");
   const tText=cellLabel(t),sText=cellLabel(s);
@@ -346,6 +351,44 @@ function classLessonEntries(cls,day){
   }
   return entries.sort((a,b)=>a.order-b.order);
 }
+// Move notices are display-only: the underlying grids remain the source of truth for occupancy.
+let weeklyMoveTimer=null;
+function activeWeeklyMoves(){return state.weeklyMoves.filter(m=>Number(m.expires_at)*1000>Date.now());}
+function scheduleWeeklyMoveExpiry(){
+  if(weeklyMoveTimer)clearTimeout(weeklyMoveTimer);
+  const deadlines=activeWeeklyMoves().map(m=>Number(m.expires_at)*1000);
+  if(!deadlines.length)return;
+  const delay=Math.min(2147483647,Math.max(0,Math.min(...deadlines)-Date.now()+50));
+  weeklyMoveTimer=setTimeout(()=>{renderClassArea();renderTeacherArea();renderFavArea();scheduleWeeklyMoveExpiry();},delay);
+}
+function displayClassEntries(cls,day){
+  const normal=classLessonEntries(cls,day).map(e=>({...e,moved:activeWeeklyMoves().some(m=>m.class_name===cls&&m.target.day===day&&m.target.raw===e.raw)}));
+  const old=activeWeeklyMoves().filter(m=>m.class_name===cls&&m.source.day===day).map(m=>{
+    const e=m.source,pre=Boolean(e.before_shift),shift=String(e.shift||1),period=bellPeriod(shift,day,e.lesson);
+    return {raw:e.raw,lesson:e.lesson,timeShift:shift,shift,displayLesson:pre?'до':e.lesson,weekKey:pre?`before:${e.raw}`:`lesson:${e.lesson}`,weekLabel:pre?'до смены':String(e.lesson),order:Number(e.raw),time:period?`${period.start}–${period.end}`:'',old:true,oldEntry:e};
+  });
+  return [...normal,...old].sort((a,b)=>a.order-b.order||Number(b.old)-Number(a.old));
+}
+function displayClassCell(cls,day,e){
+  const content=e.old?cellFromData(e.oldEntry.teachers,e.oldEntry.subjects):cellFor(cls,day,e.raw);
+  if(!content)return '';
+  return e.old?`<div class="weekly-move-old"><span class="weekly-move-label">Перенесён</span>${content}</div>`:e.moved?`<div class="weekly-move-new"><span class="weekly-move-label">Новое место</span>${content}</div>`:content;
+}
+function displayTeacherRows(name,day){
+  const normal=teacherDayRows(name,day).map(row=>({...row,moved:activeWeeklyMoves().some(m=>m.class_name===row.cls&&m.target.day===day&&m.target.raw===row.raw&&(m.target.teachers.names||[]).includes(name))}));
+  const old=[];
+  for(const m of activeWeeklyMoves()){
+    const e=m.source,t=e.teachers||{},s=e.subjects||{};
+    if(e.day!==day||!(t.names||[]).includes(name))continue;
+    const names=t.names||[],i=names.indexOf(name),subjects=s.names||[],groups=Array.isArray(t.groups)?t.groups:[];
+    const selectedGroups=groups.filter(g=>g.teacher===name);
+    const period=bellPeriod(String(e.shift||1),day,e.lesson);
+    const base={day,timeShift:String(e.shift||1),l:e.lesson,displayLesson:e.before_shift?'до':e.lesson,order:Number(e.raw),cls:m.class_name,shift:String(e.shift||1),time:period?`${period.start}–${period.end}`:'',old:true};
+    if(selectedGroups.length)for(const g of selectedGroups)old.push({...base,subj:g.subject||'',group:g.group||'',rooms:g.room?[g.room]:[]});
+    else old.push({...base,subj:names.length>1&&subjects.length===names.length?subjects[i]:subjects.join(', '),rooms:uniqueRooms(pairValueForTeacher(t.rooms||[],i,names.length),pairValueForTeacher(s.rooms||[],i,names.length))});
+  }
+  return [...normal,...old].sort((a,b)=>a.shift.localeCompare(b.shift)||a.order-b.order||Number(b.old)-Number(a.old)||a.cls.localeCompare(b.cls,'ru'));
+}
 function pairValueForTeacher(values,index,teacherCount){
   const rooms=uniqueRooms(values||[]);
   return teacherCount>1&&rooms.length===teacherCount?(rooms[index]?[rooms[index]]:[]):rooms;
@@ -360,7 +403,7 @@ function teacherDayRows(name,dayName){
       const s=state.subjects?.grid[dayName]?.[entry.raw]?.[cls];
       const groups=Array.isArray(c.groups)?c.groups:[];
       if(groups.some(g=>g.group)){
-        for(const g of groups.filter(g=>g.teacher===name))rows.push({day:dayName,timeShift:entry.timeShift,l:entry.lesson,displayLesson:entry.displayLesson,order:entry.order,beforeSecondShift:entry.beforeSecondShift,cls,shift,subj:g.subject||"",group:g.group||"",rooms:g.room?[g.room]:[],time:entry.time});
+        for(const g of groups.filter(g=>g.teacher===name))rows.push({day:dayName,raw:entry.raw,timeShift:entry.timeShift,l:entry.lesson,displayLesson:entry.displayLesson,order:entry.order,beforeSecondShift:entry.beforeSecondShift,cls,shift,subj:g.subject||"",group:g.group||"",rooms:g.room?[g.room]:[],time:entry.time});
         continue;
       }
       const teacherIndex=c.names.indexOf(name), teacherCount=c.names.length;
@@ -373,12 +416,12 @@ function teacherDayRows(name,dayName){
       }
       const teacherRooms=pairValueForTeacher(c.rooms||[],teacherIndex,teacherCount);
       const subjectRooms=pairValueForTeacher(s?.rooms||[],teacherIndex,teacherCount);
-      rows.push({day:dayName,timeShift:entry.timeShift,l:entry.lesson,displayLesson:entry.displayLesson,order:entry.order,beforeSecondShift:entry.beforeSecondShift,cls,shift,subj,rooms:uniqueRooms(teacherRooms,subjectRooms),time:entry.time});
+      rows.push({day:dayName,raw:entry.raw,timeShift:entry.timeShift,l:entry.lesson,displayLesson:entry.displayLesson,order:entry.order,beforeSecondShift:entry.beforeSecondShift,cls,shift,subj,rooms:uniqueRooms(teacherRooms,subjectRooms),time:entry.time});
     }
   }
   return rows.sort((a,b)=>a.shift.localeCompare(b.shift)||a.order-b.order||a.cls.localeCompare(b.cls,"ru"));
 }
-const trowHTML=r=>`<div class="trow" ${lessonAttributes(r.day,r.timeShift,r.l)}>
+const trowHTML=r=>`<div class="trow ${r.old?'weekly-move-old':r.moved?'weekly-move-new':''}" ${r.old?'':lessonAttributes(r.day,r.timeShift,r.l)}>${r.old?'<span class="weekly-move-label">Перенесён</span>':r.moved?'<span class="weekly-move-label">Новое место</span>':''}
   ${lessonMarker(r.displayLesson??r.l,r.time)}
   <span class="tcls">${esc(r.cls)}${r.group?`<small class="teacher-group">${esc(r.group)}</small>`:""}</span>
   <span class="tsubj">${r.subj?esc(r.subj):'<span class="muted">—</span>'}</span>
@@ -438,17 +481,17 @@ function renderClassBody(){
   if(sel==="week"){ renderWeekInto(out,cls); return; }
   const d=DAYS[sel];
   let rows="",count=0;
-  for(const entry of classLessonEntries(cls,d)){
-    const c=cellFor(cls,d,entry.raw);
-    if(!c) continue; count++;
-    rows+=`<div class="lrow" ${lessonAttributes(d,entry.timeShift,entry.lesson)}>${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`;
+  for(const entry of displayClassEntries(cls,d)){
+    const c=displayClassCell(cls,d,entry);
+    if(!c) continue; if(!entry.old)count++;
+    rows+=`<div class="lrow" ${entry.old?'':lessonAttributes(d,entry.timeShift,entry.lesson)}>${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`;
   }
   out.innerHTML=`<p class="date-label"><b>${esc(cls)}</b> · ${dateLabel(sel)} · уроков: ${count}</p>`
     +(rows||`<div class="nodata">В этот день уроков нет 🎉</div>`);
   updateActiveLessons();
 }
 function renderWeekInto(out,cls){
-  const entriesByDay=Object.fromEntries(DAYS.map(d=>[d,classLessonEntries(cls,d)]));
+  const entriesByDay=Object.fromEntries(DAYS.map(d=>[d,displayClassEntries(cls,d)]));
   const rowMap=new Map();
   for(const entries of Object.values(entriesByDay))for(const entry of entries){
     if(!rowMap.has(entry.weekKey))rowMap.set(entry.weekKey,{key:entry.weekKey,label:entry.weekLabel,order:entry.order});
@@ -459,15 +502,16 @@ function renderWeekInto(out,cls){
     DAYS.map((d,i)=>`<th class="${i===TODAY?'today':''}">${DAY_FULL[d]}</th>`).join("")+`</tr></thead><tbody>`;
   for(const row of weekRows){
     html+=`<tr><td>${esc(row.label)}</td>`+DAYS.map((d,i)=>{
-      const entry=entriesByDay[d].find(item=>item.weekKey===row.key);
-      const c=entry?cellFor(cls,d,entry.raw):"";
-      return `<td class="${i===TODAY?'today':''}" ${c?lessonAttributes(d,entry.timeShift,entry.lesson):""}>${c?`${c}${entry.time?`<div class="week-time">${esc(entry.time)}</div>`:""}`:'<span class="dash">—</span>'}</td>`;
+      const entries=entriesByDay[d].filter(item=>item.weekKey===row.key);
+      const active=entries.find(item=>!item.old);
+      const c=entries.map(entry=>{const content=displayClassCell(cls,d,entry);return content?`${content}${entry.time?`<div class="week-time">${esc(entry.time)}</div>`:""}`:''}).join('');
+      return `<td class="${i===TODAY?'today':''}" ${active?lessonAttributes(d,active.timeShift,active.lesson):""}>${c||'<span class="dash">—</span>'}</td>`;
     }).join("")+`</tr>`;
   }
   const mobileWeek=DAYS.map((d,i)=>{
     const rows=entriesByDay[d].map(entry=>{
-      const cell=cellFor(cls,d,entry.raw);
-      return cell?`<div class="lrow" ${lessonAttributes(d,entry.timeShift,entry.lesson)}>${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${cell}</div></div>`:"";
+      const cell=displayClassCell(cls,d,entry);
+      return cell?`<div class="lrow" ${entry.old?'':lessonAttributes(d,entry.timeShift,entry.lesson)}>${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${cell}</div></div>`:"";
     }).join("");
     return `<section class="mobile-week-day"><h3>${esc(DAY_FULL[d])}${i===TODAY?" · сегодня":""}</h3>${rows||'<p class="muted">Уроков нет</p>'}</section>`;
   }).join("");
@@ -524,7 +568,7 @@ function renderTeacherSchedule(){
   const dayIdxs=sel==="all"?DAYS.map((_,i)=>i):[sel];
   let html="";
   for(const di of dayIdxs){
-    const rows=teacherDayRows(name,DAYS[di]);
+    const rows=displayTeacherRows(name,DAYS[di]);
     if(!rows.length) continue;
     const dayLabel=`${DAY_FULL[DAYS[di]]}${di===TODAY?" · сегодня":""}`;
     html+=teacherShiftGroupHTML(rows,dayLabel);
@@ -625,8 +669,8 @@ function renderFavArea(){
     html+=`<h3>🎓 Мои классы</h3>`;
     for(const cls of favs.classes){
       let rows="",count=0;
-      for(const entry of classLessonEntries(cls,d)){ const c=cellFor(cls,d,entry.raw); if(!c)continue; count++;
-        rows+=`<div class="lrow" ${lessonAttributes(d,entry.timeShift,entry.lesson)}>${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`; }
+      for(const entry of displayClassEntries(cls,d)){ const c=displayClassCell(cls,d,entry); if(!c)continue; if(!entry.old)count++;
+        rows+=`<div class="lrow" ${entry.old?'':lessonAttributes(d,entry.timeShift,entry.lesson)}>${lessonMarker(entry.displayLesson,entry.time)}<div class="lcell">${c}</div></div>`; }
       html+=`<div class="fav-card"><div class="fav-head"><b>${esc(cls)}</b><span class="muted">класс · уроков: ${count}</span>
         <button class="rm-fav" data-kind="classes" data-name="${esc(cls)}">убрать ✕</button></div>
         ${rows||'<div class="muted">В этот день уроков нет 🎉</div>'}</div>`;
@@ -635,8 +679,8 @@ function renderFavArea(){
   if(favs.teachers.length){
     html+=`<h3>👩‍🏫 Мои учителя</h3>`;
     for(const name of favs.teachers){
-      const rows=teacherDayRows(name,d);
-      html+=`<div class="fav-card"><div class="fav-head"><b class="schedule-teacher-name">${esc(name)}</b><span class="muted">учитель · уроков: ${rows.length}</span>
+      const rows=displayTeacherRows(name,d);
+      html+=`<div class="fav-card"><div class="fav-head"><b class="schedule-teacher-name">${esc(name)}</b><span class="muted">учитель · уроков: ${rows.filter(row=>!row.old).length}</span>
         <button class="rm-fav" data-kind="teachers" data-name="${esc(name)}">убрать ✕</button></div>
         ${teacherShiftGroupHTML(rows)||'<div class="muted">В этот день уроков нет 🎉</div>'}</div>`;
     }

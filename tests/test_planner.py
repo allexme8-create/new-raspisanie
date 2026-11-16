@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import tempfile
 import sys
 import unittest
@@ -463,6 +464,64 @@ class PlannerTests(unittest.TestCase):
                     self.assertTrue(backend.import_schedule_groups()["added"])
             finally:
                 backend.state.clear();backend.state.update(old)
+
+    def test_weekly_move_notice_expires_and_return_clears_it(self):
+        old=copy.deepcopy(backend.state)
+        try:
+            def cell(name):return {"names":[name],"raw":name,"rooms":["101"]}
+            backend.state["teachers"]={"classes":["5а"],"numbering":"local","grid":{"Пн":{"1":{"5а":cell("Учитель")}}}}
+            backend.state["subjects"]={"classes":["5а"],"numbering":"local","grid":{"Пн":{"1":{"5а":cell("Физика")}}}}
+            backend.state["second_shift_classes"]=[];backend.state["bell_schedule"]=bells();backend.state["schedule_map_draft"]=None;backend.state["weekly_move_notices"]=[];backend.state["planner"]=planner.Project().model_dump()
+            with patch.object(backend,"_save_state"),patch.object(backend.time,"time",return_value=1000000):
+                backend.move_schedule_map(backend.MapMove(revision=0,class_name="5а",day="Пн",raw="1",target_day="Вт",target_lesson=2,room="102"))
+                self.assertEqual(backend.active_weekly_moves(),[])
+                backend.publish_schedule_map(backend.MapPublish(revision=1))
+                notice=backend.active_weekly_moves()[0]
+                public=json.loads(backend.get_schedule().body)
+                self.assertEqual(public["weekly_moves"][0]["source"]["day"],"Пн")
+                self.assertNotIn("5а",public["teachers"]["grid"]["Пн"]["1"])
+                with tempfile.TemporaryDirectory() as tmp:
+                    path=Path(tmp)/"state.json";path.write_text(json.dumps({"weekly_move_notices":[notice]}),encoding="utf-8")
+                    backend.state["weekly_move_notices"]=[];backend.state["planner"]=planner.Project().model_dump()
+                    with patch.object(backend,"STATE_FILE",path): backend._load_state()
+                    self.assertEqual(backend.active_weekly_moves(),[notice])
+                self.assertEqual(notice["source"]["day"],"Пн");self.assertEqual(notice["target"]["day"],"Вт")
+                self.assertEqual(notice["source"]["teachers"]["rooms"],["101"]);self.assertEqual(notice["target"]["teachers"]["rooms"],["102"])
+                self.assertEqual(notice["expires_at"],1000000+7*86400)
+                self.assertEqual(backend.active_weekly_moves(1000000+7*86400-1),[notice])
+                self.assertEqual(backend.active_weekly_moves(1000000+7*86400),[])
+                self.assertEqual(len(backend.schedule_map.entries(backend.schedule_map.snapshot(backend.state),"5а")),1)
+                overview=backend.read_schedule_map(all_entries=True)["entries"]
+                self.assertEqual({(e["day"],e["change"]) for e in overview},{("Пн","removed"),("Вт","added")})
+                backend.edit_schedule_map(backend.MapEdit(revision=0,class_name="5а",day="Вт",raw="2",teachers=["Учитель"],subjects=["Химия"],rooms=["102"]))
+                backend.publish_schedule_map(backend.MapPublish(revision=1))
+                self.assertEqual(backend.active_weekly_moves()[0]["expires_at"],1000000+7*86400)
+                self.assertEqual(backend.active_weekly_moves()[0]["target"]["subjects"]["names"],["Химия"])
+                backend.move_schedule_map(backend.MapMove(revision=0,class_name="5а",day="Вт",raw="2",target_day="Пн",target_lesson=1))
+                backend.publish_schedule_map(backend.MapPublish(revision=1))
+                self.assertEqual(backend.active_weekly_moves(),[])
+                self.assertEqual(backend.state["weekly_move_notices"],[])
+                self.assertEqual(backend.read_schedule_map("5а")["entries"][0]["day"],"Пн")
+        finally:backend.state.clear();backend.state.update(old)
+
+    def test_weekly_move_chains_cancel_and_external_replacement(self):
+        old=copy.deepcopy(backend.state)
+        try:
+            def cell(name):return {"names":[name],"raw":name,"rooms":["101"]}
+            for kind,name in (("teachers","Учитель"),("subjects","Физика")):
+                backend.state[kind]={"classes":["5а"],"numbering":"local","grid":{"Пн":{"1":{"5а":cell(name)}}}}
+            backend.state["second_shift_classes"]=[];backend.state["bell_schedule"]=bells();backend.state["schedule_map_draft"]=None;backend.state["weekly_move_notices"]=[];backend.state["planner"]=planner.Project().model_dump()
+            with patch.object(backend,"_save_state"),patch.object(backend.time,"time",return_value=1000000):
+                backend.move_schedule_map(backend.MapMove(revision=0,class_name="5а",day="Пн",raw="1",target_day="Пн",target_lesson=2))
+                backend.move_schedule_map(backend.MapMove(revision=1,class_name="5а",day="Пн",raw="2",target_day="Вт",target_lesson=1))
+                backend.publish_schedule_map(backend.MapPublish(revision=2))
+                n=backend.active_weekly_moves()[0];self.assertEqual((n["source"]["day"],n["source"]["raw"]),("Пн","1"));self.assertEqual((n["target"]["day"],n["target"]["raw"]),("Вт","1"))
+                backend.move_schedule_map(backend.MapMove(revision=0,class_name="5а",day="Вт",raw="1",target_day="Пн",target_lesson=2))
+                backend.reset_schedule_map(backend.MapPublish(revision=1))
+                self.assertEqual(backend.active_weekly_moves()[0]["target"]["day"],"Вт")
+                backend.state["teachers"]["grid"]["Вт"]["1"]["5а"]=cell("Другой")
+                self.assertEqual(backend.active_weekly_moves(),[])
+        finally:backend.state.clear();backend.state.update(old)
 
     def test_map_available_rooms_and_atomic_move(self):
         old=copy.deepcopy(backend.state)
