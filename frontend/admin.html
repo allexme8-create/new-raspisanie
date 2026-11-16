@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Администратор · Расписание лицея</title>
-<link rel="stylesheet" href="/css/style.css?v=overview-single-10">
+<link rel="stylesheet" href="/css/style.css?v=users-compact-3">
 </head>
 <body>
 
@@ -43,9 +43,8 @@
     </div>
     <details class="card admin-block">
       <summary><h2>Пользователи</h2></summary>
-      <p class="hint">Укажите e-mail как логин и выберите роль. Пароль создаётся автоматически; передайте его пользователю безопасным способом. При первом входе пользователь сменит пароль. Администратор может показать текущий пароль или создать новый. Письма не отправляются.</p>
-      <p class="hint">Чтобы изменить данные или назначить классное руководство существующему учителю, откройте «Редактировать пользователя» в списке ниже. Классы берутся из расписания и справочника конструктора.</p>
-      <p class="hint">Доступ к паролям имеют администраторы: используйте HTTPS и надёжный пароль администратора.</p>
+      <details class="staff-compact-section"><summary>Создать пользователя</summary>
+      <p class="hint">E-mail используется как логин. Пароль создаётся автоматически, письма не отправляются. Передайте пароль пользователю безопасным способом.</p>
       <form id="staffCreateForm" class="planner-form">
         <label>ФИО (необязательно)<input id="staffFullName" type="text" maxlength="200" autocomplete="name" placeholder="Фамилия Имя Отчество"></label>
         <label>E-mail<input id="staffEmail" type="email" maxlength="254" required autocomplete="off" placeholder="name@example.ru"></label>
@@ -54,9 +53,13 @@
         <label>Должность (необязательно)<input id="staffPosition" type="text" maxlength="200" placeholder="Например, учитель начальных классов"></label>
         <button class="btn" type="submit">Создать пользователя</button>
       </form>
+      </details>
       <div id="staffAdminResult" aria-live="polite"></div>
-      <button id="staffUsersRefresh" class="btn secondary" type="button" style="width:auto">Обновить список пользователей</button>
+      <details class="staff-compact-section"><summary>Созданные пользователи <span id="staffUsersCount"></span></summary>
+      <p class="hint">Выберите пользователя, чтобы изменить данные, посмотреть или обновить пароль. Используйте HTTPS и надёжный пароль администратора.</p>
+      <button id="staffUsersRefresh" class="btn secondary" type="button" style="width:auto">Обновить список</button>
       <div id="staffUsersList"></div>
+      </details>
     </details>
         <details class="card admin-block" id="overviewMapSection"><summary><h2>Общая карта классов и учителей</h2></summary><p class="hint">Строки — классы или учителя, столбцы — уроки недели. Выберите урок и ячейку «+» либо перетащите карточку. В одной ячейке параллельные группы переносятся вместе. Красным зачёркнуты снятые уроки, зелёным показаны новые положения в черновике.</p>
           <div class="published-map-controls"><label>Строки <select id="overviewMode"><option value="classes">Классы</option><option value="teachers">Учителя</option></select></label><label id="overviewTeacherField" class="hidden">Учитель <select id="overviewTeacher"><option value="">Все учителя</option></select></label><label>День <select id="overviewDay"><option value="">Вся неделя</option><option>Пн</option><option>Вт</option><option>Ср</option><option>Чт</option><option>Пт</option><option>Сб</option></select></label><label>Поиск <input type="search" id="overviewSearch" placeholder="Класс или учитель"></label><label><input type="checkbox" id="overviewShowEmpty"> Показать пустые часы для переноса</label><button type="button" id="overviewRefresh" class="btn secondary">Обновить карту</button></div>
@@ -134,6 +137,6 @@
 <script src="/js/planner.js?v=catalog-file-drag-1"></script>
 <script src="/js/lesson-colors.js?v=1"></script>
 <script src="/js/overview-map.js?v=overview-single-10"></script>
-<script src="/js/staff-admin.js?v=bell-editor-compact-2"></script>
+<script src="/js/staff-admin.js?v=users-compact-3"></script>
 </body>
 </html>

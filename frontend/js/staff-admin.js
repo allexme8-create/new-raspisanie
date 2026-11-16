@@ -17,13 +17,14 @@ async function loadStaffUsers(){
     const selected=$("staffHomeroom").value;$("staffHomeroom").innerHTML=classOptions(selected);if(staffClassCatalog.includes(selected))$("staffHomeroom").value=selected;
     updateCreateClassVisibility();
     const list=$("staffUsersList");
-    list.innerHTML=data.users.length?`<ul class="staff-user-list">${data.users.map((u,i)=>`<li><div class="staff-user-details"><span>${u.full_name ? `<strong><span class="${staffRoleClass(u.role)}">${esc(u.full_name)}</span></strong> · ` : ""}${esc(u.email)} · <strong>${esc(u.position || (u.role==="director"?"директор":u.role==="teacher"?"учитель":"заместитель директора"))}</strong></span><details class="staff-user-edit"><summary>Редактировать пользователя</summary><form class="planner-form" data-edit-user="${i}">
+    $("staffUsersCount").textContent=`(${data.users.length})`;
+    list.innerHTML=data.users.length?`<ul class="staff-user-list">${data.users.map((u,i)=>`<li><details class="staff-user-entry"><summary><strong><span class="${staffRoleClass(u.role)}">${esc(u.full_name || u.email)}</span></strong> · <strong>${esc(u.position || (u.role==="director"?"директор":u.role==="teacher"?"учитель":"заместитель директора"))}</strong></summary><div class="staff-user-details"><p class="hint">Логин: ${esc(u.email)}</p><details class="staff-user-edit"><summary>Редактировать пользователя</summary><form class="planner-form" data-edit-user="${i}">
       <label>ФИО<input id="staffEditName${i}" maxlength="200" value="${esc(u.full_name||"")}"></label>
       <label>E-mail<input id="staffEditEmail${i}" type="email" maxlength="254" value="${esc(u.email)}" required></label>
       <label>Должность<input id="staffEditPosition${i}" maxlength="200" value="${esc(u.position||"")}"></label>
       ${u.role==="teacher"?`<label>Классное руководство<select id="staffEditClass${i}">${classOptions(u.homeroom_class||"")}</select></label>`:""}
       <button type="submit" class="btn secondary">Сохранить изменения</button><div id="staffEditResult${i}" aria-live="polite"></div>
-      </form><p class="hint">Роль и пароль здесь не изменяются.</p></details><div id="staffPassword${i}" class="staff-password" aria-live="polite"></div></div><div class="staff-user-actions"><button type="button" class="btn secondary" data-show-user="${i}">Показать пароль</button><button type="button" class="btn secondary" data-reset-user="${i}">Обновить пароль</button><button type="button" class="btn danger" data-delete-user="${i}">Удалить</button></div></li>`).join("")}</ul>`:'<p class="muted">Пользователей пока нет.</p>';
+      </form><p class="hint">Роль и пароль здесь не изменяются.</p></details><div id="staffPassword${i}" class="staff-password" aria-live="polite"></div><div class="staff-user-actions"><button type="button" class="btn secondary" data-show-user="${i}">Показать пароль</button><button type="button" class="btn secondary" data-reset-user="${i}">Обновить пароль</button><button type="button" class="btn danger" data-delete-user="${i}">Удалить</button></div></div></details></li>`).join("")}</ul>`:'<p class="muted">Пользователей пока нет.</p>';
     list.querySelectorAll("[data-edit-user]").forEach(form=>form.onsubmit=async event=>{
       event.preventDefault();const i=Number(form.dataset.editUser),user=data.users[i],button=form.querySelector('button[type="submit"]');button.disabled=true;
       $(`staffEditResult${i}`).innerHTML="";
@@ -80,5 +81,5 @@ $("staffCreateForm").onsubmit=async e=>{
 };
 document.addEventListener("planner-catalog-changed",()=>{if(token)loadStaffUsers();});
 document.addEventListener("admin-panel-open",loadStaffUsers);
-document.addEventListener("admin-panel-close",()=>{$("staffUsersList").innerHTML="";$("staffAdminResult").innerHTML="";});
+document.addEventListener("admin-panel-close",()=>{$("staffUsersList").innerHTML="";$("staffUsersCount").textContent="";$("staffAdminResult").innerHTML="";});
 if(!$("adminPanel").classList.contains("hidden"))loadStaffUsers();

@@ -401,3 +401,6 @@ footer a{color:var(--muted)}
 
 /* Selected source and destination stand out from green available slots. */
 .overview-lesson.overview-source{outline:3px solid #174aa0;outline-offset:-3px;box-shadow:0 0 0 2px #fff}.overview-cell.overview-destination{background:#dceafe;box-shadow:inset 0 0 0 3px #174aa0}.overview-selecting .overview-cell.overview-destination{background:#dceafe;box-shadow:inset 0 0 0 3px #174aa0}.overview-destination .overview-target{background:#dceafe!important;border-color:#174aa0!important;color:#174aa0!important}
+
+/* Compact, independently expandable user list and create form. */
+.staff-compact-section{border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:8px}.staff-compact-section>summary,.staff-user-entry>summary{cursor:pointer}.staff-compact-section>summary{font-weight:700}.staff-user-list li{display:block;padding:0}.staff-user-entry>summary{padding:9px 2px;overflow-wrap:anywhere}.staff-user-entry .staff-user-details{padding:2px 4px 10px}.staff-user-entry .staff-user-details .hint{margin:4px 0}.staff-user-actions{margin-top:8px}

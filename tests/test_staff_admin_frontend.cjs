@@ -3,7 +3,9 @@ const fs=require('node:fs');
 const vm=require('node:vm');
 const page=fs.readFileSync('frontend/admin.html','utf8');
 assert.doesNotMatch(page,/SMTP_PASSWORD|data-oauth-provider|mailSettingsForm/);
-assert.match(page,/Создать пользователя/);
+assert.match(page,/<details class="staff-compact-section"><summary>Создать пользователя<\/summary>/);
+assert.match(page,/<details class="staff-compact-section"><summary>Созданные пользователи/);
+assert.match(page,/id="staffUsersCount"/);
 assert.match(page,/id="staffFullName"[^>]*maxlength="200"/);
 const map=new Map(),handlers={};
 const buttons={edit:{dataset:{editUser:'0'},querySelector:()=>({disabled:false})},show:{dataset:{showUser:'0'}},reset:{dataset:{resetUser:'0'}},del:{dataset:{deleteUser:'0'}}};
@@ -16,7 +18,7 @@ const context={token:'admin-token',$:element,esc:s=>String(s).replace(/[&<>"']/g
 vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff-admin.js','utf8'),context);
 (async()=>{
  await handlers['admin-panel-open']();
- assert.match(element('staffUsersList').innerHTML,/Показать пароль/);assert.match(element('staffUsersList').innerHTML,/<strong><span class="person-teacher">&lt;Иван&gt;<\/span><\/strong>/);assert.match(element('staffUsersList').innerHTML,/<strong>учитель<\/strong>/);assert.match(element('staffHomeroom').innerHTML,/5А/);
+ assert.equal(element('staffUsersCount').textContent,'(1)');assert.match(element('staffUsersList').innerHTML,/<details class="staff-user-entry"><summary>/);assert.match(element('staffUsersList').innerHTML,/Показать пароль/);assert.doesNotMatch(element('staffUsersList').innerHTML,/<summary>[^<]*teacher@example.com/);assert.match(element('staffUsersList').innerHTML,/<strong><span class="person-teacher">&lt;Иван&gt;<\/span><\/strong>/);assert.match(element('staffUsersList').innerHTML,/<strong>учитель<\/strong>/);assert.match(element('staffHomeroom').innerHTML,/5А/);
  assert.doesNotMatch(element('staffUsersList').innerHTML,/current-secret/);assert.match(element('staffUsersList').innerHTML,/Классное руководство/);element('staffEditName0').value='Иванова';element('staffEditEmail0').value='teacher@example.com';element('staffEditPosition0').value='Учитель';element('staffEditClass0').value='6Б';await buttons.edit.onsubmit({preventDefault(){}});assert.ok(calls.some(c=>c.path==='/api/admin/users/u1'&&c.opts.body.homeroom_class==='6Б'&&c.opts.body.full_name==='Иванова'));
  await buttons.show.onclick();
  assert.equal(element('staffPassword0').textContent,'Пароль: current-secret');
@@ -29,7 +31,7 @@ vm.createContext(context);vm.runInContext(fs.readFileSync('frontend/js/staff-adm
  assert.equal(calls.find(c=>c.path==='/api/admin/users' && c.opts.method==='POST').opts.body.position,'Заместитель директора по УВР');
  assert.equal(calls.find(c=>c.path==='/api/admin/users' && c.opts.method==='POST').opts.body.full_name,'Иванова Анна');
  assert.equal(calls.find(c=>c.path==='/api/admin/users' && c.opts.method==='POST').opts.body.homeroom_class,'5А');assert.equal(element('staffFullName').value,'');
- handlers['admin-panel-close']();assert.equal(element('staffAdminResult').innerHTML,'');assert.equal(element('staffUsersList').innerHTML,'');
+ handlers['admin-panel-close']();assert.equal(element('staffAdminResult').innerHTML,'');assert.equal(element('staffUsersList').innerHTML,'');assert.equal(element('staffUsersCount').textContent,'');
  assert.ok(calls.some(c=>c.path==='/api/admin/users/u1/password/reset'));
  console.log('Staff admin password UI OK');
 })().catch(e=>{console.error(e);process.exitCode=1});
