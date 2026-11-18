@@ -415,8 +415,8 @@ footer a{color:var(--muted)}
 .schedule-load-preview-list{max-height:220px;overflow:auto;font-size:13px;overflow-wrap:anywhere}
 
 /* Wide spreadsheet: keep the stage columns readable on phones with horizontal scrolling. */
-.load-table-scroll{overflow-x:auto;max-width:100%;margin:10px 0;overscroll-behavior-x:contain}
-.load-table{border-collapse:collapse;font-size:13px;min-width:1000px;width:100%}
+.load-table-scroll{overflow:auto;max-width:100%;max-height:min(70vh,700px);margin:10px 0;overscroll-behavior:contain}
+.load-table{border-collapse:separate;border-spacing:0;font-size:13px;min-width:1000px;width:100%}
 .load-table th,.load-table td{border:1px solid var(--line);padding:5px;vertical-align:top;text-align:left}
 .load-table thead th,.load-stage-total{background:#f3f5fa}.load-table th[scope=rowgroup]{min-width:120px}
 .load-stage-total td,.load-teacher-total{font-weight:700}.load-table td details{margin-top:4px}.load-table td summary{cursor:pointer;color:#315d9d}
@@ -425,3 +425,5 @@ footer a{color:var(--muted)}
 .department-teacher{padding:8px 0;border-bottom:1px solid var(--line)}.department-choices{display:flex;flex-wrap:wrap;gap:4px 12px;margin:5px 0}.department-choices label{font-size:13px}.department-choices input{width:auto}.department-teacher .btn{padding:5px 8px;font-size:12px}.department-import-list{max-height:320px;overflow:auto}.department-import-list label{margin:6px 0;font-size:13px}
 
 .load-add-shortcut{font-size:12px;padding:4px 6px;margin-top:6px}
+
+.load-table thead{position:sticky;top:0;z-index:2}.load-table thead th{background:#f3f5fa}.load-delete{border:0;background:none;color:#a32121;cursor:pointer;text-decoration:underline;padding:5px 0;font:inherit;font-size:12px}.load-delete:disabled{opacity:.5}.load-table [data-delete-error]{display:block}

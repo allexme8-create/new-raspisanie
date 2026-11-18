@@ -26,6 +26,16 @@ class TeacherLoadAddTests(unittest.TestCase):
         for changes,status in [({'group':''},409),({'group':'1 группа'},409),({'group':'нет'},422),({'class_name':'нет'},422),({'teacher':'нет'},422),({'per_week':0},422),({'room':'нет'},422),({'max_per_day':13},422)]:
             r=self.post({**self.body,**changes});self.assertEqual(r.status_code,status,r.text);self.assertEqual(app.state['planner'],before)
         app.state['planner']['loads'][0]['group']='';self.assertEqual(self.post().status_code,409)
+    def test_delete_is_atomic_and_preserves_other_entries(self):
+        body={'revision':0,'load_id':'old'};before=copy.deepcopy(app.state['planner'])
+        self.assertEqual(self.client.post('/api/admin/planner/teacher-load-delete',json=body).status_code,401)
+        r=self.client.post('/api/admin/planner/teacher-load-delete',headers=self.auth,json=body);self.assertEqual(r.status_code,409);self.assertEqual(app.state['planner'],before)
+        added=self.post().json()['project']['loads'][1]
+        body={'revision':1,'load_id':added['id']};r=self.client.post('/api/admin/planner/teacher-load-delete',headers=self.auth,json=body)
+        self.assertEqual(r.status_code,200,r.text);self.assertEqual(r.json()['project']['loads'],before['loads']);self.assertEqual(r.json()['project']['placements'],before['placements'])
+        self.assertEqual(self.client.post('/api/admin/planner/teacher-load-delete',headers=self.auth,json=body).status_code,409)
+        body['revision']=2;self.assertEqual(self.client.post('/api/admin/planner/teacher-load-delete',headers=self.auth,json=body).status_code,404)
+
     def test_edit_class_and_hours_then_reject_when_placed(self):
         added=self.post().json()['project']['loads'][1]
         change={'revision':1,'load_id':added['id'],'teacher':added['teacher'],'class_name':'5б','subject':added['subject'],'group':'','room':'','per_week':6,'max_per_day':2}

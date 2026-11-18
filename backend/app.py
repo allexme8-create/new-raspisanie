@@ -926,6 +926,23 @@ def add_teacher_load(body: NewTeacherLoad, _: None = Depends(require_admin)) -> 
         return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
 
 
+class DeleteTeacherLoad(BaseModel):
+    revision: int = Field(ge=0)
+    load_id: str = Field(min_length=1,max_length=80)
+
+
+@app.post("/api/admin/planner/teacher-load-delete")
+def delete_teacher_load(body: DeleteTeacherLoad, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор.")
+        load=next((x for x in p.loads if x.id==body.load_id),None)
+        if not load:raise HTTPException(404,"Запись нагрузки не найдена.")
+        if any(x.load_id==load.id for x in p.placements):raise HTTPException(409,"Сначала снимите расставленные уроки этой нагрузки. Опубликованное расписание не изменится.")
+        p.loads.remove(load);p.revision+=1;state['planner']=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
+
+
 class LoadChange(BaseModel):
     revision: int = Field(ge=0)
     load_id: str
