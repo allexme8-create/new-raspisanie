@@ -305,15 +305,6 @@ function plannerSubmit(event){
 }
 $("plannerOpen").onclick=()=>{if(!plannerRoot.classList.contains("hidden")){plannerRoot.classList.add("hidden");$("plannerOpen").textContent="Открыть конструктор";}else{plannerRoot.classList.remove("hidden");$("plannerOpen").textContent="Скрыть конструктор";plannerLoad();}};
 
-$("plannerLoadFileShortcut").onclick=async()=>{
-  const wasHidden=plannerRoot.classList.contains("hidden");
-  plannerRoot.classList.remove("hidden");$("plannerOpen").textContent="Скрыть конструктор";
-  if(wasHidden||!plannerProject)await plannerLoad();
-  const section=$("plannerLoadsSection"),upload=$("plannerLoadImportSection");
-  if(!section||!upload)return;
-  section.open=true;upload.open=true;upload.scrollIntoView?.({behavior:"smooth",block:"start"});
-};
-
 $("plannerViewLoadsShortcut").onclick=async()=>{
   const wasHidden=plannerRoot.classList.contains("hidden");plannerRoot.classList.remove("hidden");$("plannerOpen").textContent="Скрыть конструктор";
   if(wasHidden||!plannerProject)await plannerLoad();
