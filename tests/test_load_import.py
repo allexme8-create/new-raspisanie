@@ -30,6 +30,29 @@ class LoadImportTests(unittest.TestCase):
         broken=csv_bytes().replace('английския язык;5а;3'.encode('cp1251'),'английския язык;5а;1,5'.encode('cp1251'))
         with self.assertRaises(load_import.ParseError):load_import.parse(broken,'bad.csv')
 
+    def test_uploaded_load_drives_schedule_generation(self):
+        old=copy.deepcopy(app.state)
+        try:
+            app.state['planner']=planner.Project(classes=[planner.SchoolClass(name='5а')],teachers=[planner.Teacher(name='Иванов И.И.')],subjects=[planner.Named(name='Ин.яз.')],rooms=[planner.Room(name='101')]).model_dump()
+            app.state['bell_schedule']={'shifts':{'1':{day:{'1':{'start':'08:00','end':'08:40'},'2':{'start':'09:00','end':'09:40'}} for day in planner.DAYS}}}
+            before=copy.deepcopy(app.state['teachers'])
+            with patch.object(app,'_save_state'),TestClient(app.app) as client:
+                headers={'Authorization':'Bearer '+app._create_token()}
+                preview=client.post('/api/admin/planner/load-import/preview',headers=headers,files={'file':('load.csv',csv_bytes())})
+                self.assertEqual(preview.status_code,200,preview.text)
+                source=preview.json()['rows'][0]
+                row={'class_name':source['class_name'],'teacher':source['teacher'],'subject':'Ин.яз.','per_week':source['per_week']}
+                applied=client.post('/api/admin/planner/load-import/apply',headers=headers,json={'revision':preview.json()['revision'],'rows':[row]})
+                self.assertEqual(applied.status_code,200,applied.text)
+                project=applied.json()['project'];self.assertEqual(project['loads'][0]['per_week'],3)
+                result=client.post('/api/admin/planner/generate',headers=headers,json={'revision':project['revision']})
+                self.assertEqual(result.status_code,200,result.text)
+                placements=result.json()['project']['placements']
+                self.assertEqual(len(placements),3)
+                self.assertTrue(all(p['load_id']==project['loads'][0]['id'] and p['room']=='101' for p in placements))
+                self.assertEqual(app.state['teachers'],before)  # Только черновик, без публикации.
+        finally:app.state.clear();app.state.update(old)
+
     def test_preview_auth_import_accumulate_reimport_and_swap(self):
         old=copy.deepcopy(app.state)
         try:
