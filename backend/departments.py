@@ -1,9 +1,11 @@
 """Departments and safe extraction of teacher names from workload tables."""
 import re
+from typing import Literal, get_args
 import load_import
 from schedule_parser import read_rows, ParseError
 
-NAMES = ('Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура')
+Department = Literal['Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура', 'Иностранные языки']
+NAMES = get_args(Department)
 
 
 def read_teachers(buf, filename):

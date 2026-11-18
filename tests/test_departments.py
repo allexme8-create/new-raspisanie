@@ -31,6 +31,15 @@ class DepartmentsTest(unittest.TestCase):
         self.assertEqual(self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data).status_code,409)
         data['revision']+=1;data['departments']=[];r=self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data);self.assertEqual(r.status_code,200);self.assertEqual(r.json()['project']['teachers'][0]['departments'],[])
         data['revision']+=1;data['departments']=['Иная'];self.assertEqual(self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data).status_code,422)
+    def test_foreign_languages_and_all_six_departments(self):
+        data={'revision':0,'teacher':'Иванов И.И.','departments':list(departments.NAMES)}
+        r=self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data);self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual(r.json()['project']['teachers'][0]['departments'],list(departments.NAMES))
+        data['revision']=1;data['departments']=['Иностранные языки'];r=self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data);self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual(r.json()['project']['teachers'][0]['departments'],['Иностранные языки'])
+        body={'revision':2,'department':'Иностранные языки','rows':[{'source':'Петров П.П.','teacher':'Петров П.П.'}]}
+        r=self.client.post('/api/admin/planner/department-file/apply',headers=self.auth,json=body);self.assertEqual(r.status_code,200,r.text)
+        self.assertEqual(r.json()['project']['teachers'][1]['departments'],['Математика','Иностранные языки'])
     def test_repeated_teacher_is_atomic(self):
         p=copy.deepcopy(app.state['planner']);body={'revision':0,'department':'Математика','rows':[{'source':'А','teacher':'Иванов И.И.'},{'source':'Б','teacher':'Иванов И.И.'}]}
         self.assertEqual(self.client.post('/api/admin/planner/department-file/apply',headers=self.auth,json=body).status_code,422);self.assertEqual(app.state['planner'],p)

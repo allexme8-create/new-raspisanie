@@ -45,6 +45,7 @@ import catalog_file
 import schedule_map
 import schedule_load_import
 import departments
+from departments import Department
 import staff
 from schedule_parser import (
     ParseError,
@@ -771,7 +772,7 @@ def apply_schedule_load(body: ScheduleLoadImport, _: None = Depends(require_admi
 class DepartmentAssignment(BaseModel):
     revision: int = Field(ge=0)
     teacher: str = Field(min_length=1,max_length=80)
-    departments: list[Literal['Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура']] = Field(max_length=5)
+    departments: list[Department] = Field(max_length=6)
 
 
 @app.post("/api/admin/planner/teacher-departments")
@@ -811,7 +812,7 @@ class DepartmentImportRow(BaseModel):
 
 class DepartmentImport(BaseModel):
     revision: int = Field(ge=0)
-    department: Literal['Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура']
+    department: Department
     rows: list[DepartmentImportRow] = Field(min_length=1,max_length=200)
 
 

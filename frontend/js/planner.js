@@ -5,7 +5,7 @@ let plannerProject=null, plannerIssues=[];
 let plannerMapClass="",plannerMapSelected=null,plannerMapBusy=false;
 let roomRulesSelected="",roomRulesShift=1,classRulesSelected="",classRulesShift=1;
 let plannerLoadSubject="",plannerLoadDepartment="";
-const plannerDepartments=['Филология','Информатика и технология','Естественные науки','Математика','Физическая культура'];
+const plannerDepartments=['Филология','Информатика и технология','Естественные науки','Математика','Физическая культура','Иностранные языки'];
 const plannerSearch={classes:"",teachers:"",subjects:"",rooms:"",groups:"",loads:""};
 const plannerRoot=$("plannerRoot");
 const optionList=(items,value="name")=>items.map(x=>`<option value="${esc(x[value])}">${esc(x[value])}</option>`).join("");

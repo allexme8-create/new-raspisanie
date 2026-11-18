@@ -5,6 +5,7 @@ from collections import Counter
 import re
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
+from departments import Department
 
 DAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб")
 
@@ -65,7 +66,7 @@ class Room(Named):
 
 
 class Teacher(Named):
-    departments: list[Literal['Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура']] = Field(default_factory=list, max_length=5)
+    departments: list[Department] = Field(default_factory=list, max_length=6)
 
     @field_validator("departments")
     @classmethod
