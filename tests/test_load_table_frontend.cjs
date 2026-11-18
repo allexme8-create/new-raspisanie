@@ -9,4 +9,9 @@ vm.createContext(ctx);vm.runInContext(fs.readFileSync('frontend/js/planner.js','
 const html=el('plannerRoot').innerHTML;
 for(const text of ['Основная ступень · 5–9 класс','Старшая ступень · 10–11 класс','Другие классы','Итого часов','Иванова','Петров','1 группа','&lt;тест&gt;'])assert.ok(html.includes(text),text);
 assert.match(html,/load-teacher-total">13/);assert.match(html,/colspan="3">4<\/td><td colspan="3">3<\/td><td colspan="3">6/);assert.match(html,/data-load-entry="0"/);assert.match(html,/data-load-hours="0"/);
+assert.match(html,/id="plannerLoadSubject"/);assert.match(html,/Все предметы/);assert.match(html,/value="&lt;тест&gt;"/);
+el('plannerLoadSubject').value='Литература';el('plannerLoadSubject').onchange();
+let filtered=el('plannerLoadList').innerHTML;assert.match(filtered,/Иванова/);assert.doesNotMatch(filtered,/Петров|Русский|2а/);assert.match(filtered,/load-teacher-total">3/);assert.match(filtered,/data-load-hours="1"/);assert.match(filtered,/data-load-entry="1"/);
+el('plannerLoadSubject').value='Русский';el('plannerLoadSubject').onchange();filtered=el('plannerLoadList').innerHTML;assert.match(filtered,/load-teacher-total">10/);assert.doesNotMatch(filtered,/Литература|Петров/);
+el('plannerLoadSubject').value='';el('plannerLoadSubject').onchange();assert.match(el('plannerLoadList').innerHTML,/Петров/);
 (async()=>{await hourForm.onsubmit({preventDefault(){}});assert.equal(calls[0].path,'/api/admin/planner/load-change');assert.equal(calls[0].opts.body.per_week,5);assert.equal(calls[0].opts.body.group,'1 группа');assert.equal(calls[0].opts.body.revision,8);assert.match(el('plannerRoot').innerHTML,/load-teacher-total">14/);hourForm.elements.hours.value='6';failure=true;await hourForm.onsubmit({preventDefault(){}});assert.match(error.textContent,/снимите/);assert.equal(button.disabled,false);console.log('Spreadsheet workload table and hour editing OK')})().catch(e=>{console.error(e);process.exitCode=1});

@@ -4,6 +4,7 @@ const plannerDays=["Пн","Вт","Ср","Чт","Пт","Сб"];
 let plannerProject=null, plannerIssues=[];
 let plannerMapClass="",plannerMapSelected=null,plannerMapBusy=false;
 let roomRulesSelected="",roomRulesShift=1,classRulesSelected="",classRulesShift=1;
+let plannerLoadSubject="";
 const plannerSearch={classes:"",teachers:"",subjects:"",rooms:"",groups:"",loads:""};
 const plannerRoot=$("plannerRoot");
 const optionList=(items,value="name")=>items.map(x=>`<option value="${esc(x[value])}">${esc(x[value])}</option>`).join("");
@@ -27,15 +28,16 @@ function plannerPreferenceWarnings(project){
 
 // The workload is stored as individual records, not as the uploaded spreadsheet.
 // Reconstruct the two school-stage columns while preserving each record and group.
-function plannerLoadTable(project){
+function plannerLoadTable(project,subject=""){
   const teachers=new Map();
   project.loads.forEach((load,index)=>{
+    if(subject && load.subject!==subject)return;
     if(!teachers.has(load.teacher))teachers.set(load.teacher,{lower:[],upper:[],other:[]});
     const grade=String(load.class_name).trim().match(/^(\d+)/)?.[1];
     const stage=grade>=5&&grade<=9?'lower':grade>=10&&grade<=11?'upper':'other';
     teachers.get(load.teacher)[stage].push({load,index});
   });
-  if(!teachers.size)return '<p class="muted">Пока нет записей нагрузки. Добавьте её из файла, расписания или вручную.</p>';
+  if(!teachers.size)return subject?'<p class="muted">По выбранному предмету записей нагрузки нет.</p>':'<p class="muted">Пока нет записей нагрузки. Добавьте её из файла, расписания или вручную.</p>';
   const hasOther=[...teachers.values()].some(t=>t.other.length);
   const names=[...teachers.keys()].sort((a,b)=>a.localeCompare(b,'ru'));
   const itemCells=item=>{
@@ -88,8 +90,10 @@ function plannerRender(){
       <p class="hint">Здесь объединены загруженные и введённые вручную записи. Нагрузку из опубликованного расписания можно проверить и добавить ниже; существующие записи не перезаписываются. Для изменения класса, учителя, предмета или часов уже расставленные уроки этой нагрузки нужно сначала снять.</p>
       <button type="button" id="scheduleLoadRefresh" class="btn secondary planner-inline-import">Проверить нагрузку из текущего расписания</button><div id="scheduleLoadPreview" aria-live="polite"></div>
       <p class="hint">Таблица показывает нагрузку черновика по учителям и ступеням, как в файле. Часы можно изменить прямо в таблице; чтобы изменить предмет, класс, учителя, группу или кабинет, откройте «Изменить запись». Суммы рассчитываются автоматически. Поиск показывает нагрузку учителя целиком.</p>
+      <label>Предмет<select id="plannerLoadSubject"><option value="">Все предметы</option>${[...new Set([...p.loads.map(x=>x.subject),...(plannerLoadSubject?[plannerLoadSubject]:[])])].sort((a,b)=>a.localeCompare(b,'ru')).map(subject=>`<option value="${esc(subject)}"${subject===plannerLoadSubject?' selected':''}>${esc(subject)}</option>`).join('')}</select></label>
+      <p class="hint">При выборе предмета итоги показывают часы только по нему.</p>
       <label>Поиск по учителю, классу или предмету<input type="search" id="plannerLoadSearch" value="${esc(plannerSearch.loads)}" placeholder="Найти нагрузку"></label>
-      <div id="plannerLoadList">${plannerLoadTable(p)}</div>
+      <div id="plannerLoadList">${plannerLoadTable(p,plannerLoadSubject)}</div>
     </details>
     <details><summary>4. Ограничения и предпочтения</summary>
     <details><summary>Недоступность учителей</summary><p class="hint">Укажите время по звонкам соответствующей смены. Пересечения со второй сменой тоже учитываются.</p><form data-form="unavailable" class="planner-form">${select("unTeacher","Учитель",optionList(p.teachers))}${select("unDay","День",dayOptions)}${select("unShift","Смена",'<option>1</option><option>2</option>')}${select("unLesson","Урок",numberOptions)}<button class="btn">Добавить</button></form><ul class="planner-list">${p.teachers.flatMap((t,ti)=>t.unavailable.map((s,si)=>`<li><span>${esc(t.name)} · ${esc(s.day)} · смена ${s.shift} · урок ${s.lesson}</span><button type="button" class="planner-remove" data-un-teacher="${ti}" data-index="${si}" aria-label="Удалить">✕</button></li>`)).join("")||'<li class="muted">Ограничений нет</li>'}</ul></details>
@@ -191,6 +195,22 @@ function plannerRender(){
   };
   $("plannerLoadsView").ontoggle=()=>{if($("plannerLoadsView").open)previewScheduleLoad();};
   $("scheduleLoadRefresh").onclick=previewScheduleLoad;
+  setupLoadTable();
+  $("plannerLoadSubject").onchange=()=>{
+    plannerLoadSubject=$("plannerLoadSubject").value;
+    $("plannerLoadList").innerHTML=plannerLoadTable(plannerProject,plannerLoadSubject);
+    setupLoadTable();
+  };
+  function updateLoadGroups(){
+    const cls=$("loadClass").value,select=$("loadGroup"),previous=select.value;
+    select.innerHTML='<option value="">Весь класс</option>'+plannerProject.groups.filter(g=>g.class_name===cls).map(g=>`<option value="${esc(g.name)}">${esc(g.name)}${g.inferred?' · проверить':''}</option>`).join("");
+    if(plannerProject.groups.some(g=>g.class_name===cls&&g.name===previous))select.value=previous;
+  }
+  $("loadClass").onchange=updateLoadGroups;updateLoadGroups();
+  $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
+  $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
+}
+function setupLoadTable(){
   const filterLoads=()=>{const query=$("plannerLoadSearch").value.trim().toLocaleLowerCase("ru-RU");plannerSearch.loads=$("plannerLoadSearch").value;plannerRoot.querySelectorAll("[data-load-search]").forEach(row=>row.classList.toggle("hidden",!row.dataset.loadSearch.includes(query)));};
   $("plannerLoadSearch").oninput=filterLoads;filterLoads();
   plannerRoot.querySelectorAll("[data-load-hours]").forEach(form=>{form.onsubmit=async e=>{
@@ -203,14 +223,6 @@ function plannerRender(){
     catch(error){message.textContent=error.message;button.disabled=false;}
   };});
   plannerRoot.querySelectorAll("[data-load-entry]").forEach(entry=>{entry.ontoggle=()=>{if(entry.open)setupLoadEditor(entry);};if(entry.open)setupLoadEditor(entry);});
-  function updateLoadGroups(){
-    const cls=$("loadClass").value,select=$("loadGroup"),previous=select.value;
-    select.innerHTML='<option value="">Весь класс</option>'+plannerProject.groups.filter(g=>g.class_name===cls).map(g=>`<option value="${esc(g.name)}">${esc(g.name)}${g.inferred?' · проверить':''}</option>`).join("");
-    if(plannerProject.groups.some(g=>g.class_name===cls&&g.name===previous))select.value=previous;
-  }
-  $("loadClass").onchange=updateLoadGroups;updateLoadGroups();
-  $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
-  $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }
 function renderRoomRules(){
   const root=$("roomRulesUI"),p=plannerProject;
