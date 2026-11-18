@@ -411,3 +411,5 @@ footer a{color:var(--muted)}
 .weekly-move-old{background:#fbe8e8;border:1px solid #ce6666;border-radius:6px;padding:4px;color:#9b2525;text-decoration:line-through}.weekly-move-old .subj,.weekly-move-old .teach,.weekly-move-old .tcls,.weekly-move-old .tsubj,.weekly-move-old .room-badge{color:#9b2525;text-decoration:line-through}.weekly-move-new{background:#e5f6e9;border:1px solid #72b883;border-radius:6px;padding:4px}.weekly-move-label{display:block;font-size:11px;font-weight:700;color:#78413b}.weekly-move-new>.weekly-move-label{color:#226b35}
 
 .planner-load-list{border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:8px}.planner-load-list>summary,.planner-load-list .planner-list summary{cursor:pointer}.planner-load-list label{display:block}.load-edit-error{color:#a32121;font-size:13px}
+
+.schedule-load-preview-list{max-height:220px;overflow:auto;font-size:13px;overflow-wrap:anywhere}

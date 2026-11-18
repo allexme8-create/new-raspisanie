@@ -43,6 +43,7 @@ import planner
 import load_import
 import catalog_file
 import schedule_map
+import schedule_load_import
 import staff
 from schedule_parser import (
     ParseError,
@@ -706,6 +707,64 @@ async def preview_load_import(file: UploadFile = File(...), _: None = Depends(re
         choices={"class_name":[x.name for x in p.classes],"teacher":[x.name for x in p.teachers],"subject":[x.name for x in p.subjects]}
         for row in rows:row["matches"]={k:load_import.match(row[k],v) for k,v in choices.items()}
         return {"revision":p.revision,"rows":rows,"choices":choices}
+
+
+def schedule_load_candidates(project, data):
+    rows,skipped=schedule_load_import.from_schedule(data,normalize_teacher_initials)
+    # Preserve existing/manual/imported loads, including conflicting group layouts.
+    existing={}
+    for load in project.loads:
+        key=(load.class_name.casefold(),normalize_teacher_initials(load.teacher).casefold(),load.subject.casefold())
+        existing.setdefault(key,[]).append(load.group.casefold())
+    additions=[];duplicates=[]
+    for row in rows:
+        key=(row["class_name"].casefold(),row["teacher"].casefold(),row["subject"].casefold())
+        groups=existing.get(key,[]);group=row["group"].casefold()
+        if group in groups:
+            duplicates.append(row);continue
+        if groups and (row.get('inferred') or not group or '' in groups):
+            skipped.append(f"{row['class_name']}, {row['subject']}, {row['teacher']}: в черновике уже есть нагрузка с несовместимым разделением на группы.");continue
+        additions.append(row);existing.setdefault(key,[]).append(group)
+    return additions,duplicates,skipped
+
+
+@app.get("/api/admin/planner/schedule-load/preview")
+def preview_schedule_load(_: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        data=schedule_map.snapshot(state);project=_planner_project()
+        rows,duplicates,skipped=schedule_load_candidates(project,data)
+        return {"revision":project.revision,"schedule_fingerprint":map_fingerprint(data),"rows":rows,"duplicates":duplicates,"skipped":skipped}
+
+
+class ScheduleLoadImport(BaseModel):
+    revision: int = Field(ge=0)
+    schedule_fingerprint: str = Field(min_length=64,max_length=64)
+
+
+@app.post("/api/admin/planner/schedule-load/apply")
+def apply_schedule_load(body: ScheduleLoadImport, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True);data=schedule_map.snapshot(state)
+        if p.revision!=body.revision or map_fingerprint(data)!=body.schedule_fingerprint:raise HTTPException(409,"Конструктор или опубликованное расписание изменились. Обновите предпросмотр.")
+        rows,duplicates,skipped=schedule_load_candidates(p,data)
+        classes={x.name.casefold():x.name for x in p.classes};teachers={normalize_teacher_initials(x.name).casefold():x.name for x in p.teachers};subjects={x.name.casefold():x.name for x in p.subjects};groups={(g.class_name.casefold(),g.name.casefold()):g.name for g in p.groups}
+        second={x.casefold() for x in (data.get("second_shift_classes") or [])}
+        for row in rows:
+            ck=row["class_name"].casefold();tk=row["teacher"].casefold();sk=row["subject"].casefold()
+            if ck not in classes:
+                p.classes.append(planner.SchoolClass(name=row["class_name"],shift=2 if ck in second else 1));classes[ck]=row["class_name"]
+            if tk not in teachers:p.teachers.append(planner.Teacher(name=row["teacher"]));teachers[tk]=row["teacher"]
+            if sk not in subjects:p.subjects.append(planner.Named(name=row["subject"]));subjects[sk]=row["subject"]
+            cls=classes[ck];group=row["group"];gk=(cls.casefold(),group.casefold())
+            if group and gk not in groups:p.groups.append(planner.ClassGroup(name=group,class_name=cls,inferred=row.get("inferred",False)));groups[gk]=group
+            p.loads.append(planner.Load(id=secrets.token_hex(16),class_name=cls,teacher=teachers[tk],subject=subjects[sk],group=groups[gk] if group else '',room='',per_week=row["per_week"],max_per_day=row["max_per_day"]))
+        if rows:
+            try:p=planner.Project.model_validate(p.model_dump())
+            except ValueError as exc:raise HTTPException(422,"Невозможно добавить нагрузку: превышен предел справочников конструктора.") from exc
+            errors=planner.references(p)
+            if errors:raise HTTPException(422," ".join(errors[:5]))
+            p.revision+=1;state["planner"]=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True),"added":len(rows),"duplicates":len(duplicates),"skipped":len(skipped)}
 
 
 class LoadImportRow(BaseModel):

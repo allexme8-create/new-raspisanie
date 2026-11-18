@@ -12,6 +12,7 @@ const numberOptions=Array.from({length:12},(_,i)=>`<option>${i+1}</option>`).joi
 const field=(id,label,content)=>`<label>${label}${content.replace("<select",`<select id="${id}"`).replace("<input",`<input id="${id}"`)}</label>`;
 const select=(id,label,opts)=>field(id,label,`<select required>${opts}</select>`);
 const input=(id,label,placeholder,type="text",extra="")=>field(id,label,`<input type="${type}" placeholder="${placeholder}" required ${extra}>`);
+const selectedOptions=(items,value)=>items.map(item=>`<option value="${esc(item.name)}"${item.name===value?' selected':''}>${esc(item.name)}</option>`).join("");
 function plannerPreferenceWarnings(project){
   const previous=[],warnings=[],loads=new Map(project.loads.map(x=>[x.id,x]));
   for(const placement of project.placements){const load=loads.get(placement.load_id);if(!load)continue;
@@ -35,7 +36,6 @@ function plannerRender(){
     return `<li class="planner-catalog-item" data-search-name="${esc(`${x.class_name||""} ${x.name||""}`.trim().toLocaleLowerCase("ru-RU"))}"><div class="planner-item-line">${title}<button type="button" class="planner-remove" data-kind="${key}" data-index="${i}" aria-label="Удалить ${esc(x.name||"запись")}">✕</button></div>${form}</li>`;
   }).join(""):'<li class="muted">Пока нет записей</li>';
   const loadOptions=p.loads.map(x=>`<option value="${esc(x.id)}">${esc(`${x.class_name}${x.group?` · ${x.group}`:""} · ${x.subject} · ${x.teacher} · ${x.room}`)}</option>`).join("");
-  const selectedOptions=(items,value)=>items.map(item=>`<option value="${esc(item.name)}"${item.name===value?' selected':''}>${esc(item.name)}</option>`).join("");
   const nameForm=(type,label)=>`<form data-form="${type}" class="planner-form">${input(`${type}Name`,label,label)}<button class="btn" type="submit">Добавить</button></form>`;
   const fileForm=(kind)=>`<details class="catalog-file-import"><summary>Загрузить список из файла</summary><p class="hint">CSV, XLS, XLSX, XLSM, ODS или Excel XML; таблица со столбцом ${kind==='teachers'?'«ФИО» либо «Фамилия», «Имя», «Отчество»':'«Кабинет», «Номер» или «Название»'}. Используется первый лист. Проверим повторы перед сохранением.</p><form class="planner-form" id="${kind}FileForm"><label>Файл<input id="${kind}File" type="file" accept=".csv,.xls,.xlsx,.xlsm,.ods,.xml" required></label><button class="btn secondary">Проверить файл</button></form><div id="${kind}FilePreview" aria-live="polite"></div></details>`;
   plannerRoot.innerHTML=`
@@ -54,9 +54,10 @@ function plannerRender(){
     <details class="load-import" id="plannerLoadImportSection"><summary>Загрузить файл нагрузки</summary><p class="hint">CSV, XLS, XLSX, XLSM, ODS или Excel XML (до 10 МБ). Можно последовательно загружать разные предметы. Перед сохранением проверьте все неточные совпадения. После сохранения нагрузка используется для ручной расстановки и автоподбора в разделе «Расстановка и публикация». Повторная загрузка обновит количество часов для того же класса, предмета и учителя.</p><form id="loadImportForm" class="planner-form"><label>Файл<input type="file" id="loadImportFile" accept=".csv,.xls,.xlsx,.xlsm,.xml,.ods" required></label><button class="btn">Проверить файл</button></form><a class="btn secondary planner-inline-import" href="/api/schedule/load-template.csv" download="workload-template.csv">Скачать образец нагрузки (CSV)</a><p class="hint">В образце примеры: замените их своими данными. Каждый файл можно загружать отдельно по предмету; новые записи добавляются к ранее загруженным.</p><div id="loadImportPreview"></div></details><p class="hint">Для всего класса оставьте группу пустой. Для параллельных занятий создайте нагрузку для каждой группы с разными названиями, учителями и кабинетами. Используйте одно название для одной и той же группы во всех предметах.</p><form data-form="loads" class="planner-form">${select("loadClass","Класс",optionList(p.classes))}<label>Группа<select id="loadGroup"><option value="">Весь класс</option></select></label>${select("loadSubject","Предмет",optionList(p.subjects))}${select("loadTeacher","Учитель",optionList(p.teachers))}<label>Кабинет нагрузки<select id="loadRoom"><option value="">Автоподбор</option>${optionList(p.rooms)}</select></label>${input("loadWeek","Уроков в неделю","1","number",'min="1" max="36" value="1"')}${input("loadDay","Не более в день","1","number",'min="1" max="12" value="1"')}<button class="btn">Добавить</button></form>
     </details>
     <details class="planner-load-list" id="plannerLoadsView"><summary>Просмотр и редактирование нагрузки · ${p.loads.length}</summary>
-      <p class="hint">Здесь объединены все загруженные и введённые вручную записи. Для изменения класса, учителя, предмета или часов уже расставленные уроки этой нагрузки нужно сначала снять.</p>
+      <p class="hint">Здесь объединены загруженные и введённые вручную записи. Нагрузку из опубликованного расписания можно проверить и добавить ниже; существующие записи не перезаписываются. Для изменения класса, учителя, предмета или часов уже расставленные уроки этой нагрузки нужно сначала снять.</p>
+      <button type="button" id="scheduleLoadRefresh" class="btn secondary planner-inline-import">Проверить нагрузку из текущего расписания</button><div id="scheduleLoadPreview" aria-live="polite"></div>
       <label>Поиск по учителю, классу или предмету<input type="search" id="plannerLoadSearch" value="${esc(plannerSearch.loads)}" placeholder="Найти нагрузку"></label>
-      <ul class="planner-list" id="plannerLoadList">${p.loads.map((x,i)=>`<li class="planner-catalog-item" data-load-search="${esc(`${x.class_name} ${x.subject} ${x.teacher} ${x.group||''} ${x.room||''}`.toLocaleLowerCase('ru-RU'))}"><details><summary><strong>${esc(x.class_name)} · ${esc(x.subject)} · ${esc(x.teacher)} · ${x.per_week} ч/нед${x.group?' · '+esc(x.group):''}</strong></summary><form class="planner-form" data-load-edit="${esc(x.id)}"><label>Класс<select name="class_name" required>${selectedOptions(p.classes,x.class_name)}</select></label><label>Учитель<select name="teacher" required>${selectedOptions(p.teachers,x.teacher)}</select></label><label>Предмет<select name="subject" required>${selectedOptions(p.subjects,x.subject)}</select></label><label>Группа<select name="group"><option value="">Весь класс</option>${p.groups.filter(g=>g.class_name===x.class_name).map(g=>`<option value="${esc(g.name)}"${g.name===x.group?' selected':''}>${esc(g.name)}</option>`).join("")}</select></label><label>Кабинет<select name="room"><option value="">Автоподбор</option>${selectedOptions(p.rooms,x.room)}</select></label><label>Уроков в неделю<input name="per_week" type="number" min="1" max="36" required value="${x.per_week}"></label><label>Не более в день<input name="max_per_day" type="number" min="1" max="12" required value="${x.max_per_day??1}"></label><button class="btn secondary" type="submit">Сохранить нагрузку</button><div class="load-edit-error" role="alert"></div></form><button type="button" class="planner-remove" data-kind="loads" data-index="${i}" aria-label="Удалить нагрузку">✕</button></details></li>`).join("")||'<li class="muted">Пока нет записей</li>'}</ul>
+      <ul class="planner-list" id="plannerLoadList">${p.loads.map((x,i)=>`<li class="planner-catalog-item" data-load-search="${esc(`${x.class_name} ${x.subject} ${x.teacher} ${x.group||''} ${x.room||''}`.toLocaleLowerCase('ru-RU'))}"><details data-load-entry="${i}"><summary><strong>${esc(x.class_name)} · ${esc(x.subject)} · ${esc(x.teacher)} · ${x.per_week} ч/нед${x.group?' · '+esc(x.group):''}</strong></summary><div data-load-editor></div></details></li>`).join("")||'<li class="muted">Пока нет записей</li>'}</ul>
     </details>
     <details><summary>4. Ограничения и предпочтения</summary>
     <details><summary>Недоступность учителей</summary><p class="hint">Укажите время по звонкам соответствующей смены. Пересечения со второй сменой тоже учитываются.</p><form data-form="unavailable" class="planner-form">${select("unTeacher","Учитель",optionList(p.teachers))}${select("unDay","День",dayOptions)}${select("unShift","Смена",'<option>1</option><option>2</option>')}${select("unLesson","Урок",numberOptions)}<button class="btn">Добавить</button></form><ul class="planner-list">${p.teachers.flatMap((t,ti)=>t.unavailable.map((s,si)=>`<li><span>${esc(t.name)} · ${esc(s.day)} · смена ${s.shift} · урок ${s.lesson}</span><button type="button" class="planner-remove" data-un-teacher="${ti}" data-index="${si}" aria-label="Удалить">✕</button></li>`)).join("")||'<li class="muted">Ограничений нет</li>'}</ul></details>
@@ -110,7 +111,6 @@ function plannerRender(){
       if(used){plannerError(new Error(`Нельзя удалить «${item.name}»: есть учебная нагрузка (${used}). Сначала удалите её и связанные уроки.`));return;}
       if(!confirm(`Удалить «${item.name}» из справочника конструктора? Опубликованное расписание и учётные записи не изменятся.`))return;
     }
-    if(kind==="loads"&&!confirm("Удалить эту запись нагрузки? Если уроки уже расставлены, сначала снимите их."))return;
     plannerChange(d=>d[kind].splice(index,1));
   });
   plannerRoot.querySelectorAll("[data-un-teacher]").forEach(b=>b.onclick=()=>plannerChange(d=>d.teachers[Number(b.dataset.unTeacher)].unavailable.splice(Number(b.dataset.index),1)));
@@ -157,15 +157,11 @@ function plannerRender(){
     try{const data=await api("/api/admin/planner/load-import/preview",{method:"POST",form});renderLoadImportPreview(data);}
     catch(error){$("loadImportPreview").textContent=error.message;}
   };
+  $("plannerLoadsView").ontoggle=()=>{if($("plannerLoadsView").open)previewScheduleLoad();};
+  $("scheduleLoadRefresh").onclick=previewScheduleLoad;
   const filterLoads=()=>{const query=$("plannerLoadSearch").value.trim().toLocaleLowerCase("ru-RU");plannerSearch.loads=$("plannerLoadSearch").value;plannerRoot.querySelectorAll("[data-load-search]").forEach(row=>row.classList.toggle("hidden",!row.dataset.loadSearch.includes(query)));};
   $("plannerLoadSearch").oninput=filterLoads;filterLoads();
-  plannerRoot.querySelectorAll("[data-load-edit]").forEach(form=>{
-    form.elements.class_name.onchange=()=>{const group=form.elements.group,old=group.value,cls=form.elements.class_name.value;group.innerHTML='<option value="">Весь класс</option>'+plannerProject.groups.filter(g=>g.class_name===cls).map(g=>`<option value="${esc(g.name)}">${esc(g.name)}</option>`).join("");if(plannerProject.groups.some(g=>g.class_name===cls&&g.name===old))group.value=old;};
-    form.onsubmit=async e=>{
-      e.preventDefault();const message=form.querySelector('.load-edit-error');if(message)message.textContent='';
-      try{const data=await api("/api/admin/planner/load-change",{method:"POST",body:{revision:plannerProject.revision,load_id:form.dataset.loadEdit,class_name:form.elements.class_name.value,teacher:form.elements.teacher.value,subject:form.elements.subject.value,per_week:Number(form.elements.per_week.value),max_per_day:Number(form.elements.max_per_day.value),group:form.elements.group.value,room:form.elements.room.value}});plannerProject=data.project;plannerIssues=data.issues;plannerRender();toast("Нагрузка сохранена");}catch(error){if(message)message.textContent=error.message;else plannerError(error);}
-    };
-  });
+  plannerRoot.querySelectorAll("[data-load-entry]").forEach(entry=>{entry.ontoggle=()=>{if(entry.open)setupLoadEditor(entry);};if(entry.open)setupLoadEditor(entry);});
   function updateLoadGroups(){
     const cls=$("loadClass").value,select=$("loadGroup"),previous=select.value;
     select.innerHTML='<option value="">Весь класс</option>'+plannerProject.groups.filter(g=>g.class_name===cls).map(g=>`<option value="${esc(g.name)}">${esc(g.name)}${g.inferred?' · проверить':''}</option>`).join("");
@@ -229,6 +225,38 @@ function suggestImportGroups(rows,existing){
     }
   }
   return result;
+}
+
+// Large schedules can contain hundreds of loads. Create the selects only when
+// an individual row is opened instead of rendering every editor at once.
+function setupLoadEditor(details){
+  const index=Number(details.dataset.loadEntry),x=plannerProject.loads[index],host=details.querySelector('[data-load-editor]');
+  if(!x||!host||host.dataset.ready)return;
+  const p=plannerProject;
+  host.innerHTML=`<form class="planner-form" data-load-edit="${esc(x.id)}"><label>Класс<select name="class_name" required>${selectedOptions(p.classes,x.class_name)}</select></label><label>Учитель<select name="teacher" required>${selectedOptions(p.teachers,x.teacher)}</select></label><label>Предмет<select name="subject" required>${selectedOptions(p.subjects,x.subject)}</select></label><label>Группа<select name="group"><option value="">Весь класс</option>${p.groups.filter(g=>g.class_name===x.class_name).map(g=>`<option value="${esc(g.name)}"${g.name===x.group?' selected':''}>${esc(g.name)}</option>`).join("")}</select></label><label>Кабинет<select name="room"><option value="">Автоподбор</option>${selectedOptions(p.rooms,x.room)}</select></label><label>Уроков в неделю<input name="per_week" type="number" min="1" max="36" required value="${x.per_week}"></label><label>Не более в день<input name="max_per_day" type="number" min="1" max="12" required value="${x.max_per_day??1}"></label><button class="btn secondary" type="submit">Сохранить нагрузку</button><div class="load-edit-error" role="alert"></div></form><button type="button" class="planner-remove" data-load-remove aria-label="Удалить нагрузку">✕</button>`;
+  host.dataset.ready='1';const form=host.querySelector('[data-load-edit]');
+  form.elements.class_name.onchange=()=>{const group=form.elements.group,old=group.value,cls=form.elements.class_name.value;group.innerHTML='<option value="">Весь класс</option>'+plannerProject.groups.filter(g=>g.class_name===cls).map(g=>`<option value="${esc(g.name)}">${esc(g.name)}</option>`).join("");if(plannerProject.groups.some(g=>g.class_name===cls&&g.name===old))group.value=old;};
+  form.onsubmit=async e=>{
+    e.preventDefault();const message=form.querySelector('.load-edit-error');if(message)message.textContent='';
+    try{const data=await api("/api/admin/planner/load-change",{method:"POST",body:{revision:plannerProject.revision,load_id:form.dataset.loadEdit,class_name:form.elements.class_name.value,teacher:form.elements.teacher.value,subject:form.elements.subject.value,per_week:Number(form.elements.per_week.value),max_per_day:Number(form.elements.max_per_day.value),group:form.elements.group.value,room:form.elements.room.value}});plannerProject=data.project;plannerIssues=data.issues;plannerRender();toast("Нагрузка сохранена");}catch(error){if(message)message.textContent=error.message;else plannerError(error);}
+  };
+  host.querySelector('[data-load-remove]').onclick=()=>{if(!confirm("Удалить эту запись нагрузки? Если уроки уже расставлены, сначала снимите их."))return;plannerChange(project=>{const i=project.loads.findIndex(load=>load.id===x.id);if(i>=0)project.loads.splice(i,1);});};
+}
+
+async function previewScheduleLoad(){
+  const box=$("scheduleLoadPreview");if(!box)return;
+  box.textContent='Проверяем опубликованное расписание…';
+  try{
+    const data=await api('/api/admin/planner/schedule-load/preview');
+    const rows=data.rows.map(r=>`<li>${esc(r.class_name)} · ${esc(r.subject)} · ${esc(r.teacher)}${r.group?' · '+esc(r.group):''}${r.inferred?' · группа предположительная, проверьте':''} · ${r.per_week} ч/нед</li>`).join('');
+    const skipped=data.skipped.map(item=>`<li>${esc(item)}</li>`).join('');
+    box.innerHTML=`<p class="hint">Из текущего расписания: новых записей ${data.rows.length}, уже есть в черновике ${data.duplicates.length}, требуют ручной проверки ${data.skipped.length}. Часы посчитаны по недельной сетке; разовые изменения не учитываются. Если несколько учителей ведут один предмет без указания групп, группы предложены предположительно — проверьте их перед добавлением.</p>${rows?`<details><summary>Новые записи (${data.rows.length})</summary><ul class="schedule-load-preview-list">${rows}</ul></details><button type="button" class="btn secondary planner-inline-import" id="scheduleLoadApply">Добавить нагрузку в конструктор</button>`:''}${skipped?`<details><summary>Неоднозначные или пропущенные уроки (${data.skipped.length})</summary><ul class="schedule-load-preview-list">${skipped}</ul></details>`:''}`;
+    if(data.rows.length)$("scheduleLoadApply").onclick=async()=>{
+      if(!confirm(`Добавить ${data.rows.length} записей нагрузки из опубликованного расписания? Существующие записи и расставленные уроки не изменятся. Предположительные группы необходимо проверить.`))return;
+      try{const result=await api('/api/admin/planner/schedule-load/apply',{method:'POST',body:{revision:data.revision,schedule_fingerprint:data.schedule_fingerprint}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast(`Добавлено записей нагрузки: ${result.added}`);}
+      catch(error){box.textContent=error.message;}
+    };
+  }catch(error){box.textContent=error.message;}
 }
 
 function renderLoadImportPreview(data){
