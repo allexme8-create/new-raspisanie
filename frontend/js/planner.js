@@ -25,6 +25,37 @@ function plannerPreferenceWarnings(project){
   }return warnings;
 }
 
+// The workload is stored as individual records, not as the uploaded spreadsheet.
+// Reconstruct the two school-stage columns while preserving each record and group.
+function plannerLoadTable(project){
+  const teachers=new Map();
+  project.loads.forEach((load,index)=>{
+    if(!teachers.has(load.teacher))teachers.set(load.teacher,{lower:[],upper:[],other:[]});
+    const grade=String(load.class_name).trim().match(/^(\d+)/)?.[1];
+    const stage=grade>=5&&grade<=9?'lower':grade>=10&&grade<=11?'upper':'other';
+    teachers.get(load.teacher)[stage].push({load,index});
+  });
+  if(!teachers.size)return '<p class="muted">Пока нет записей нагрузки. Добавьте её из файла, расписания или вручную.</p>';
+  const hasOther=[...teachers.values()].some(t=>t.other.length);
+  const names=[...teachers.keys()].sort((a,b)=>a.localeCompare(b,'ru'));
+  const itemCells=item=>{
+    if(!item)return '<td></td><td></td><td></td>';
+    const {load:x,index:i}=item;
+    return `<td>${esc(x.subject)}${x.group?`<br><small>${esc(x.group)}</small>`:''}<details data-load-entry="${i}"><summary>Изменить запись</summary><div data-load-editor></div></details></td><td>${esc(x.class_name)}</td><td><form data-load-hours="${i}" class="load-hours-form"><input type="number" name="hours" value="${x.per_week}" min="1" max="36" required aria-label="Часов в неделю: ${esc(x.teacher)}, ${esc(x.class_name)}, ${esc(x.subject)}"><button class="btn secondary" type="submit">Сохранить</button><span class="load-edit-error" role="alert"></span></form></td>`;
+  };
+  const total=items=>items.reduce((sum,item)=>sum+item.load.per_week,0);
+  const body=names.map((name,n)=>{
+    const teacher=teachers.get(name),count=Math.max(teacher.lower.length,teacher.upper.length,teacher.other.length,1);
+    const search=[name,...[...teacher.lower,...teacher.upper,...teacher.other].flatMap(({load:x})=>[x.class_name,x.subject,x.group,x.room])].join(' ').toLocaleLowerCase('ru-RU');
+    let rows='';
+    for(let i=0;i<count;i++)rows+=`<tr>${i===0?`<td rowspan="${count}">${n+1}</td><th scope="rowgroup" rowspan="${count}">${esc(name)}</th>`:''}${itemCells(teacher.lower[i])}${itemCells(teacher.upper[i])}${hasOther?itemCells(teacher.other[i]):''}${i===0?`<td rowspan="${count}" class="load-teacher-total">${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td>`:''}</tr>`;
+    rows+=`<tr class="load-stage-total"><td colspan="2">Итого</td><td colspan="3">${total(teacher.lower)}</td><td colspan="3">${total(teacher.upper)}</td>${hasOther?`<td colspan="3">${total(teacher.other)}</td>`:''}<td>${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td></tr>`;
+    return `<tbody data-load-search="${esc(search)}">${rows}</tbody>`;
+  }).join('');
+  const head='<th>Предмет</th><th>Класс</th><th>Часов в неделю</th>';
+  return `<div class="load-table-scroll"><table class="load-table"><thead><tr><th rowspan="2">№</th><th rowspan="2">ФИО учителя</th><th colspan="3">Основная ступень · 5–9 класс</th><th colspan="3">Старшая ступень · 10–11 класс</th>${hasOther?'<th colspan="3">Другие классы</th>':''}<th rowspan="2">Итого часов</th></tr><tr>${head}${head}${hasOther?head:''}</tr></thead>${body}</table></div>`;
+}
+
 function plannerRender(){
   const p=plannerProject;p.groups=p.groups||[];p.preferences=p.preferences||[];
   const softWarnings=plannerPreferenceWarnings(p);
@@ -56,8 +87,9 @@ function plannerRender(){
     <details class="planner-load-list" id="plannerLoadsView"><summary>Просмотр и редактирование нагрузки · ${p.loads.length}</summary>
       <p class="hint">Здесь объединены загруженные и введённые вручную записи. Нагрузку из опубликованного расписания можно проверить и добавить ниже; существующие записи не перезаписываются. Для изменения класса, учителя, предмета или часов уже расставленные уроки этой нагрузки нужно сначала снять.</p>
       <button type="button" id="scheduleLoadRefresh" class="btn secondary planner-inline-import">Проверить нагрузку из текущего расписания</button><div id="scheduleLoadPreview" aria-live="polite"></div>
+      <p class="hint">Таблица показывает нагрузку черновика по учителям и ступеням, как в файле. Часы можно изменить прямо в таблице; чтобы изменить предмет, класс, учителя, группу или кабинет, откройте «Изменить запись». Суммы рассчитываются автоматически. Поиск показывает нагрузку учителя целиком.</p>
       <label>Поиск по учителю, классу или предмету<input type="search" id="plannerLoadSearch" value="${esc(plannerSearch.loads)}" placeholder="Найти нагрузку"></label>
-      <ul class="planner-list" id="plannerLoadList">${p.loads.map((x,i)=>`<li class="planner-catalog-item" data-load-search="${esc(`${x.class_name} ${x.subject} ${x.teacher} ${x.group||''} ${x.room||''}`.toLocaleLowerCase('ru-RU'))}"><details data-load-entry="${i}"><summary><strong>${esc(x.class_name)} · ${esc(x.subject)} · ${esc(x.teacher)} · ${x.per_week} ч/нед${x.group?' · '+esc(x.group):''}</strong></summary><div data-load-editor></div></details></li>`).join("")||'<li class="muted">Пока нет записей</li>'}</ul>
+      <div id="plannerLoadList">${plannerLoadTable(p)}</div>
     </details>
     <details><summary>4. Ограничения и предпочтения</summary>
     <details><summary>Недоступность учителей</summary><p class="hint">Укажите время по звонкам соответствующей смены. Пересечения со второй сменой тоже учитываются.</p><form data-form="unavailable" class="planner-form">${select("unTeacher","Учитель",optionList(p.teachers))}${select("unDay","День",dayOptions)}${select("unShift","Смена",'<option>1</option><option>2</option>')}${select("unLesson","Урок",numberOptions)}<button class="btn">Добавить</button></form><ul class="planner-list">${p.teachers.flatMap((t,ti)=>t.unavailable.map((s,si)=>`<li><span>${esc(t.name)} · ${esc(s.day)} · смена ${s.shift} · урок ${s.lesson}</span><button type="button" class="planner-remove" data-un-teacher="${ti}" data-index="${si}" aria-label="Удалить">✕</button></li>`)).join("")||'<li class="muted">Ограничений нет</li>'}</ul></details>
@@ -161,6 +193,15 @@ function plannerRender(){
   $("scheduleLoadRefresh").onclick=previewScheduleLoad;
   const filterLoads=()=>{const query=$("plannerLoadSearch").value.trim().toLocaleLowerCase("ru-RU");plannerSearch.loads=$("plannerLoadSearch").value;plannerRoot.querySelectorAll("[data-load-search]").forEach(row=>row.classList.toggle("hidden",!row.dataset.loadSearch.includes(query)));};
   $("plannerLoadSearch").oninput=filterLoads;filterLoads();
+  plannerRoot.querySelectorAll("[data-load-hours]").forEach(form=>{form.onsubmit=async e=>{
+    e.preventDefault();const load=plannerProject.loads[Number(form.dataset.loadHours)],message=form.querySelector('.load-edit-error');
+    if(!load)return;message.textContent='';const hours=Number(form.elements.hours.value);
+    if(!Number.isInteger(hours)||hours<1||hours>36){message.textContent='Укажите от 1 до 36 часов.';return;}
+    if(hours===load.per_week)return;
+    const button=form.querySelector('button');button.disabled=true;
+    try{const result=await api('/api/admin/planner/load-change',{method:'POST',body:{revision:plannerProject.revision,load_id:load.id,class_name:load.class_name,teacher:load.teacher,subject:load.subject,group:load.group||'',room:load.room||'',per_week:hours,max_per_day:load.max_per_day}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast('Часы нагрузки сохранены');}
+    catch(error){message.textContent=error.message;button.disabled=false;}
+  };});
   plannerRoot.querySelectorAll("[data-load-entry]").forEach(entry=>{entry.ontoggle=()=>{if(entry.open)setupLoadEditor(entry);};if(entry.open)setupLoadEditor(entry);});
   function updateLoadGroups(){
     const cls=$("loadClass").value,select=$("loadGroup"),previous=select.value;

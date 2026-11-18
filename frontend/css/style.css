@@ -413,3 +413,11 @@ footer a{color:var(--muted)}
 .planner-load-list{border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:8px}.planner-load-list>summary,.planner-load-list .planner-list summary{cursor:pointer}.planner-load-list label{display:block}.load-edit-error{color:#a32121;font-size:13px}
 
 .schedule-load-preview-list{max-height:220px;overflow:auto;font-size:13px;overflow-wrap:anywhere}
+
+/* Wide spreadsheet: keep the stage columns readable on phones with horizontal scrolling. */
+.load-table-scroll{overflow-x:auto;max-width:100%;margin:10px 0;overscroll-behavior-x:contain}
+.load-table{border-collapse:collapse;font-size:13px;min-width:1000px;width:100%}
+.load-table th,.load-table td{border:1px solid var(--line);padding:5px;vertical-align:top;text-align:left}
+.load-table thead th,.load-stage-total{background:#f3f5fa}.load-table th[scope=rowgroup]{min-width:120px}
+.load-stage-total td,.load-teacher-total{font-weight:700}.load-table td details{margin-top:4px}.load-table td summary{cursor:pointer;color:#315d9d}
+.load-hours-form{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:100px}.load-hours-form input{width:55px;min-width:0;padding:4px}.load-hours-form .btn{font-size:12px;padding:4px}.load-hours-form .load-edit-error{flex-basis:100%}
