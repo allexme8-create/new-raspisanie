@@ -682,6 +682,17 @@ def apply_catalog_file(kind: str, body: CatalogFileImport, _: None = Depends(req
         return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True),"added":added}
 
 
+@app.get("/api/schedule/load-template.csv")
+def download_load_template() -> Response:
+    out=io.StringIO(newline="")
+    writer=csv.writer(out,delimiter=";",lineterminator="\r\n")
+    writer.writerow(["ФИО учителя","Предмет","Класс","Количество часов в неделю"])
+    writer.writerow(["Иванова И.И.","Математика","5а",4])
+    writer.writerow(["Иванова И.И.","Математика","5б",4])
+    writer.writerow(["Петров П.П.","Физика","7а",2])
+    return Response(content=out.getvalue().encode("utf-8-sig"),media_type="text/csv; charset=utf-8",headers={"Content-Disposition":'attachment; filename="workload-template.csv"'})
+
+
 @app.post("/api/admin/planner/load-import/preview")
 async def preview_load_import(file: UploadFile = File(...), _: None = Depends(require_admin)) -> dict:
     name=file.filename or ""
@@ -758,6 +769,11 @@ class LoadChange(BaseModel):
     load_id: str
     group: str = Field(max_length=80)
     room: str = Field(max_length=80)
+    class_name: str | None = Field(default=None,min_length=1,max_length=80)
+    teacher: str | None = Field(default=None,min_length=1,max_length=80)
+    subject: str | None = Field(default=None,min_length=1,max_length=80)
+    per_week: int | None = Field(default=None,ge=1,le=36)
+    max_per_day: int | None = Field(default=None,ge=1,le=12)
 
 
 @app.post("/api/admin/planner/load-change")
@@ -768,11 +784,20 @@ def change_load(body: LoadChange, _: None = Depends(require_admin)) -> dict:
         load=next((x for x in p.loads if x.id==body.load_id),None)
         if not load:raise HTTPException(404,"Нагрузка не найдена")
         if body.room and body.room not in {r.name for r in p.rooms}:raise HTTPException(422,"Кабинет отсутствует в справочнике")
-        peers=[x for x in p.loads if x.class_name==load.class_name and x.subject==load.subject and x.id!=load.id]
-        if body.group and not any(g.class_name==load.class_name and g.name==body.group for g in p.groups):raise HTTPException(422,"Группа отсутствует в справочнике")
+        cls=body.class_name if body.class_name is not None else load.class_name
+        teacher=body.teacher if body.teacher is not None else load.teacher
+        subject=body.subject if body.subject is not None else load.subject
+        hours=body.per_week if body.per_week is not None else load.per_week
+        daily=body.max_per_day if body.max_per_day is not None else load.max_per_day
+        if cls not in {x.name for x in p.classes} or teacher not in {x.name for x in p.teachers} or subject not in {x.name for x in p.subjects}:raise HTTPException(422,"Выберите существующие класс, учителя и предмет.")
+        identity_changed=(cls,teacher,subject)!=(load.class_name,load.teacher,load.subject)
+        if (identity_changed or hours!=load.per_week) and any(x.load_id==load.id for x in p.placements):raise HTTPException(409,"Для изменения класса, учителя, предмета или часов сначала снимите расставленные уроки этой нагрузки.")
+        if identity_changed and any(x.id!=load.id and (x.class_name,x.teacher,x.subject)==(cls,teacher,subject) for x in p.loads):raise HTTPException(409,"Такая нагрузка для класса, предмета и учителя уже существует.")
+        peers=[x for x in p.loads if x.class_name==cls and x.subject==subject and x.id!=load.id]
+        if body.group and not any(g.class_name==cls and g.name==body.group for g in p.groups):raise HTTPException(422,"Группа отсутствует в справочнике")
         if peers and not body.group:raise HTTPException(422,"Для параллельных учителей выберите группу.")
         other=next((x for x in peers if x.group==body.group and body.group),None)
-        if other and not load.group:raise HTTPException(409,"Сначала назначьте текущему учителю другую группу.")
+        if other and (identity_changed or not load.group):raise HTTPException(409,"Эта группа уже назначена другому учителю. Выберите свободную группу.")
         def conflicts(project):
             return Counter(issue for issue in planner.issues(project,state.get("bell_schedule")) if not issue.startswith("Укажите кабинет для "))
         before=conflicts(p)
@@ -781,6 +806,7 @@ def change_load(body: LoadChange, _: None = Depends(require_admin)) -> dict:
             for placement in p.placements:
                 if placement.load_id == load.id:
                     placement.room = "" if body.room else (load.room or placement.room)
+        load.class_name=cls;load.teacher=teacher;load.subject=subject;load.per_week=hours;load.max_per_day=daily
         load.group=body.group;load.room=body.room
         after=conflicts(p)
         added=list((after-before).elements())

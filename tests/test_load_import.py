@@ -30,6 +30,41 @@ class LoadImportTests(unittest.TestCase):
         broken=csv_bytes().replace('английския язык;5а;3'.encode('cp1251'),'английския язык;5а;1,5'.encode('cp1251'))
         with self.assertRaises(load_import.ParseError):load_import.parse(broken,'bad.csv')
 
+    def test_template_partial_files_and_edit_load(self):
+        old=copy.deepcopy(app.state)
+        try:
+            app.state['planner']=planner.Project(classes=[planner.SchoolClass(name=n) for n in ['5а','5б','7а']],teachers=[planner.Teacher(name=n) for n in ['Иванова И.И.','Петров П.П.']],subjects=[planner.Named(name=n) for n in ['Математика','Физика']],rooms=[planner.Room(name='101')]).model_dump()
+            app.state['bell_schedule']=None
+            with patch.object(app,'_save_state'),TestClient(app.app) as client:
+                headers={'Authorization':'Bearer '+app._create_token()}
+                sample=client.get('/api/schedule/load-template.csv')
+                self.assertEqual(sample.status_code,200);self.assertIn('attachment',sample.headers['content-disposition'])
+                self.assertEqual(len(load_import.parse(sample.content,'example.csv')),3)
+                lines=sample.content.decode('utf-8-sig').splitlines()
+                for rev,line in enumerate((lines[1],lines[3])):
+                    part=('\ufeff'+lines[0]+'\r\n'+line+'\r\n').encode('utf-8')
+                    preview=client.post('/api/admin/planner/load-import/preview',headers=headers,files={'file':('part.csv',part)})
+                    self.assertEqual(preview.status_code,200,preview.text)
+                    rows=preview.json()['rows'];self.assertEqual(len(rows),1)
+                    apply=client.post('/api/admin/planner/load-import/apply',headers=headers,json={'revision':rev,'rows':[{k:rows[0][k] for k in ('class_name','teacher','subject','per_week')}]})
+                    self.assertEqual(apply.status_code,200,apply.text)
+                project=apply.json()['project'];self.assertEqual(len(project['loads']),2)
+                self.assertEqual({x['subject'] for x in project['loads']},{'Математика','Физика'})
+                load=project['loads'][0]
+                change={'revision':2,'load_id':load['id'],'class_name':'5б','teacher':'Петров П.П.','subject':'Математика','group':'','room':'101','per_week':5,'max_per_day':2}
+                edited=client.post('/api/admin/planner/load-change',headers=headers,json=change)
+                self.assertEqual(edited.status_code,200,edited.text)
+                edited_load=next(x for x in edited.json()['project']['loads'] if x['id']==load['id'])
+                self.assertEqual((edited_load['class_name'],edited_load['teacher'],edited_load['per_week'],edited_load['max_per_day'],edited_load['room']),('5б','Петров П.П.',5,2,'101'))
+                self.assertEqual(client.post('/api/admin/planner/load-change',headers=headers,json=change).status_code,409)
+                change['revision']=3;change['per_week']=37
+                self.assertEqual(client.post('/api/admin/planner/load-change',headers=headers,json=change).status_code,422)
+                app.state['planner']['placements']=[{'load_id':load['id'],'day':'Пн','lesson':1,'room':''}]
+                before=copy.deepcopy(app.state['planner']);change['per_week']=6
+                self.assertEqual(client.post('/api/admin/planner/load-change',headers=headers,json=change).status_code,409)
+                self.assertEqual(app.state['planner'],before)
+        finally:app.state.clear();app.state.update(old)
+
     def test_uploaded_load_drives_schedule_generation(self):
         old=copy.deepcopy(app.state)
         try:

@@ -1,0 +1,15 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const elements=new Map(),calls=[];
+const classes=new Set();
+const entry={dataset:{loadSearch:'5а математика иванова'},hidden:false,classList:{toggle(_n,v){entry.hidden=v}}};
+const form={dataset:{loadEdit:'L1'},elements:{class_name:{value:'5а'},teacher:{value:'Иванова'},subject:{value:'Математика'},group:{value:'',innerHTML:''},room:{value:'101'},per_week:{value:'5'},max_per_day:{value:'2'}},querySelector:()=>({textContent:''})};
+function el(id){if(!elements.has(id))elements.set(id,{value:'',innerHTML:'',textContent:'',classList:{contains:()=>false,add(){},remove(){},toggle(){}},querySelectorAll:s=>id==='plannerRoot'?(s==='[data-load-edit]'?[form]:s==='[data-load-search]'?[entry]:[]):[],files:[]});return elements.get(id)}
+const project={revision:1,classes:[{name:'5а',shift:1},{name:'5б',shift:1}],teachers:[{name:'Иванова',unavailable:[]}],subjects:[{name:'Математика'}],rooms:[{name:'101'}],groups:[{class_name:'5б',name:'1 группа'}],loads:[{id:'L1',class_name:'5а',teacher:'Иванова',subject:'Математика',room:'101',group:'',per_week:4,max_per_day:1}],placements:[],preferences:[]};
+const ctx={$:el,esc:s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),api:async(path,opts)=>{calls.push({path,opts});return {project,issues:[]}},confirm:()=>true,toast(){},document:{dispatchEvent(){}},Event:class{},console};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync('frontend/js/planner.js','utf8'),ctx);ctx.project=project;vm.runInContext('plannerProject=project;plannerIssues=[];plannerRender()',ctx);
+const markup=el('plannerRoot').innerHTML;
+assert.match(markup,/id="plannerLoadsView"/);assert.match(markup,/Просмотр и редактирование нагрузки/);assert.match(markup,/data-load-edit="L1"/);assert.match(markup,/name="per_week"/);assert.match(markup,/name="teacher"/);assert.match(markup,/href="\/api\/schedule\/load-template.csv"/);
+const page=fs.readFileSync('frontend/admin.html','utf8');assert.match(page,/id="plannerViewLoadsShortcut"/);assert.match(page,/download="workload-template.csv"/);
+el('plannerLoadSearch').value='петров';el('plannerLoadSearch').oninput();assert.equal(entry.hidden,true);el('plannerLoadSearch').value='иванова';el('plannerLoadSearch').oninput();assert.equal(entry.hidden,false);
+form.elements.class_name.value='5б';form.elements.class_name.onchange();assert.match(form.elements.group.innerHTML,/1 группа/);
+(async()=>{await el('plannerViewLoadsShortcut').onclick();assert.equal(el('plannerLoadsView').open,true);await form.onsubmit({preventDefault(){}});assert.equal(calls[0].path,'/api/admin/planner/load-change');assert.equal(calls[0].opts.body.class_name,'5б');assert.equal(calls[0].opts.body.per_week,5);assert.equal(calls[0].opts.body.max_per_day,2);console.log('Workload list, editing and template UI OK')})().catch(e=>{console.error(e);process.exitCode=1});
