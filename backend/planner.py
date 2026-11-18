@@ -65,6 +65,14 @@ class Room(Named):
 
 
 class Teacher(Named):
+    departments: list[Literal['Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура']] = Field(default_factory=list, max_length=5)
+
+    @field_validator("departments")
+    @classmethod
+    def unique_departments(cls, values):
+        if len(values) != len(set(values)): raise ValueError("Кафедра указана повторно")
+        return values
+
     preferred_room: str = Field(default="", max_length=80)
     unavailable: list[Slot] = Field(default_factory=list, max_length=144)
 

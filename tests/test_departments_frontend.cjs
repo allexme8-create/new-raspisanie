@@ -1,0 +1,14 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const elements=new Map(),calls=[];
+function el(id){if(!elements.has(id))elements.set(id,{value:'',innerHTML:'',textContent:'',open:false,classList:{contains:()=>false,add(){},remove(){},toggle(){}},querySelectorAll:()=>[],files:[]});return elements.get(id)}
+const project={revision:1,classes:[{name:'5а',shift:1}],teachers:[{name:'А',unavailable:[],departments:['Математика','Филология']},{name:'Б',unavailable:[],departments:['Математика']},{name:'В',unavailable:[],departments:[]}],subjects:[{name:'Математика'},{name:'Русский'}],rooms:[],groups:[],loads:[{id:'a',class_name:'5а',teacher:'А',subject:'Русский',per_week:3,group:'',room:''},{id:'b',class_name:'5а',teacher:'Б',subject:'Математика',per_week:4,group:'',room:''},{id:'c',class_name:'5а',teacher:'В',subject:'Математика',per_week:2,group:'',room:''}],placements:[],preferences:[]};
+const ctx={$:el,esc:s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),api:async(path,opts)=>{calls.push({path,opts});return {project,issues:[]}},confirm:()=>true,toast(){},document:{dispatchEvent(){}},Event:class{},console};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync('frontend/js/planner.js','utf8'),ctx);ctx.project=project;vm.runInContext('plannerProject=project;plannerIssues=[];plannerRender()',ctx);
+assert.match(el('plannerRoot').innerHTML,/id="plannerLoadDepartment"/);assert.match(el('plannerRoot').innerHTML,/Все кафедры/);assert.match(el('plannerRoot').innerHTML,/Без кафедры/);
+assert.match(el('departmentTeacherList').innerHTML,/А/);assert.match(el('departmentTeacherList').innerHTML,/Информатика и технология/);
+el('plannerLoadDepartment').value='Математика';el('plannerLoadDepartment').onchange();let html=el('plannerLoadList').innerHTML;assert.match(html,/data-load-hours="0"/);assert.match(html,/data-load-hours="1"/);assert.doesNotMatch(html,/data-load-hours="2"/);
+el('plannerLoadSubject').value='Русский';el('plannerLoadSubject').onchange();html=el('plannerLoadList').innerHTML;assert.match(html,/data-load-hours="0"/);assert.doesNotMatch(html,/data-load-hours="1"/);assert.match(html,/load-teacher-total">3/);
+el('plannerLoadSubject').value='';el('plannerLoadSubject').onchange();el('plannerLoadDepartment').value='__none__';el('plannerLoadDepartment').onchange();html=el('plannerLoadList').innerHTML;assert.match(html,/data-load-hours="2"/);assert.doesNotMatch(html,/data-load-hours="0"/);
+assert.match(el('departmentTeacherList').innerHTML,/data-department-teacher="В"/);assert.doesNotMatch(el('departmentTeacherList').innerHTML,/data-department-teacher="А"/);
+el('plannerLoadDepartment').value='';el('plannerLoadDepartment').onchange();assert.match(el('plannerLoadList').innerHTML,/data-load-hours="0"/);assert.match(el('plannerLoadList').innerHTML,/data-load-hours="2"/);
+console.log('Department filters, shared memberships and management UI OK');

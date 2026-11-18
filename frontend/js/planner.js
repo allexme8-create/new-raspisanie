@@ -4,7 +4,8 @@ const plannerDays=["Пн","Вт","Ср","Чт","Пт","Сб"];
 let plannerProject=null, plannerIssues=[];
 let plannerMapClass="",plannerMapSelected=null,plannerMapBusy=false;
 let roomRulesSelected="",roomRulesShift=1,classRulesSelected="",classRulesShift=1;
-let plannerLoadSubject="";
+let plannerLoadSubject="",plannerLoadDepartment="";
+const plannerDepartments=['Филология','Информатика и технология','Естественные науки','Математика','Физическая культура'];
 const plannerSearch={classes:"",teachers:"",subjects:"",rooms:"",groups:"",loads:""};
 const plannerRoot=$("plannerRoot");
 const optionList=(items,value="name")=>items.map(x=>`<option value="${esc(x[value])}">${esc(x[value])}</option>`).join("");
@@ -28,16 +29,18 @@ function plannerPreferenceWarnings(project){
 
 // The workload is stored as individual records, not as the uploaded spreadsheet.
 // Reconstruct the two school-stage columns while preserving each record and group.
-function plannerLoadTable(project,subject=""){
-  const teachers=new Map();
+function plannerLoadTable(project,subject="",department=""){
+  const teachers=new Map(), memberships=new Map(project.teachers.map(t=>[t.name,t.departments||[]]));
   project.loads.forEach((load,index)=>{
     if(subject && load.subject!==subject)return;
+    const membershipsForTeacher=memberships.get(load.teacher)||[];
+    if(department==='__none__'?membershipsForTeacher.length>0:department&&!membershipsForTeacher.includes(department))return;
     if(!teachers.has(load.teacher))teachers.set(load.teacher,{lower:[],upper:[],other:[]});
     const grade=String(load.class_name).trim().match(/^(\d+)/)?.[1];
     const stage=grade>=5&&grade<=9?'lower':grade>=10&&grade<=11?'upper':'other';
     teachers.get(load.teacher)[stage].push({load,index});
   });
-  if(!teachers.size)return subject?'<p class="muted">По выбранному предмету записей нагрузки нет.</p>':'<p class="muted">Пока нет записей нагрузки. Добавьте её из файла, расписания или вручную.</p>';
+  if(!teachers.size)return subject||department?'<p class="muted">По выбранным фильтрам записей нагрузки нет.</p>':'<p class="muted">Пока нет записей нагрузки. Добавьте её из файла, расписания или вручную.</p>';
   const hasOther=[...teachers.values()].some(t=>t.other.length);
   const names=[...teachers.keys()].sort((a,b)=>a.localeCompare(b,'ru'));
   const itemCells=item=>{
@@ -90,10 +93,13 @@ function plannerRender(){
       <p class="hint">Здесь объединены загруженные и введённые вручную записи. Нагрузку из опубликованного расписания можно проверить и добавить ниже; существующие записи не перезаписываются. Для изменения класса, учителя, предмета или часов уже расставленные уроки этой нагрузки нужно сначала снять.</p>
       <button type="button" id="scheduleLoadRefresh" class="btn secondary planner-inline-import">Проверить нагрузку из текущего расписания</button><div id="scheduleLoadPreview" aria-live="polite"></div>
       <p class="hint">Таблица показывает нагрузку черновика по учителям и ступеням, как в файле. Часы можно изменить прямо в таблице; чтобы изменить предмет, класс, учителя, группу или кабинет, откройте «Изменить запись». Суммы рассчитываются автоматически. Поиск показывает нагрузку учителя целиком.</p>
+      <label>Кафедра<select id="plannerLoadDepartment"><option value="">Все кафедры</option><option value="__none__"${plannerLoadDepartment==='__none__'?' selected':''}>Без кафедры</option>${plannerDepartments.map(name=>`<option value="${esc(name)}"${name===plannerLoadDepartment?' selected':''}>${esc(name)}</option>`).join('')}</select></label>
+      <details id="departmentManagement"><summary>Учителя и кафедры · просмотр и редактирование</summary><p class="hint">Учитель может состоять в нескольких кафедрах. Выберите кафедры и сохраните изменения для каждого учителя. Список справочника включает и учителей без нагрузки.</p><div id="departmentTeacherList"></div>
+      <details><summary>Добавить учителей кафедры из файла</summary><p class="hint">Загрузите файл кафедры и проверьте сопоставления. Неточные совпадения не выбираются автоматически; можно выбрать учителя или явно создать нового. Нагрузка из файла не изменяется.</p><form id="departmentFileForm" class="planner-form"><label>Кафедра<select id="departmentFileName" required><option value="">Выберите кафедру</option>${plannerDepartments.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label><label>Файл<input id="departmentFile" type="file" accept=".csv,.xls,.xlsx,.xlsm,.xml,.ods" required></label><button class="btn secondary">Проверить файл</button></form><div id="departmentFilePreview" aria-live="polite"></div></details></details>
       <label>Предмет<select id="plannerLoadSubject"><option value="">Все предметы</option>${[...new Set([...p.loads.map(x=>x.subject),...(plannerLoadSubject?[plannerLoadSubject]:[])])].sort((a,b)=>a.localeCompare(b,'ru')).map(subject=>`<option value="${esc(subject)}"${subject===plannerLoadSubject?' selected':''}>${esc(subject)}</option>`).join('')}</select></label>
-      <p class="hint">При выборе предмета итоги показывают часы только по нему.</p>
+      <p class="hint">Кафедра определяется по учителю. Фильтры кафедры и предмета работают вместе; итоги показывают только отобранные записи.</p>
       <label>Поиск по учителю, классу или предмету<input type="search" id="plannerLoadSearch" value="${esc(plannerSearch.loads)}" placeholder="Найти нагрузку"></label>
-      <div id="plannerLoadList">${plannerLoadTable(p,plannerLoadSubject)}</div>
+      <div id="plannerLoadList">${plannerLoadTable(p,plannerLoadSubject,plannerLoadDepartment)}</div>
     </details>
     <details><summary>4. Ограничения и предпочтения</summary>
     <details><summary>Недоступность учителей</summary><p class="hint">Укажите время по звонкам соответствующей смены. Пересечения со второй сменой тоже учитываются.</p><form data-form="unavailable" class="planner-form">${select("unTeacher","Учитель",optionList(p.teachers))}${select("unDay","День",dayOptions)}${select("unShift","Смена",'<option>1</option><option>2</option>')}${select("unLesson","Урок",numberOptions)}<button class="btn">Добавить</button></form><ul class="planner-list">${p.teachers.flatMap((t,ti)=>t.unavailable.map((s,si)=>`<li><span>${esc(t.name)} · ${esc(s.day)} · смена ${s.shift} · урок ${s.lesson}</span><button type="button" class="planner-remove" data-un-teacher="${ti}" data-index="${si}" aria-label="Удалить">✕</button></li>`)).join("")||'<li class="muted">Ограничений нет</li>'}</ul></details>
@@ -195,11 +201,14 @@ function plannerRender(){
   };
   $("plannerLoadsView").ontoggle=()=>{if($("plannerLoadsView").open)previewScheduleLoad();};
   $("scheduleLoadRefresh").onclick=previewScheduleLoad;
-  setupLoadTable();
-  $("plannerLoadSubject").onchange=()=>{
-    plannerLoadSubject=$("plannerLoadSubject").value;
-    $("plannerLoadList").innerHTML=plannerLoadTable(plannerProject,plannerLoadSubject);
-    setupLoadTable();
+  setupLoadTable();renderDepartmentTeachers();
+  $("plannerLoadSubject").onchange=()=>{plannerLoadSubject=$("plannerLoadSubject").value;refreshLoadFilters();};
+  $("plannerLoadDepartment").onchange=()=>{plannerLoadDepartment=$("plannerLoadDepartment").value;refreshLoadFilters();renderDepartmentTeachers();};
+  $("departmentFileForm").onsubmit=async e=>{
+    e.preventDefault();const file=$("departmentFile").files[0],department=$("departmentFileName").value,box=$("departmentFilePreview");if(!file||!department)return;
+    const form=new FormData();form.append('file',file);box.textContent='Проверяем файл…';
+    try{const result=await api('/api/admin/planner/department-file/preview',{method:'POST',form});renderDepartmentImport(result,department);}
+    catch(error){box.textContent=error.message;}
   };
   function updateLoadGroups(){
     const cls=$("loadClass").value,select=$("loadGroup"),previous=select.value;
@@ -210,6 +219,33 @@ function plannerRender(){
   $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
   $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }
+function refreshLoadFilters(){
+  $("plannerLoadList").innerHTML=plannerLoadTable(plannerProject,plannerLoadSubject,plannerLoadDepartment);
+  setupLoadTable();
+}
+function renderDepartmentTeachers(){
+  const teachers=plannerProject.teachers.filter(t=>plannerLoadDepartment==='__none__'?(t.departments||[]).length===0:!plannerLoadDepartment||(t.departments||[]).includes(plannerLoadDepartment));
+  const box=$("departmentTeacherList");
+  box.innerHTML=teachers.length?teachers.map(t=>`<form class="department-teacher" data-department-teacher="${esc(t.name)}"><strong>${esc(t.name)}</strong><div class="department-choices">${plannerDepartments.map(name=>`<label><input type="checkbox" name="department" value="${esc(name)}"${(t.departments||[]).includes(name)?' checked':''}> ${esc(name)}</label>`).join('')}</div><button class="btn secondary" type="submit">Сохранить кафедры</button><span role="alert" class="load-edit-error"></span></form>`).join(''):'<p class="muted">Учителей для выбранной кафедры нет.</p>';
+  box.querySelectorAll('[data-department-teacher]').forEach(form=>form.onsubmit=async e=>{
+    e.preventDefault();const error=form.querySelector('[role="alert"]'),button=form.querySelector('button');error.textContent='';button.disabled=true;
+    const departments=[...form.querySelectorAll('input[name="department"]:checked')].map(input=>input.value);
+    try{const result=await api('/api/admin/planner/teacher-departments',{method:'POST',body:{revision:plannerProject.revision,teacher:form.dataset.departmentTeacher,departments}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast('Кафедры сохранены');}
+    catch(err){error.textContent=err.message;button.disabled=false;}
+  });
+}
+function renderDepartmentImport(data,department){
+  const box=$("departmentFilePreview");
+  box.innerHTML=`<p class="hint">Кафедра: ${esc(department)}. Проверьте все строки. Выберите «Пропустить» для неоднозначных записей или «Создать» только если это действительно новый учитель.</p>${data.skipped.length?`<p class="load-edit-error">Не распознаны как ФИО: ${data.skipped.map(esc).join(', ')}</p>`:''}<div class="department-import-list">${data.rows.map((row,i)=>`<label>${esc(row.source)}${row.match.suggestion?` · возможное совпадение: ${esc(row.match.suggestion)}`:''}<select data-department-match="${i}"><option value="">Пропустить</option><option value="__new__">Создать нового учителя</option>${data.teachers.map(name=>`<option value="${esc(name)}"${row.match.value===name?' selected':''}>${esc(name)}</option>`).join('')}</select></label>`).join('')}</div><button type="button" class="btn secondary" id="departmentImportApply">Сохранить выбранные сопоставления</button><div id="departmentImportError" role="alert" class="load-edit-error"></div>`;
+  $("departmentImportApply").onclick=async()=>{
+    const rows=[...box.querySelectorAll('[data-department-match]')].map(select=>({source:data.rows[Number(select.dataset.departmentMatch)].source,teacher:select.value})).filter(row=>row.teacher).map(row=>({...row,teacher:row.teacher==='__new__'?'':row.teacher}));
+    if(!rows.length){$("departmentImportError").textContent='Выберите хотя бы одного учителя.';return;}
+    if(!confirm(`Добавить выбранных учителей (${rows.length}) в кафедру «${department}»? Другие кафедры и нагрузка сохранятся.`))return;
+    try{const result=await api('/api/admin/planner/department-file/apply',{method:'POST',body:{revision:data.revision,department,rows}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast(`Добавлено в кафедру: ${result.assigned}`);}
+    catch(error){$("departmentImportError").textContent=error.message;}
+  };
+}
+
 function setupLoadTable(){
   const filterLoads=()=>{const query=$("plannerLoadSearch").value.trim().toLocaleLowerCase("ru-RU");plannerSearch.loads=$("plannerLoadSearch").value;plannerRoot.querySelectorAll("[data-load-search]").forEach(row=>row.classList.toggle("hidden",!row.dataset.loadSearch.includes(query)));};
   $("plannerLoadSearch").oninput=filterLoads;filterLoads();

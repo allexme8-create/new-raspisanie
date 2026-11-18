@@ -44,6 +44,7 @@ import load_import
 import catalog_file
 import schedule_map
 import schedule_load_import
+import departments
 import staff
 from schedule_parser import (
     ParseError,
@@ -765,6 +766,77 @@ def apply_schedule_load(body: ScheduleLoadImport, _: None = Depends(require_admi
             if errors:raise HTTPException(422," ".join(errors[:5]))
             p.revision+=1;state["planner"]=p.model_dump();_save_state()
         return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True),"added":len(rows),"duplicates":len(duplicates),"skipped":len(skipped)}
+
+
+class DepartmentAssignment(BaseModel):
+    revision: int = Field(ge=0)
+    teacher: str = Field(min_length=1,max_length=80)
+    departments: list[Literal['Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура']] = Field(max_length=5)
+
+
+@app.post("/api/admin/planner/teacher-departments")
+def set_teacher_departments(body: DepartmentAssignment, _: None = Depends(require_admin)) -> dict:
+    if len(set(body.departments))!=len(body.departments):raise HTTPException(422,"Кафедра указана повторно.")
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор.")
+        teacher=next((t for t in p.teachers if t.name==body.teacher),None)
+        if not teacher:raise HTTPException(404,"Учитель не найден.")
+        teacher.departments=list(body.departments);p.revision+=1
+        state["planner"]=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
+
+
+@app.post("/api/admin/planner/department-file/preview")
+async def preview_department_file(file: UploadFile = File(...), _: None = Depends(require_admin)) -> dict:
+    filename=file.filename or ''
+    if filename.rsplit('.',1)[-1].lower() not in {'csv','xls','xlsx','xlsm','xml','ods'}:raise HTTPException(422,"Неподдерживаемый формат файла.")
+    buf=await file.read(10*1024*1024+1)
+    if len(buf)>10*1024*1024:raise HTTPException(413,"Файл больше 10 МБ.")
+    try:names,skipped=departments.read_teachers(buf,filename)
+    except (ParseError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
+    with _planner_lock:
+        p=_planner_project();choices=[t.name for t in p.teachers]
+        rows=[]
+        for name in names:
+            match=load_import.match(normalize_teacher_initials(name),choices)
+            rows.append({"source":name,"match":match})
+        return {"revision":p.revision,"rows":rows,"skipped":skipped,"teachers":choices}
+
+
+class DepartmentImportRow(BaseModel):
+    source: str = Field(min_length=1,max_length=80)
+    teacher: str = Field(max_length=80)  # Existing exact name, or empty for an explicitly requested new teacher.
+
+
+class DepartmentImport(BaseModel):
+    revision: int = Field(ge=0)
+    department: Literal['Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура']
+    rows: list[DepartmentImportRow] = Field(min_length=1,max_length=200)
+
+
+@app.post("/api/admin/planner/department-file/apply")
+def apply_department_file(body: DepartmentImport, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Проверьте файл заново.")
+        byname={t.name:t for t in p.teachers};existing={t.name.casefold():t for t in p.teachers};seen=set();assigned=created=0
+        for row in body.rows:
+            if row.teacher:
+                teacher=byname.get(row.teacher)
+                if not teacher:raise HTTPException(422,"Выберите учителя из справочника.")
+            else:
+                name=normalize_teacher_initials(row.source)
+                if len(name)>80 or not re.fullmatch(r'[А-ЯЁа-яёA-Za-z-]+\s+[А-ЯЁA-Zа-яёa-z.\s-]+',name):raise HTTPException(422,"Некорректное ФИО нового учителя.")
+                if name.casefold() in existing:raise HTTPException(409,"Такой учитель уже есть; выберите его из справочника.")
+                if len(p.teachers)>=200:raise HTTPException(422,"Превышен предел учителей.")
+                teacher=planner.Teacher(name=name);p.teachers.append(teacher);existing[name.casefold()]=teacher;byname[name]=teacher;created+=1
+            if teacher.name in seen:raise HTTPException(422,"Один учитель выбран в нескольких строках. Исправьте сопоставление.")
+            seen.add(teacher.name)
+            if body.department not in teacher.departments:teacher.departments.append(body.department);assigned+=1
+        if assigned or created:
+            p.revision+=1;state["planner"]=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True),"assigned":assigned,"created":created}
 
 
 class LoadImportRow(BaseModel):
