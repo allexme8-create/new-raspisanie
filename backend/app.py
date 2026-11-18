@@ -904,7 +904,7 @@ class NewTeacherLoad(BaseModel):
     group: str = Field(default='',max_length=80)
     room: str = Field(default='',max_length=80)
     per_week: int = Field(ge=1,le=36)
-    max_per_day: int = Field(default=1,ge=1,le=12)
+    max_per_day: int = Field(default=12,ge=1,le=12)
 
 
 @app.post("/api/admin/planner/teacher-load-add")

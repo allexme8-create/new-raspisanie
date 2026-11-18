@@ -21,6 +21,13 @@ class TeacherLoadAddTests(unittest.TestCase):
         self.assertEqual(p['loads'][0],before['loads'][0]);self.assertEqual(p['placements'],before['placements']);self.assertEqual(p['loads'][1]['per_week'],4);self.assertEqual(p['loads'][1]['teacher'],'Учитель Б.Б.');self.assertEqual(p['loads'][1]['group'],'2 группа')
         self.assertEqual(self.post().status_code,409)
         b={**self.body,'revision':1};self.assertEqual(self.post(b).status_code,409)
+    def test_simple_add_defaults_to_unrestricted_day_and_no_fixed_room(self):
+        body={k:v for k,v in self.body.items() if k not in ('max_per_day','room')}
+        r=self.post(body);self.assertEqual(r.status_code,200,r.text)
+        load=r.json()['project']['loads'][-1];self.assertEqual(load['max_per_day'],12);self.assertEqual(load['room'],'')
+    def test_edit_without_daily_field_preserves_existing_setting(self):
+        body={'revision':0,'load_id':'old','class_name':'5а','teacher':'Учитель А.А.','subject':'Математика','group':'1 группа','room':'','per_week':3}
+        r=self.client.post('/api/admin/planner/load-change',headers=self.auth,json=body);self.assertEqual(r.status_code,200,r.text);self.assertEqual(r.json()['project']['loads'][0]['max_per_day'],1);self.assertEqual(r.json()['project']['placements'][0]['room'],'101')
     def test_invalid_and_ambiguous_group_are_atomic(self):
         before=copy.deepcopy(app.state['planner'])
         for changes,status in [({'group':''},409),({'group':'1 группа'},409),({'group':'нет'},422),({'class_name':'нет'},422),({'teacher':'нет'},422),({'per_week':0},422),({'room':'нет'},422),({'max_per_day':13},422)]:
