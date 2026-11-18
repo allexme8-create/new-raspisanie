@@ -815,6 +815,51 @@ def change_load(body: LoadChange, _: None = Depends(require_admin)) -> dict:
         return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
 
 
+class TeacherLoadTransfer(BaseModel):
+    revision: int = Field(ge=0)
+    source: str = Field(min_length=1,max_length=80)
+    target: str = Field(min_length=1,max_length=80)
+
+
+@app.post("/api/admin/planner/transfer-teacher-load")
+def transfer_teacher_load(body: TeacherLoadTransfer, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор.")
+        names={teacher.name for teacher in p.teachers}
+        if body.source not in names or body.target not in names:raise HTTPException(422,"Выберите учителей из справочника.")
+        if body.source==body.target:raise HTTPException(422,"Выберите разных учителей.")
+        transferring=[load for load in p.loads if load.teacher==body.source]
+        if not transferring:raise HTTPException(422,"У выбранного учителя нет нагрузки в конструкторе.")
+        target_keys={(load.class_name,load.subject) for load in p.loads if load.teacher==body.target}
+        duplicate=next((load for load in transferring if (load.class_name,load.subject) in target_keys),None)
+        if duplicate:raise HTTPException(409,f"У нового учителя уже есть нагрузка {duplicate.class_name} · {duplicate.subject}. Сначала разрешите совпадение в списке нагрузки.")
+        ids={load.id for load in transferring}
+        placed=[entry for entry in p.placements if entry.load_id in ids]
+        bells=state.get("bell_schedule")
+        classes={cls.name:cls for cls in p.classes}
+        for entry in placed:
+            load=next(load for load in transferring if load.id==entry.load_id)
+            if not planner.period(bells,entry.day,classes[load.class_name].shift,entry.lesson):
+                raise HTTPException(422,"Нельзя проверить перенос расставленных уроков: не хватает времени звонков.")
+        load_by_id={load.id:load for load in p.loads}
+        affected_days={entry.day for entry in placed}
+        for entry in p.placements:
+            other=load_by_id[entry.load_id]
+            if other.teacher==body.target and entry.day in affected_days and not planner.period(bells,entry.day,classes[other.class_name].shift,entry.lesson):
+                raise HTTPException(422,"Нельзя проверить занятость нового учителя: не хватает времени звонков.")
+        target_teacher=next(t for t in p.teachers if t.name==body.target)
+        for slot in target_teacher.unavailable:
+            if any(entry.day==slot.day for entry in placed) and not planner.period(bells,slot.day,slot.shift,slot.lesson):
+                raise HTTPException(422,"Нельзя проверить недоступность нового учителя: не хватает времени звонков.")
+        before=Counter(planner.issues(p,bells))
+        for load in transferring:load.teacher=body.target
+        added=list((Counter(planner.issues(p,bells))-before).elements())
+        if added:raise HTTPException(409,"Передача создаёт конфликт: "+added[0])
+        p.revision+=1;state["planner"]=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,bells,complete=True),"transferred":len(transferring),"placements":len(placed)}
+
+
 class PlannerRename(BaseModel):
     revision: int = Field(ge=0)
     old_name: str = Field(min_length=1, max_length=80)
@@ -1107,6 +1152,60 @@ def move_schedule_map(body: MapMove, _: None = Depends(require_admin)) -> dict:
         updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data,"move_events":events}
         state["schedule_map_draft"]=updated;_save_state()
         return {"revision":updated["revision"],"ok":True}
+
+
+class MapTeacherTransfer(BaseModel):
+    revision: int = Field(ge=0)
+    source: str = Field(min_length=1,max_length=80)
+    target: str = Field(min_length=1,max_length=80)
+
+
+@app.post("/api/admin/schedule-map/transfer-teacher")
+def transfer_map_teacher(body: MapTeacherTransfer, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        draft,stale=map_current()
+        if stale or draft["revision"]!=body.revision:raise HTTPException(409,"Расписание или карта изменились. Обновите данные.")
+        source=normalize_teacher_initials(body.source).casefold()
+        target_name=next((x.name for x in _planner_project().teachers if x.name==body.target),None)
+        if not target_name:raise HTTPException(422,"Новый учитель должен быть в справочнике конструктора.")
+        target=normalize_teacher_initials(target_name).casefold()
+        if source==target:raise HTTPException(422,"Выберите двух разных учителей.")
+        data=copy.deepcopy(draft["data"])
+        classes={c for kind in ("teachers","subjects") for c in (data.get(kind) or {}).get("classes",[])}
+        affected=[]
+        for cls in classes:
+            for entry in schedule_map.entries(data,cls):
+                names=entry["teachers"].get("names",[])
+                if not any(normalize_teacher_initials(name).casefold()==source for name in names):continue
+                if any(normalize_teacher_initials(name).casefold()==target for name in names):raise HTTPException(409,f"В {cls}, {entry['day']}, урок {entry['lesson']} новый учитель уже указан. Исправьте эту ячейку вручную.")
+                affected.append((cls,entry))
+        if not affected:raise HTTPException(422,"У выбранного учителя нет уроков в текущем черновике карты.")
+        for cls,entry in affected:
+            for kind in ("teachers","subjects"):
+                if not data.get(kind):continue
+                cell=copy.deepcopy(schedule_map.getcell(data,kind,entry["day"],entry["raw"],cls))
+                if cell is None:continue
+                if kind=="teachers":
+                    cell["names"]=[target_name if normalize_teacher_initials(name).casefold()==source else name for name in cell.get("names",[])]
+                    cell["raw"]=", ".join(cell["names"])
+                if isinstance(cell.get("groups"),list):
+                    for group in cell["groups"]:
+                        if normalize_teacher_initials(group.get("teacher","")).casefold()==source:group["teacher"]=target_name
+                schedule_map.putcell(data,kind,entry["day"],entry["raw"],cls,cell)
+        for cls,old in affected:
+            entry=map_entry_at(data,cls,old["day"],old["raw"])
+            check_map_conflicts(data,cls,entry["day"],entry["shift"],entry["lesson"],entry["teachers"],entry["subjects"])
+            period=schedule_map.period(data,entry["shift"],entry["day"],entry["lesson"])
+            start,end=schedule_map.clock(period.get("start")),schedule_map.clock(period.get("end"))
+            for other in schedule_map.entries(data,cls):
+                if other["day"]!=entry["day"] or other["raw"]==entry["raw"] or not any(normalize_teacher_initials(n).casefold()==target for n in other["teachers"].get("names",[])):continue
+                other_period=schedule_map.period(data,other["shift"],other["day"],other["lesson"])
+                a,b=schedule_map.clock(other_period.get("start")),schedule_map.clock(other_period.get("end"))
+                if a is None or b is None or a>=b:raise HTTPException(422,"Нельзя проверить занятость нового учителя: не хватает времени звонков.")
+                if start<b and a<end:raise HTTPException(409,f"Учитель занят: {cls}, {entry['day']}, урок {other['lesson']}.")
+        updated={"base":draft["base"],"revision":draft["revision"]+1,"data":data,"move_events":copy.deepcopy(draft.get("move_events",[]))}
+        state["schedule_map_draft"]=updated;_save_state()
+        return {"revision":updated["revision"],"transferred":len(affected)}
 
 
 class MapRemove(BaseModel):

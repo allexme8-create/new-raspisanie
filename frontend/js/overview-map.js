@@ -89,6 +89,30 @@ $("overviewMoveConfirm").onclick=async()=>{
 $("overviewRemove").onclick=async()=>{if(!overviewSelected||overviewBusy||overviewData.stale)return;const entry=overviewData.entries.find(e=>e.class_name===overviewSelected.class_name&&e.day===overviewSelected.day&&e.raw===overviewSelected.raw&&e.change!=='removed');const teacher=entry?.teachers?.names?.[0];if(!teacher||!confirm(`Снять урок ${teacher} у класса ${overviewSelected.class_name} из недельного черновика?`))return;overviewBusy=true;try{await api('/api/admin/schedule-map/remove',{method:'POST',body:{revision:overviewData.revision,class_name:overviewSelected.class_name,day:overviewSelected.day,raw:overviewSelected.raw,teacher}});await loadOverview();$("overviewStatus").textContent='Урок снят в черновике; опубликуйте изменения ниже.';}catch(e){$("overviewStatus").textContent=e.message;}finally{overviewBusy=false;}};
 $("overviewEdit").onsubmit=async e=>{e.preventDefault();if(!overviewSelected||overviewBusy||overviewData.stale)return;const list=id=>$(id).value.split(',').map(x=>x.trim()).filter(Boolean);overviewBusy=true;try{await api('/api/admin/schedule-map/edit',{method:'POST',body:{revision:overviewData.revision,class_name:overviewSelected.class_name,day:overviewSelected.day,raw:overviewSelected.raw,teachers:list('overviewTeachers'),subjects:list('overviewSubjects'),rooms:list('overviewRooms')}});await loadOverview();$("overviewStatus").textContent='Изменения сохранены в черновике.';}catch(err){$("overviewStatus").textContent=err.message;}finally{overviewBusy=false;}};
 $("overviewClear").onclick=()=>{overviewPending=null;$("overviewRoomChoice").classList.add("hidden");overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();};
+async function loadOverviewTransfer(){
+  const out=$("overviewTransferMessage");
+  if(!overviewData){out.textContent='Сначала загрузите общую карту.';return;}
+  try{
+    const data=await api('/api/admin/planner');
+    const sources=[...new Set(overviewData.entries.filter(e=>e.change!=='removed').flatMap(e=>e.teachers.names||[]))].sort((a,b)=>a.localeCompare(b,'ru'));
+    const targets=data.project.teachers.map(t=>t.name).sort((a,b)=>a.localeCompare(b,'ru'));
+    const options=names=>'<option value="">Выберите учителя</option>'+names.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('');
+    $("overviewTransferSource").innerHTML=options(sources);$("overviewTransferTarget").innerHTML=options(targets);
+    out.textContent='Новый учитель должен быть добавлен в справочник конструктора.';
+  }catch(e){out.textContent=e.message;}
+}
+$("overviewTransferSection").ontoggle=()=>{if($("overviewTransferSection").open)loadOverviewTransfer();};
+$("overviewTransferForm").onsubmit=async e=>{
+  e.preventDefault();if(!overviewData||overviewBusy||overviewData.stale)return;
+  const source=$("overviewTransferSource").value,target=$("overviewTransferTarget").value,out=$("overviewTransferMessage");
+  if(!source||!target||source===target){out.textContent='Выберите двух разных учителей.';return;}
+  const count=overviewData.entries.filter(entry=>entry.change!=='removed'&&(entry.teachers.names||[]).includes(source)).length;
+  if(!count){out.textContent='У выбранного учителя нет уроков в карте.';return;}
+  if(!confirm(`Передать все уроки (${count}) от ${source} учителю ${target}? Изменения сохранятся в черновике общей карты.`))return;
+  overviewBusy=true;out.textContent='Проверяем занятость и передаём уроки…';
+  try{const result=await api('/api/admin/schedule-map/transfer-teacher',{method:'POST',body:{revision:overviewData.revision,source,target}});await loadOverview();await loadOverviewTransfer();out.textContent=`Передано уроков: ${result.transferred}. Проверьте карту и опубликуйте изменения.`;$("overviewStatus").textContent='Передача сохранена в черновике карты; опубликованное расписание пока не изменилось.';}
+  catch(error){out.textContent=error.message;}finally{overviewBusy=false;}
+};
 $("overviewMapSection").ontoggle=()=>{if($("overviewMapSection").open){loadOverview();loadDatedChanges();}};
 $("overviewMode").onchange=()=>{overviewPending=null;$("overviewRoomChoice").classList.add("hidden");overviewSelected=null;$("overviewSelected").classList.add('hidden');renderOverview();};
 $("overviewTeacher").onchange=()=>{overviewPending=null;overviewSelected=null;$("overviewSearch").value='';$("overviewRoomChoice").classList.add('hidden');$("overviewSelected").classList.add('hidden');renderOverview();};
