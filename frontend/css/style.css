@@ -423,3 +423,5 @@ footer a{color:var(--muted)}
 .load-hours-form{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:100px}.load-hours-form input{width:55px;min-width:0;padding:4px}.load-hours-form .btn{font-size:12px;padding:4px}.load-hours-form .load-edit-error{flex-basis:100%}
 
 .department-teacher{padding:8px 0;border-bottom:1px solid var(--line)}.department-choices{display:flex;flex-wrap:wrap;gap:4px 12px;margin:5px 0}.department-choices label{font-size:13px}.department-choices input{width:auto}.department-teacher .btn{padding:5px 8px;font-size:12px}.department-import-list{max-height:320px;overflow:auto}.department-import-list label{margin:6px 0;font-size:13px}
+
+.load-add-shortcut{font-size:12px;padding:4px 6px;margin-top:6px}

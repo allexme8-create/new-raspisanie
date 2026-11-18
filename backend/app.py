@@ -896,6 +896,36 @@ def apply_load_import(body: LoadImportRequest, _: None = Depends(require_admin))
         return {"added":added,"updated":updated,"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
 
 
+class NewTeacherLoad(BaseModel):
+    revision: int = Field(ge=0)
+    teacher: str = Field(min_length=1,max_length=80)
+    class_name: str = Field(min_length=1,max_length=80)
+    subject: str = Field(min_length=1,max_length=80)
+    group: str = Field(default='',max_length=80)
+    room: str = Field(default='',max_length=80)
+    per_week: int = Field(ge=1,le=36)
+    max_per_day: int = Field(default=1,ge=1,le=12)
+
+
+@app.post("/api/admin/planner/teacher-load-add")
+def add_teacher_load(body: NewTeacherLoad, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор.")
+        if body.teacher not in {t.name for t in p.teachers} or body.class_name not in {c.name for c in p.classes} or body.subject not in {s.name for s in p.subjects}:
+            raise HTTPException(422,"Выберите учителя, класс и предмет из справочников.")
+        if body.room and body.room not in {r.name for r in p.rooms}:raise HTTPException(422,"Кабинет отсутствует в справочнике.")
+        if body.group and not any(g.class_name==body.class_name and g.name==body.group for g in p.groups):raise HTTPException(422,"Группа отсутствует в справочнике этого класса.")
+        peers=[x for x in p.loads if x.class_name==body.class_name and x.subject==body.subject]
+        if any(x.teacher==body.teacher for x in peers):raise HTTPException(409,"У этого учителя уже есть нагрузка по выбранным классу и предмету. Измените существующую запись.")
+        if peers and (not body.group or any(not x.group for x in peers)):raise HTTPException(409,"Для нескольких учителей одного предмета укажите разные группы во всех записях нагрузки.")
+        if body.group and any(x.group.casefold()==body.group.casefold() for x in peers):raise HTTPException(409,"Эта группа уже назначена другому учителю по этому предмету.")
+        if len(p.loads)>=10000:raise HTTPException(422,"Достигнут предел записей нагрузки.")
+        p.loads.append(planner.Load(id=secrets.token_hex(16),teacher=body.teacher,class_name=body.class_name,subject=body.subject,group=body.group,room=body.room,per_week=body.per_week,max_per_day=body.max_per_day))
+        p.revision+=1;state['planner']=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
+
+
 class LoadChange(BaseModel):
     revision: int = Field(ge=0)
     load_id: str
