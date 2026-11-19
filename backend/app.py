@@ -83,6 +83,7 @@ state: dict = {
     "planner_subjects_imported": False,
     "planner_rooms_imported": False,
     "planner_groups_imported": False,
+    "planner_unassigned_vacancy_migrated": False,
     "schedule_map_draft": None,
     "weekly_move_notices": [],
     "dated_schedule_changes": [],
@@ -104,7 +105,7 @@ def _load_state() -> None:
         return
     try:
         saved = json.loads(STATE_FILE.read_text(encoding="utf-8"))
-        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported", "planner_groups_imported", "schedule_map_draft", "weekly_move_notices", "dated_schedule_changes", "dated_schedule_revision"):
+        for key in ("teachers", "subjects", "bell_schedule", "second_shift_classes", "updated_at", "planner", "planner_class_imported", "planner_teachers_imported", "planner_initials_normalized", "planner_subjects_imported", "planner_rooms_imported", "planner_groups_imported", "planner_unassigned_vacancy_migrated", "schedule_map_draft", "weekly_move_notices", "dated_schedule_changes", "dated_schedule_revision"):
             if key in saved:
                 state[key] = saved[key]
         if isinstance(saved.get("files"), dict):
@@ -423,7 +424,7 @@ def _import_schedule_teachers() -> list[str]:
             continue
         if len(project.teachers) >= 200 or len(name) > 80:
             raise ValueError("Невозможно перенести всех учителей: превышен предел конструктора или длина имени")
-        project.teachers.append(planner.Teacher(name=name))
+        project.teachers.append(planner.Teacher(name=name,departments=_vacancy_membership(project)))
         existing.add(name.casefold()); added.append(name)
     if added:
         project.revision += 1
@@ -605,6 +606,29 @@ def migrate_schedule_groups():
         _save_state()
 
 
+def _vacancy_membership(project: planner.Project) -> list[str]:
+    return [project.vacancy_department] if project.vacancy_department and any(d.name==project.vacancy_department for d in project.departments) else []
+
+
+@app.on_event("startup")
+def migrate_unassigned_to_vacancy():
+    """Move existing unassigned teachers once, without changing real teachers into vacancies."""
+    with _planner_lock:
+        if state.get("planner_unassigned_vacancy_migrated"):
+            return
+        project=_planner_project()
+        default=_vacancy_membership(project)
+        changed=0
+        if default:
+            for teacher in project.teachers:
+                if not teacher.departments:
+                    teacher.departments=list(default);changed+=1
+        if changed:
+            project.revision+=1;state["planner"]=project.model_dump()
+        state["planner_unassigned_vacancy_migrated"]=True
+        _save_state()
+
+
 @app.get("/api/admin/planner")
 def planner_get(_: None = Depends(require_admin)) -> dict:
     project = _planner_project()
@@ -624,6 +648,9 @@ def planner_save(project: planner.Project, _: None = Depends(require_admin)) -> 
         if errors:
             raise HTTPException(status_code=422, detail=" ".join(errors[:5]))
         previous_project = _planner_project()
+        old_teacher_names={t.name for t in previous_project.teachers}
+        for teacher in project.teachers:
+            if teacher.name not in old_teacher_names and not teacher.departments:teacher.departments=_vacancy_membership(project)
         vacancy_names={t.name for t in project.teachers if t.is_vacancy}
         vacancy_loads={l.id for l in project.loads if l.teacher in vacancy_names}
         if any(x.load_id in vacancy_loads for x in project.placements):raise HTTPException(422,"Перед расстановкой назначьте учителя на вакансию.")
@@ -680,7 +707,7 @@ def apply_catalog_file(kind: str, body: CatalogFileImport, _: None = Depends(req
             if kind=="teachers":name=normalize_teacher_initials(name)
             if not name or len(name)>80:raise HTTPException(422,"Проверьте названия в таблице.")
             if name.casefold() not in existing:
-                getattr(p,kind).append(planner.Teacher(name=name) if kind=="teachers" else planner.Room(name=name))
+                getattr(p,kind).append(planner.Teacher(name=name,departments=_vacancy_membership(p)) if kind=="teachers" else planner.Room(name=name))
                 existing.add(name.casefold());added.append(name)
         if len(getattr(p,kind))>200:raise HTTPException(422,"В справочнике допускается не более 200 записей.")
         if added:
@@ -758,7 +785,7 @@ def apply_schedule_load(body: ScheduleLoadImport, _: None = Depends(require_admi
             ck=row["class_name"].casefold();tk=row["teacher"].casefold();sk=row["subject"].casefold()
             if ck not in classes:
                 p.classes.append(planner.SchoolClass(name=row["class_name"],shift=2 if ck in second else 1));classes[ck]=row["class_name"]
-            if tk not in teachers:p.teachers.append(planner.Teacher(name=row["teacher"]));teachers[tk]=row["teacher"]
+            if tk not in teachers:p.teachers.append(planner.Teacher(name=row["teacher"],departments=_vacancy_membership(p)));teachers[tk]=row["teacher"]
             if sk not in subjects:p.subjects.append(planner.Named(name=row["subject"]));subjects[sk]=row["subject"]
             cls=classes[ck];group=row["group"];gk=(cls.casefold(),group.casefold())
             if group and gk not in groups:p.groups.append(planner.ClassGroup(name=group,class_name=cls,inferred=row.get("inferred",False)));groups[gk]=group
@@ -801,8 +828,11 @@ def change_department_catalog(body: DepartmentCatalogChange, _: None = Depends(r
                 if p.vacancy_department==name:p.vacancy_department=new
                 for teacher in p.teachers:teacher.departments=[new if d==name else d for d in teacher.departments]
             else:
+                fallback=_vacancy_membership(p) if name!=p.vacancy_department else []
                 for teacher in p.teachers:
+                    if name not in teacher.departments:continue
                     teacher.departments=[d for d in teacher.departments if d!=name]
+                    if not teacher.departments:teacher.departments=list(fallback)
                 p.departments.remove(item)
                 if p.vacancy_department==name:p.vacancy_department=''
         p.revision+=1;state['planner']=p.model_dump();_save_state()
@@ -824,7 +854,7 @@ def set_teacher_departments(body: DepartmentAssignment, _: None = Depends(requir
         teacher=next((t for t in p.teachers if t.name==body.teacher),None)
         if not teacher:raise HTTPException(404,"Учитель не найден.")
         if any(d not in {x.name for x in p.departments} for d in body.departments):raise HTTPException(422,"Кафедра отсутствует в справочнике.")
-        teacher.departments=list(body.departments);p.revision+=1
+        teacher.departments=list(body.departments) or _vacancy_membership(p);p.revision+=1
         state["planner"]=p.model_dump();_save_state()
         return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
 
@@ -996,7 +1026,7 @@ def add_teacher_load(body: NewTeacherLoad, _: None = Depends(require_admin)) -> 
             if not teacher or len(teacher)>80:raise HTTPException(422,"Укажите ФИО учителя.")
             if any(normalize_teacher_initials(t.name).casefold()==teacher.casefold() for t in p.teachers):raise HTTPException(409,"Такой учитель уже есть в справочнике. Выберите его из списка.")
             if len(p.teachers)>=200:raise HTTPException(422,"Достигнут предел учителей.")
-            p.teachers.append(planner.Teacher(name=teacher,departments=[body.department] if body.department else []))
+            p.teachers.append(planner.Teacher(name=teacher,departments=[body.department] if body.department else _vacancy_membership(p)))
         elif teacher not in {t.name for t in p.teachers}:raise HTTPException(422,"Выберите учителя из справочника.")
         if body.create_subject:
             if not subject or len(subject)>80:raise HTTPException(422,"Укажите название предмета.")

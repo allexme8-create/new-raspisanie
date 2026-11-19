@@ -29,7 +29,7 @@ class DepartmentsTest(unittest.TestCase):
         r=self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data);self.assertEqual(r.status_code,200,r.text)
         self.assertEqual(r.json()['project']['teachers'][0]['departments'],['Математика','Филология'])
         self.assertEqual(self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data).status_code,409)
-        data['revision']+=1;data['departments']=[];r=self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data);self.assertEqual(r.status_code,200);self.assertEqual(r.json()['project']['teachers'][0]['departments'],[])
+        data['revision']+=1;data['departments']=[];r=self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data);self.assertEqual(r.status_code,200);self.assertEqual(r.json()['project']['teachers'][0]['departments'],['Вакансия'])
         data['revision']+=1;data['departments']=['Иная'];self.assertEqual(self.client.post('/api/admin/planner/teacher-departments',headers=self.auth,json=data).status_code,422)
     def test_foreign_languages_and_all_six_departments(self):
         data={'revision':0,'teacher':'Иванов И.И.','departments':list(departments.NAMES)}
