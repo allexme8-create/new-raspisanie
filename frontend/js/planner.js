@@ -56,19 +56,20 @@ function plannerLoadTable(project,subject="",department=""){
     const teacher=teachers.get(name),count=Math.max(teacher.lower.length,teacher.upper.length,teacher.other.length,1);
     const search=[name,...[...teacher.lower,...teacher.upper,...teacher.other].flatMap(({load:x})=>[x.class_name,x.subject,x.group,x.room])].join(' ').toLocaleLowerCase('ru-RU');
     let rows='';
-    for(let i=0;i<count;i++)rows+=`<tr>${i===0?`<td rowspan="${count}">${n+1}</td><th scope="rowgroup" rowspan="${count}">${esc(name)}<br><button type="button" class="btn secondary load-add-shortcut" data-add-teacher="${esc(name)}">Добавить строку</button></th>`:''}${itemCells(teacher.lower[i])}${itemCells(teacher.upper[i])}${hasOther?itemCells(teacher.other[i]):''}${i===0?`<td rowspan="${count}" class="load-teacher-total">${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td>`:''}</tr>`;
+    for(let i=0;i<count;i++)rows+=`<tr>${i===0?`<td rowspan="${count}">${n+1}</td><th scope="rowgroup" rowspan="${count}">${esc(name)}<details data-teacher-department="${esc(name)}"><summary>Кафедры учителя</summary><div data-teacher-department-editor></div></details><button type="button" class="btn secondary load-add-shortcut" data-add-teacher="${esc(name)}">Добавить строку</button></th>`:''}${itemCells(teacher.lower[i])}${itemCells(teacher.upper[i])}${hasOther?itemCells(teacher.other[i]):''}${i===0?`<td rowspan="${count}" class="load-teacher-total">${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td>`:''}</tr>`;
     rows+=`<tr class="load-stage-total"><td colspan="2">Итого</td><td colspan="3">${total(teacher.lower)}</td><td colspan="3">${total(teacher.upper)}</td>${hasOther?`<td colspan="3">${total(teacher.other)}</td>`:''}<td>${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td></tr>`;
     return `<tbody data-load-search="${esc(search)}">${rows}</tbody>`;
   }).join('');
   const creation=`<tbody><tr><td colspan="${hasOther?12:9}" class="load-create-cell"><div class="load-create-panel">${!names.length?'<p class="hint">По выбранным фильтрам записей нагрузки нет. Заполните строку ниже.</p>':''}${teacherLoadForm(project,!names.length)}</div></td></tr></tbody>`;
   const head='<th>Предмет</th><th>Класс</th><th>Часов в неделю</th>';
-  return `<div class="load-table-scroll" tabindex="0" role="region" aria-label="Таблица нагрузки: прокручивайте вниз и в стороны"><table class="load-table"><thead><tr><th rowspan="2">№</th><th rowspan="2">ФИО учителя</th><th colspan="3">Основная ступень · 5–9 класс</th><th colspan="3">Старшая ступень · 10–11 класс</th>${hasOther?'<th colspan="3">Другие классы</th>':''}<th rowspan="2">Итого часов</th></tr><tr>${head}${head}${hasOther?head:''}</tr></thead>${body}${creation}</table></div>`;
+  const controls=`<caption class="load-table-controls"><div class="load-filter-panel"><label>Кафедра<select id="plannerLoadDepartment"><option value="">Все кафедры</option><option value="__none__"${department==='__none__'?' selected':''}>Без кафедры</option>${plannerDepartments.map(name=>`<option value="${esc(name)}"${name===department?' selected':''}>${esc(name)}</option>`).join('')}</select></label><label>Предмет<select id="plannerLoadSubject"><option value="">Все предметы</option>${[...new Set([...project.loads.map(x=>x.subject),...(subject?[subject]:[])])].sort((a,b)=>a.localeCompare(b,'ru')).map(name=>`<option value="${esc(name)}"${name===subject?' selected':''}>${esc(name)}</option>`).join('')}</select></label><label>Поиск<input type="search" id="plannerLoadSearch" value="${esc(plannerSearch.loads)}" placeholder="Учитель, класс или предмет"></label></div><button type="button" id="clearDepartmentLoad" class="btn danger planner-inline-import" disabled>Очистить нагрузку кафедры</button><div id="clearDepartmentLoadInfo" class="hint" aria-live="polite"></div><p class="hint">Фильтры кафедры и предмета работают вместе; итоги относятся к показанным записям. Поиск показывает отобранную нагрузку учителя целиком.</p></caption>`;
+  return `<div class="load-table-scroll" tabindex="0" role="region" aria-label="Таблица нагрузки: прокручивайте вниз и в стороны"><table class="load-table">${controls}<thead><tr><th rowspan="2">№</th><th rowspan="2">ФИО учителя</th><th colspan="3">Основная ступень · 5–9 класс</th><th colspan="3">Старшая ступень · 10–11 класс</th>${hasOther?'<th colspan="3">Другие классы</th>':''}<th rowspan="2">Итого часов</th></tr><tr>${head}${head}${hasOther?head:''}</tr></thead>${body}${creation}</table></div>`;
 }
 
 function plannerRender(){
   const p=plannerProject;p.groups=p.groups||[];p.preferences=p.preferences||[];
   const softWarnings=plannerPreferenceWarnings(p);
-  const openDetails=[...plannerRoot.querySelectorAll("details:not([data-load-entry])")].map(d=>d.open);
+  const openDetails=[...plannerRoot.querySelectorAll("details:not([data-load-entry]):not([data-teacher-department])")].map(d=>d.open);
   const oldScroll=plannerRoot.querySelector?.('.load-table-scroll');
   const scrollPosition=oldScroll?{top:oldScroll.scrollTop,left:oldScroll.scrollLeft}:null;
   const list=(key,format)=>p[key].length?p[key].map((x,i)=>{
@@ -100,13 +101,6 @@ function plannerRender(){
       <button type="button" id="scheduleLoadRefresh" class="btn secondary planner-inline-import">Проверить нагрузку из текущего расписания</button><div id="scheduleLoadPreview" aria-live="polite"></div>
       <p class="hint">Таблица показывает нагрузку черновика по учителям и ступеням, как в файле. Прокручивайте таблицу вниз и в стороны — её шапка останется на месте. Кнопка «Удалить строку» удаляет только выбранные предмет, класс и часы, даже если рядом показана другая запись. Часы можно изменить прямо в таблице; чтобы изменить предмет, класс или группу, откройте «Изменить данные». Новые строки можно добавить через кнопку у учителя или форму в конце таблицы. Суммы рассчитываются автоматически. Поиск показывает нагрузку учителя целиком.</p>
 
-      <label>Кафедра<select id="plannerLoadDepartment"><option value="">Все кафедры</option><option value="__none__"${plannerLoadDepartment==='__none__'?' selected':''}>Без кафедры</option>${plannerDepartments.map(name=>`<option value="${esc(name)}"${name===plannerLoadDepartment?' selected':''}>${esc(name)}</option>`).join('')}</select></label>
-      <button type="button" id="clearDepartmentLoad" class="btn danger planner-inline-import" disabled>Очистить нагрузку кафедры</button><div id="clearDepartmentLoadInfo" class="hint" aria-live="polite"></div>
-      <details id="departmentManagement"><summary>Учителя и кафедры · просмотр и редактирование</summary><p class="hint">Учитель может состоять в нескольких кафедрах. Выберите кафедры и сохраните изменения для каждого учителя. Список справочника включает и учителей без нагрузки.</p><div id="departmentTeacherList"></div>
-      <details><summary>Добавить учителей кафедры из файла</summary><p class="hint">Загрузите файл кафедры и проверьте сопоставления. Неточные совпадения не выбираются автоматически; можно выбрать учителя или явно создать нового. Нагрузка из файла не изменяется.</p><form id="departmentFileForm" class="planner-form"><label>Кафедра<select id="departmentFileName" required><option value="">Выберите кафедру</option>${plannerDepartments.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label><label>Файл<input id="departmentFile" type="file" accept=".csv,.xls,.xlsx,.xlsm,.xml,.ods" required></label><button class="btn secondary">Проверить файл</button></form><div id="departmentFilePreview" aria-live="polite"></div></details></details>
-      <label>Предмет<select id="plannerLoadSubject"><option value="">Все предметы</option>${[...new Set([...p.loads.map(x=>x.subject),...(plannerLoadSubject?[plannerLoadSubject]:[])])].sort((a,b)=>a.localeCompare(b,'ru')).map(subject=>`<option value="${esc(subject)}"${subject===plannerLoadSubject?' selected':''}>${esc(subject)}</option>`).join('')}</select></label>
-      <p class="hint">Кафедра определяется по учителю. Фильтры кафедры и предмета работают вместе; итоги показывают только отобранные записи.</p>
-      <label>Поиск по учителю, классу или предмету<input type="search" id="plannerLoadSearch" value="${esc(plannerSearch.loads)}" placeholder="Найти нагрузку"></label>
       <div id="plannerLoadList">${plannerLoadTable(p,plannerLoadSubject,plannerLoadDepartment)}</div>
     </details>
     <details><summary>4. Ограничения и предпочтения</summary>
@@ -123,7 +117,7 @@ function plannerRender(){
     </details>
     <details><summary>Ручная расстановка</summary><p class="hint">Добавьте уроки вручную или используйте автоподбор. Номер урока указывается внутри смены. Если в нагрузке закреплён кабинет, для урока необходимо выбрать тот же кабинет или оставить «Как в нагрузке».</p><form data-form="placements" class="planner-form">${select("placeLoad","Нагрузка",loadOptions)}${select("placeDay","День",dayOptions)}${select("placeLesson","Урок",numberOptions)}<label>Кабинет для урока<select id="placeRoom"><option value="">Как в нагрузке</option>${optionList(p.rooms)}</select></label><button class="btn">Поставить</button></form><ul class="planner-list planner-placements">${list("placements",x=>{const load=p.loads.find(l=>l.id===x.load_id);return `${esc(x.day)} · урок ${x.lesson} · ${esc(load?.class_name||"")}${load?.group?` · ${esc(load.group)}`:""} · ${esc(load?.subject||"")} · ${esc(load?.teacher||"")}`;})}</ul></details>
     <div class="planner-check"><b>Проверка перед публикацией</b>${plannerIssues.length?`<ul>${plannerIssues.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:p.loads.length?'<p class="tag-ok">Конфликтов и нераспределённой нагрузки нет.</p>':'<p class="hint">Для начала добавьте учебную нагрузку.</p>'}${softWarnings.length?`<p><b>Не выполнены мягкие предпочтения (${softWarnings.length}):</b></p><ul>${softWarnings.map(x=>`<li>${esc(x)}</li>`).join("")}</ul>`:""}</div></details>`;
-  plannerRoot.querySelectorAll("details:not([data-load-entry])").forEach((d,i)=>{if(openDetails[i]!==undefined)d.open=openDetails[i];});
+  plannerRoot.querySelectorAll("details:not([data-load-entry]):not([data-teacher-department])").forEach((d,i)=>{if(openDetails[i]!==undefined)d.open=openDetails[i];});
   if($("teacherLoadAdd").dataset?.empty==='true')$("teacherLoadAdd").open=true;
   const newScroll=plannerRoot.querySelector?.('.load-table-scroll');
   if(newScroll&&scrollPosition){newScroll.scrollTop=scrollPosition.top;newScroll.scrollLeft=scrollPosition.left;}
@@ -212,10 +206,20 @@ function plannerRender(){
   };
   $("plannerLoadsView").ontoggle=()=>{if($("plannerLoadsView").open)previewScheduleLoad();};
   $("scheduleLoadRefresh").onclick=previewScheduleLoad;
-  setupTeacherLoadAdd();
-  setupLoadTable();renderDepartmentTeachers();renderDepartmentClear();
+  setupTeacherLoadAdd();setupLoadTable();setupLoadControls();
+  function updateLoadGroups(){
+    const cls=$("loadClass").value,select=$("loadGroup"),previous=select.value;
+    select.innerHTML='<option value="">Весь класс</option>'+plannerProject.groups.filter(g=>g.class_name===cls).map(g=>`<option value="${esc(g.name)}">${esc(g.name)}${g.inferred?' · проверить':''}</option>`).join("");
+    if(plannerProject.groups.some(g=>g.class_name===cls&&g.name===previous))select.value=previous;
+  }
+  $("loadClass").onchange=updateLoadGroups;updateLoadGroups();
+  $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
+  $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
+}
+function setupLoadControls(){
   $("plannerLoadSubject").onchange=()=>{plannerLoadSubject=$("plannerLoadSubject").value;refreshLoadFilters();};
-  $("plannerLoadDepartment").onchange=()=>{plannerLoadDepartment=$("plannerLoadDepartment").value;refreshLoadFilters();renderDepartmentTeachers();renderDepartmentClear();};
+  $("plannerLoadDepartment").onchange=()=>{plannerLoadDepartment=$("plannerLoadDepartment").value;refreshLoadFilters();};
+  renderDepartmentClear();
   $("clearDepartmentLoad").onclick=async()=>{
     const department=plannerLoadDepartment,summary=departmentLoadSummary(plannerProject,department),button=$("clearDepartmentLoad"),info=$("clearDepartmentLoadInfo");
     if(!plannerDepartments.includes(department)||!summary.loads.length||summary.placed)return;
@@ -225,20 +229,6 @@ function plannerRender(){
     try{const result=await api('/api/admin/planner/department-load/clear',{method:'POST',body:{revision:plannerProject.revision,department}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();$("clearDepartmentLoadInfo").textContent=`Удалено записей: ${result.removed}. Опубликованное расписание не изменено.`;toast(`Удалено записей нагрузки: ${result.removed}`);}
     catch(error){info.textContent=error.message;button.disabled=false;}
   };
-  $("departmentFileForm").onsubmit=async e=>{
-    e.preventDefault();const file=$("departmentFile").files[0],department=$("departmentFileName").value,box=$("departmentFilePreview");if(!file||!department)return;
-    const form=new FormData();form.append('file',file);box.textContent='Проверяем файл…';
-    try{const result=await api('/api/admin/planner/department-file/preview',{method:'POST',form});renderDepartmentImport(result,department);}
-    catch(error){box.textContent=error.message;}
-  };
-  function updateLoadGroups(){
-    const cls=$("loadClass").value,select=$("loadGroup"),previous=select.value;
-    select.innerHTML='<option value="">Весь класс</option>'+plannerProject.groups.filter(g=>g.class_name===cls).map(g=>`<option value="${esc(g.name)}">${esc(g.name)}${g.inferred?' · проверить':''}</option>`).join("");
-    if(plannerProject.groups.some(g=>g.class_name===cls&&g.name===previous))select.value=previous;
-  }
-  $("loadClass").onchange=updateLoadGroups;updateLoadGroups();
-  $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
-  $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }
 function departmentLoadSummary(project,department){
   const teachers=project.teachers.filter(t=>(t.departments||[]).includes(department)),names=new Set(teachers.map(t=>t.name));
@@ -282,32 +272,23 @@ function setupTeacherLoadAdd(){
 }
 function refreshLoadFilters(){
   $("plannerLoadList").innerHTML=plannerLoadTable(plannerProject,plannerLoadSubject,plannerLoadDepartment);
-  setupLoadTable();setupTeacherLoadAdd();
+  setupLoadTable();setupTeacherLoadAdd();setupLoadControls();
 }
-function renderDepartmentTeachers(){
-  const teachers=plannerProject.teachers.filter(t=>plannerLoadDepartment==='__none__'?(t.departments||[]).length===0:!plannerLoadDepartment||(t.departments||[]).includes(plannerLoadDepartment));
-  const box=$("departmentTeacherList");
-  box.innerHTML=teachers.length?teachers.map(t=>`<form class="department-teacher" data-department-teacher="${esc(t.name)}"><strong>${esc(t.name)}</strong><div class="department-choices">${plannerDepartments.map(name=>`<label><input type="checkbox" name="department" value="${esc(name)}"${(t.departments||[]).includes(name)?' checked':''}> ${esc(name)}</label>`).join('')}</div><button class="btn secondary" type="submit">Сохранить кафедры</button><span role="alert" class="load-edit-error"></span></form>`).join(''):'<p class="muted">Учителей для выбранной кафедры нет.</p>';
-  box.querySelectorAll('[data-department-teacher]').forEach(form=>form.onsubmit=async e=>{
+function setupTeacherDepartmentEditor(details){
+  const teacher=plannerProject.teachers.find(t=>t.name===details.dataset.teacherDepartment),host=details.querySelector('[data-teacher-department-editor]');
+  if(!teacher||!host||host.dataset.ready)return;
+  host.innerHTML=`<form class="department-teacher">${plannerDepartments.map(name=>`<label><input type="checkbox" name="department" value="${esc(name)}"${(teacher.departments||[]).includes(name)?' checked':''}> ${esc(name)}</label>`).join('')}<button class="btn secondary" type="submit">Сохранить</button><span role="alert" class="load-edit-error"></span></form>`;
+  host.dataset.ready='1';const form=host.querySelector('form');
+  form.onsubmit=async e=>{
     e.preventDefault();const error=form.querySelector('[role="alert"]'),button=form.querySelector('button');error.textContent='';button.disabled=true;
     const departments=[...form.querySelectorAll('input[name="department"]:checked')].map(input=>input.value);
-    try{const result=await api('/api/admin/planner/teacher-departments',{method:'POST',body:{revision:plannerProject.revision,teacher:form.dataset.departmentTeacher,departments}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast('Кафедры сохранены');}
+    try{const result=await api('/api/admin/planner/teacher-departments',{method:'POST',body:{revision:plannerProject.revision,teacher:teacher.name,departments}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast('Кафедры сохранены');}
     catch(err){error.textContent=err.message;button.disabled=false;}
-  });
-}
-function renderDepartmentImport(data,department){
-  const box=$("departmentFilePreview");
-  box.innerHTML=`<p class="hint">Кафедра: ${esc(department)}. Проверьте все строки. Выберите «Пропустить» для неоднозначных записей или «Создать» только если это действительно новый учитель.</p>${data.skipped.length?`<p class="load-edit-error">Не распознаны как ФИО: ${data.skipped.map(esc).join(', ')}</p>`:''}<div class="department-import-list">${data.rows.map((row,i)=>`<label>${esc(row.source)}${row.match.suggestion?` · возможное совпадение: ${esc(row.match.suggestion)}`:''}<select data-department-match="${i}"><option value="">Пропустить</option><option value="__new__">Создать нового учителя</option>${data.teachers.map(name=>`<option value="${esc(name)}"${row.match.value===name?' selected':''}>${esc(name)}</option>`).join('')}</select></label>`).join('')}</div><button type="button" class="btn secondary" id="departmentImportApply">Сохранить выбранные сопоставления</button><div id="departmentImportError" role="alert" class="load-edit-error"></div>`;
-  $("departmentImportApply").onclick=async()=>{
-    const rows=[...box.querySelectorAll('[data-department-match]')].map(select=>({source:data.rows[Number(select.dataset.departmentMatch)].source,teacher:select.value})).filter(row=>row.teacher).map(row=>({...row,teacher:row.teacher==='__new__'?'':row.teacher}));
-    if(!rows.length){$("departmentImportError").textContent='Выберите хотя бы одного учителя.';return;}
-    if(!confirm(`Добавить выбранных учителей (${rows.length}) в кафедру «${department}»? Другие кафедры и нагрузка сохранятся.`))return;
-    try{const result=await api('/api/admin/planner/department-file/apply',{method:'POST',body:{revision:data.revision,department,rows}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast(`Добавлено в кафедру: ${result.assigned}`);}
-    catch(error){$("departmentImportError").textContent=error.message;}
   };
 }
 
 function setupLoadTable(){
+  plannerRoot.querySelectorAll('[data-teacher-department]').forEach(details=>{details.ontoggle=()=>{if(details.open)setupTeacherDepartmentEditor(details);};if(details.open)setupTeacherDepartmentEditor(details);});
   plannerRoot.querySelectorAll('[data-delete-load]').forEach(button=>button.onclick=async()=>{
     const index=Number(button.dataset.deleteLoad),load=plannerProject.loads[index];if(!load)return;
     if(!confirm(`Удалить запись нагрузки: ${load.teacher}, ${load.class_name}, ${load.subject}${load.group?' · '+load.group:''}, ${load.per_week} ч/нед? Другая нагрузка и опубликованное расписание не изменятся.`))return;
