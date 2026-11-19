@@ -5,7 +5,7 @@ from collections import Counter
 import re
 from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
-from departments import Department
+from departments import Department, NAMES
 
 DAYS = ("Пн", "Вт", "Ср", "Чт", "Пт", "Сб")
 
@@ -66,7 +66,8 @@ class Room(Named):
 
 
 class Teacher(Named):
-    departments: list[Department] = Field(default_factory=list, max_length=6)
+    departments: list[Department] = Field(default_factory=list, max_length=100)
+    is_vacancy: bool = False
 
     @field_validator("departments")
     @classmethod
@@ -130,6 +131,8 @@ class Preference(BaseModel):
 
 class Project(BaseModel):
     revision: int = Field(default=0, ge=0)
+    departments: list[Named] = Field(default_factory=lambda: [Named(name=name) for name in NAMES], max_length=100)
+    vacancy_department: str = Field(default='Вакансия',max_length=80)
     classes: list[SchoolClass] = Field(default_factory=list, max_length=500)
     teachers: list[Teacher] = Field(default_factory=list, max_length=200)
     groups: list[ClassGroup] = Field(default_factory=list, max_length=2000)
@@ -150,6 +153,12 @@ def references(project: Project) -> list[str]:
     group_keys = [(g.class_name.casefold(), g.name.casefold()) for g in project.groups]
     if len(group_keys) != len(set(group_keys)):
         errors.append("Повторяется название группы в одном классе.")
+    dept_names=[d.name.casefold() for d in project.departments]
+    if len(dept_names)!=len(set(dept_names)):errors.append("Повторяется название кафедры.")
+    department_names={d.name for d in project.departments}
+    if project.vacancy_department and project.vacancy_department not in department_names:errors.append("Кафедра вакансий отсутствует в справочнике.")
+    for teacher in project.teachers:
+        if any(d not in department_names for d in teacher.departments):errors.append(f"Учитель {teacher.name}: неизвестная кафедра.")
     class_names = {c.name for c in project.classes}
     for group in project.groups:
         if group.class_name not in class_names:
@@ -204,6 +213,10 @@ def issues(project: Project, bells: dict | None, complete: bool = False) -> list
     if errors:
         return errors
     loads = {x.id: x for x in project.loads}
+    vacancies={t.name for t in project.teachers if t.is_vacancy}
+    for load in project.loads:
+        if load.teacher in vacancies and (complete or any(p.load_id==load.id for p in project.placements)):
+            errors.append(f"{load.class_name}, {load.subject}: назначьте учителя на вакансию.")
     classes = {x.name: x for x in project.classes}
     teachers = {x.name: x for x in project.teachers}
     rooms = {x.name: x for x in project.rooms}
@@ -348,6 +361,8 @@ def teacher_gap_summary(project: Project, bells: dict | None) -> dict:
 
 
 def generate(project: Project, bells: dict | None, node_limit: int = 30000) -> tuple[Project | None, str]:
+    if any(load.teacher in {t.name for t in project.teachers if t.is_vacancy} for load in project.loads):
+        return None, "Перед автоподбором назначьте учителей на все вакансии."
     errors = issues(project, bells)
     if errors:
         return None, errors[0]

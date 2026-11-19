@@ -624,6 +624,9 @@ def planner_save(project: planner.Project, _: None = Depends(require_admin)) -> 
         if errors:
             raise HTTPException(status_code=422, detail=" ".join(errors[:5]))
         previous_project = _planner_project()
+        vacancy_names={t.name for t in project.teachers if t.is_vacancy}
+        vacancy_loads={l.id for l in project.loads if l.teacher in vacancy_names}
+        if any(x.load_id in vacancy_loads for x in project.placements):raise HTTPException(422,"Перед расстановкой назначьте учителя на вакансию.")
         old_groups={(g.class_name,g.name.casefold()) for g in previous_project.groups}
         new_groups={(g.class_name,g.name.casefold()) for g in project.groups}
         for load in project.loads:
@@ -769,10 +772,47 @@ def apply_schedule_load(body: ScheduleLoadImport, _: None = Depends(require_admi
         return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True),"added":len(rows),"duplicates":len(duplicates),"skipped":len(skipped)}
 
 
+class DepartmentCatalogChange(BaseModel):
+    revision: int = Field(ge=0)
+    action: Literal['add','rename','delete']
+    name: str = Field(default='',max_length=80)
+    new_name: str = Field(default='',max_length=80)
+
+
+@app.post("/api/admin/planner/department-catalog")
+def change_department_catalog(body: DepartmentCatalogChange, _: None = Depends(require_admin)) -> dict:
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор.")
+        name=' '.join(body.name.split());new=' '.join(body.new_name.split())
+        if body.action=='add':
+            if not new or len(new)>80:raise HTTPException(422,"Укажите название кафедры.")
+            if new in ('__none__','__create__') or any(d.name.casefold()==new.casefold() for d in p.departments):raise HTTPException(409,"Такая кафедра уже существует или название зарезервировано.")
+            if len(p.departments)>=100:raise HTTPException(422,"Достигнут предел кафедр.")
+            p.departments.append(planner.Named(name=new))
+            if not p.vacancy_department and new.casefold()=='вакансия':p.vacancy_department=new
+        else:
+            item=next((d for d in p.departments if d.name==name),None)
+            if not item:raise HTTPException(404,"Кафедра не найдена.")
+            if body.action=='rename':
+                if not new or len(new)>80:raise HTTPException(422,"Укажите название кафедры.")
+                if new in ('__none__','__create__') or any(d is not item and d.name.casefold()==new.casefold() for d in p.departments):raise HTTPException(409,"Такая кафедра уже существует или название зарезервировано.")
+                item.name=new
+                if p.vacancy_department==name:p.vacancy_department=new
+                for teacher in p.teachers:teacher.departments=[new if d==name else d for d in teacher.departments]
+            else:
+                for teacher in p.teachers:
+                    teacher.departments=[d for d in teacher.departments if d!=name]
+                p.departments.remove(item)
+                if p.vacancy_department==name:p.vacancy_department=''
+        p.revision+=1;state['planner']=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
+
+
 class DepartmentAssignment(BaseModel):
     revision: int = Field(ge=0)
     teacher: str = Field(min_length=1,max_length=80)
-    departments: list[Department] = Field(max_length=6)
+    departments: list[Department] = Field(max_length=100)
 
 
 @app.post("/api/admin/planner/teacher-departments")
@@ -783,6 +823,7 @@ def set_teacher_departments(body: DepartmentAssignment, _: None = Depends(requir
         if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор.")
         teacher=next((t for t in p.teachers if t.name==body.teacher),None)
         if not teacher:raise HTTPException(404,"Учитель не найден.")
+        if any(d not in {x.name for x in p.departments} for d in body.departments):raise HTTPException(422,"Кафедра отсутствует в справочнике.")
         teacher.departments=list(body.departments);p.revision+=1
         state["planner"]=p.model_dump();_save_state()
         return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
@@ -799,6 +840,7 @@ def clear_department_load(body: ClearDepartmentLoad, _: None = Depends(require_a
     with _planner_lock:
         p=_planner_project().model_copy(deep=True)
         if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор и повторите проверку.")
+        if body.department not in {d.name for d in p.departments}:raise HTTPException(422,"Кафедра отсутствует в справочнике.")
         teachers={t.name for t in p.teachers if body.department in t.departments}
         selected=[load for load in p.loads if load.teacher in teachers]
         ids={load.id for load in selected}
@@ -843,6 +885,7 @@ def apply_department_file(body: DepartmentImport, _: None = Depends(require_admi
     with _planner_lock:
         p=_planner_project().model_copy(deep=True)
         if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Проверьте файл заново.")
+        if body.department not in {d.name for d in p.departments}:raise HTTPException(422,"Кафедра отсутствует в справочнике.")
         byname={t.name:t for t in p.teachers};existing={t.name.casefold():t for t in p.teachers};seen=set();assigned=created=0
         for row in body.rows:
             if row.teacher:
@@ -924,6 +967,7 @@ class NewTeacherLoad(BaseModel):
     class_name: str = Field(min_length=1,max_length=80)
     subject: str = Field(min_length=1,max_length=80)
     create_teacher: bool = False
+    vacancy: bool = False
     create_subject: bool = False
     department: Department | None = None
     group: str = Field(default='',max_length=80)
@@ -937,10 +981,18 @@ def add_teacher_load(body: NewTeacherLoad, _: None = Depends(require_admin)) -> 
     with _planner_lock:
         p=_planner_project().model_copy(deep=True)
         if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор.")
-        teacher=normalize_teacher_initials(body.teacher) if body.create_teacher else body.teacher
+        if body.department and body.department not in {d.name for d in p.departments}:raise HTTPException(422,"Кафедра отсутствует в справочнике.")
+        if body.vacancy:
+            existing=next((t for t in p.teachers if t.is_vacancy),None)
+            if existing:teacher=existing.name
+            else:
+                if any(t.name.casefold()=='вакансия' for t in p.teachers):raise HTTPException(409,"В справочнике уже есть учитель с именем «Вакансия». Переименуйте его перед созданием вакансии.")
+                if len(p.teachers)>=200:raise HTTPException(422,"Достигнут предел учителей.")
+                teacher='Вакансия';p.teachers.append(planner.Teacher(name=teacher,is_vacancy=True,departments=[p.vacancy_department] if p.vacancy_department else []))
+        else:teacher=normalize_teacher_initials(body.teacher) if body.create_teacher else body.teacher
         subject=' '.join(body.subject.split()) if body.create_subject else body.subject
         if body.class_name not in {c.name for c in p.classes}:raise HTTPException(422,"Выберите класс из справочника.")
-        if body.create_teacher:
+        if body.create_teacher and not body.vacancy:
             if not teacher or len(teacher)>80:raise HTTPException(422,"Укажите ФИО учителя.")
             if any(normalize_teacher_initials(t.name).casefold()==teacher.casefold() for t in p.teachers):raise HTTPException(409,"Такой учитель уже есть в справочнике. Выберите его из списка.")
             if len(p.teachers)>=200:raise HTTPException(422,"Достигнут предел учителей.")
@@ -955,7 +1007,8 @@ def add_teacher_load(body: NewTeacherLoad, _: None = Depends(require_admin)) -> 
         if body.room and body.room not in {r.name for r in p.rooms}:raise HTTPException(422,"Кабинет отсутствует в справочнике.")
         if body.group and not any(g.class_name==body.class_name and g.name==body.group for g in p.groups):raise HTTPException(422,"Группа отсутствует в справочнике этого класса.")
         peers=[x for x in p.loads if x.class_name==body.class_name and x.subject==subject]
-        if any(x.teacher==teacher for x in peers):raise HTTPException(409,"У этого учителя уже есть нагрузка по выбранным классу и предмету. Измените существующую запись.")
+        is_vacancy=any(t.name==teacher and t.is_vacancy for t in p.teachers)
+        if any(x.teacher==teacher and (not is_vacancy or x.group.casefold()==body.group.casefold()) for x in peers):raise HTTPException(409,"Такая нагрузка у учителя или вакансии уже есть. Измените существующую запись.")
         if peers and (not body.group or any(not x.group for x in peers)):raise HTTPException(409,"Для нескольких учителей одного предмета укажите разные группы во всех записях нагрузки.")
         if body.group and any(x.group.casefold()==body.group.casefold() for x in peers):raise HTTPException(409,"Эта группа уже назначена другому учителю по этому предмету.")
         if len(p.loads)>=10000:raise HTTPException(422,"Достигнут предел записей нагрузки.")

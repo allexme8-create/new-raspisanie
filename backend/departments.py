@@ -1,11 +1,12 @@
 """Departments and safe extraction of teacher names from workload tables."""
 import re
-from typing import Literal, get_args
+from typing import Annotated
+from pydantic import Field
 import load_import
 from schedule_parser import read_rows, ParseError
 
-Department = Literal['Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура', 'Иностранные языки']
-NAMES = get_args(Department)
+Department = Annotated[str, Field(min_length=1, max_length=80)]
+NAMES = ('Филология', 'Информатика и технология', 'Естественные науки', 'Математика', 'Физическая культура', 'Иностранные языки', 'Вакансия')
 
 
 def read_teachers(buf, filename):
