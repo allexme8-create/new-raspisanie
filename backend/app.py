@@ -882,6 +882,25 @@ def clear_department_load(body: ClearDepartmentLoad, _: None = Depends(require_a
         return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True),"removed":len(selected)}
 
 
+class ClearAllLoad(BaseModel):
+    revision: int = Field(ge=0)
+
+
+@app.post("/api/admin/planner/all-load/clear")
+def clear_all_load(body: ClearAllLoad, _: None = Depends(require_admin)) -> dict:
+    """Атомарно удалить всю нагрузку черновика, включая учителей без кафедры."""
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор и повторите проверку.")
+        ids={load.id for load in p.loads}
+        placed=sum(1 for entry in p.placements if entry.load_id in ids)
+        if placed:raise HTTPException(409,f"Очистка не выполнена: в черновике расставлено уроков по нагрузке: {placed}. Сначала снимите их; данные не изменены.")
+        removed=len(p.loads)
+        if removed:
+            p.loads=[];p.revision+=1;state["planner"]=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True),"removed":removed}
+
+
 @app.post("/api/admin/planner/department-file/preview")
 async def preview_department_file(file: UploadFile = File(...), _: None = Depends(require_admin)) -> dict:
     filename=file.filename or ''
