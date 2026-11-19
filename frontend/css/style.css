@@ -433,3 +433,5 @@ footer a{color:var(--muted)}
 .load-table-controls{text-align:left;background:#fff;padding:6px;caption-side:top}.load-filter-panel{display:flex;flex-wrap:wrap;gap:8px;align-items:end}.load-filter-panel label{display:block;min-width:150px;flex:1}.load-table-controls .hint{margin:4px 0}.load-table th[scope=rowgroup] details label{display:block;font-weight:400;font-size:12px}.load-table th[scope=rowgroup] details input{width:auto}
 
 .load-filter-panel{position:sticky;left:0;max-width:min(100%,85vw)}.load-table-controls>div.hint,.load-table-controls>p.hint{position:sticky;left:0;max-width:min(100%,85vw)}
+
+.vacancy-assign-form{display:grid;gap:4px;min-width:150px}.vacancy-assign-form select{max-width:220px}.vacancy-assign-form .btn{font-size:12px;padding:4px 6px}

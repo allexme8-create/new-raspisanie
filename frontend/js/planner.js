@@ -49,14 +49,23 @@ function plannerLoadTable(project,subject="",department=""){
   const itemCells=item=>{
     if(!item)return '<td></td><td></td><td></td>';
     const {load:x,index:i}=item;
-    return `<td>${esc(x.subject)}${x.group?`<br><small>${esc(x.group)}</small>`:''}${project.teachers.some(t=>t.name===x.teacher&&t.is_vacancy)?`<details data-vacancy-load="${i}"><summary>Назначить учителя</summary><div data-vacancy-editor></div></details>`:''}<details data-load-entry="${i}"><summary>Изменить данные</summary><div data-load-editor></div></details><button type="button" class="load-delete" data-delete-load="${i}" aria-label="Удалить нагрузку: ${esc(x.teacher)}, ${esc(x.class_name)}, ${esc(x.subject)}">Удалить строку</button><span class="load-edit-error" data-delete-error="${i}" role="alert"></span></td><td>${esc(x.class_name)}</td><td><form data-load-hours="${i}" class="load-hours-form"><input type="number" name="hours" value="${x.per_week}" min="1" max="36" required aria-label="Часов в неделю: ${esc(x.teacher)}, ${esc(x.class_name)}, ${esc(x.subject)}"><button class="btn secondary" type="submit">Сохранить</button><span class="load-edit-error" role="alert"></span></form></td>`;
+    return `<td>${esc(x.subject)}${x.group?`<br><small>${esc(x.group)}</small>`:''}<details data-load-entry="${i}"><summary>Изменить данные</summary><div data-load-editor></div></details><button type="button" class="load-delete" data-delete-load="${i}" aria-label="Удалить нагрузку: ${esc(x.teacher)}, ${esc(x.class_name)}, ${esc(x.subject)}">Удалить строку</button><span class="load-edit-error" data-delete-error="${i}" role="alert"></span></td><td>${esc(x.class_name)}</td><td><form data-load-hours="${i}" class="load-hours-form"><input type="number" name="hours" value="${x.per_week}" min="1" max="36" required aria-label="Часов в неделю: ${esc(x.teacher)}, ${esc(x.class_name)}, ${esc(x.subject)}"><button class="btn secondary" type="submit">Сохранить</button><span class="load-edit-error" role="alert"></span></form></td>`;
   };
   const total=items=>items.reduce((sum,item)=>sum+item.load.per_week,0);
-  const body=names.map((name,n)=>{
-    const teacher=teachers.get(name),count=Math.max(teacher.lower.length,teacher.upper.length,teacher.other.length,1);
+  let displayNumber=0;
+  const body=names.map(name=>{
+    const teacher=teachers.get(name),vacancy=project.teachers.some(t=>t.name===name&&t.is_vacancy);
+    if(vacancy){
+      return ['lower','upper','other'].flatMap(stage=>teacher[stage].map(item=>{
+        const load=item.load,index=item.index,search=[name,load.class_name,load.subject,load.group,load.room].join(' ').toLocaleLowerCase('ru-RU');
+        const assign=`<form data-vacancy-assign="${index}" class="vacancy-assign-form"><label class="sr-only" for="vacancy-teacher-${index}">Учитель: ${esc(load.class_name)}, ${esc(load.subject)}</label><select id="vacancy-teacher-${index}" name="teacher" required><option value="">Выберите учителя</option></select><button type="submit" class="btn secondary">Назначить</button><span class="load-edit-error" role="alert"></span></form>`;
+        return `<tbody data-load-search="${esc(search)}"><tr><td>${++displayNumber}</td><td>${assign}</td>${itemCells(stage==='lower'?item:null)}${itemCells(stage==='upper'?item:null)}${hasOther?itemCells(stage==='other'?item:null):''}<td class="load-teacher-total">${load.per_week}</td></tr></tbody>`;
+      })).join('');
+    }
+    const count=Math.max(teacher.lower.length,teacher.upper.length,teacher.other.length,1);
     const search=[name,...[...teacher.lower,...teacher.upper,...teacher.other].flatMap(({load:x})=>[x.class_name,x.subject,x.group,x.room])].join(' ').toLocaleLowerCase('ru-RU');
     let rows='';
-    for(let i=0;i<count;i++)rows+=`<tr>${i===0?`<td rowspan="${count}">${n+1}</td><th scope="rowgroup" rowspan="${count}">${esc(name)}<details data-teacher-department="${esc(name)}"><summary>Кафедры учителя</summary><div data-teacher-department-editor></div></details><button type="button" class="btn secondary load-add-shortcut" data-add-teacher="${esc(name)}">Добавить строку</button></th>`:''}${itemCells(teacher.lower[i])}${itemCells(teacher.upper[i])}${hasOther?itemCells(teacher.other[i]):''}${i===0?`<td rowspan="${count}" class="load-teacher-total">${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td>`:''}</tr>`;
+    for(let i=0;i<count;i++)rows+=`<tr>${i===0?`<td rowspan="${count}">${++displayNumber}</td><th scope="rowgroup" rowspan="${count}">${esc(name)}<details data-teacher-department="${esc(name)}"><summary>Кафедры учителя</summary><div data-teacher-department-editor></div></details><button type="button" class="btn secondary load-add-shortcut" data-add-teacher="${esc(name)}">Добавить строку</button></th>`:''}${itemCells(teacher.lower[i])}${itemCells(teacher.upper[i])}${hasOther?itemCells(teacher.other[i]):''}${i===0?`<td rowspan="${count}" class="load-teacher-total">${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td>`:''}</tr>`;
     rows+=`<tr class="load-stage-total"><td colspan="2">Итого</td><td colspan="3">${total(teacher.lower)}</td><td colspan="3">${total(teacher.upper)}</td>${hasOther?`<td colspan="3">${total(teacher.other)}</td>`:''}<td>${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td></tr>`;
     return `<tbody data-load-search="${esc(search)}">${rows}</tbody>`;
   }).join('');
@@ -290,17 +299,6 @@ function refreshLoadFilters(){
   $("plannerLoadList").innerHTML=plannerLoadTable(plannerProject,plannerLoadSubject,plannerLoadDepartment);
   setupLoadTable();setupTeacherLoadAdd();setupLoadControls();
 }
-function setupVacancyEditor(details){
-  const load=plannerProject.loads[Number(details.dataset.vacancyLoad)],host=details.querySelector('[data-vacancy-editor]');
-  if(!load||!host||host.dataset.ready)return;
-  host.innerHTML=`<form class="planner-form"><label>Учитель<select name="teacher" required><option value="">Выберите учителя</option>${optionList(plannerProject.teachers.filter(t=>!t.is_vacancy))}</select></label><button type="submit" class="btn secondary">Назначить</button><span class="load-edit-error" role="alert"></span></form>`;
-  host.dataset.ready='1';const form=host.querySelector('form');
-  form.onsubmit=async e=>{e.preventDefault();const message=form.querySelector('[role="alert"]'),button=form.querySelector('button');message.textContent='';button.disabled=true;
-    try{const result=await api('/api/admin/planner/load-change',{method:'POST',body:{revision:plannerProject.revision,load_id:load.id,teacher:form.elements.teacher.value,group:load.group||'',room:load.room||''}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast('Учитель назначен');}
-    catch(error){message.textContent=error.message;button.disabled=false;}
-  };
-}
-
 function setupTeacherDepartmentEditor(details){
   const teacher=plannerProject.teachers.find(t=>t.name===details.dataset.teacherDepartment),host=details.querySelector('[data-teacher-department-editor]');
   if(!teacher||!host||host.dataset.ready)return;
@@ -315,7 +313,15 @@ function setupTeacherDepartmentEditor(details){
 }
 
 function setupLoadTable(){
-  plannerRoot.querySelectorAll('[data-vacancy-load]').forEach(details=>{details.ontoggle=()=>{if(details.open)setupVacancyEditor(details);};if(details.open)setupVacancyEditor(details);});
+  plannerRoot.querySelectorAll('[data-vacancy-assign]').forEach(form=>{
+    const select=form.elements.teacher;
+    select.onfocus=()=>{if(select.dataset.loaded)return;select.innerHTML='<option value="">Выберите учителя</option>'+optionList(plannerProject.teachers.filter(t=>!t.is_vacancy));select.dataset.loaded='1';};
+    form.onsubmit=async e=>{e.preventDefault();const load=plannerProject.loads[Number(form.dataset.vacancyAssign)],message=form.querySelector('[role="alert"]'),button=form.querySelector('button');
+      if(!load)return;message.textContent='';if(!select.value){message.textContent='Выберите учителя.';return;}button.disabled=true;
+      try{const result=await api('/api/admin/planner/load-change',{method:'POST',body:{revision:plannerProject.revision,load_id:load.id,teacher:select.value,group:load.group||'',room:load.room||''}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast('Учитель назначен');}
+      catch(error){message.textContent=error.message;button.disabled=false;}
+    };
+  });
   plannerRoot.querySelectorAll('[data-teacher-department]').forEach(details=>{details.ontoggle=()=>{if(details.open)setupTeacherDepartmentEditor(details);};if(details.open)setupTeacherDepartmentEditor(details);});
   plannerRoot.querySelectorAll('[data-delete-load]').forEach(button=>button.onclick=async()=>{
     const index=Number(button.dataset.deleteLoad),load=plannerProject.loads[index];if(!load)return;
