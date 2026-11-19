@@ -45,7 +45,7 @@ function plannerLoadTable(project,subject="",department=""){
   const itemCells=item=>{
     if(!item)return '<td></td><td></td><td></td>';
     const {load:x,index:i}=item;
-    return `<td>${esc(x.subject)}${x.group?`<br><small>${esc(x.group)}</small>`:''}<details data-load-entry="${i}"><summary>Изменить данные</summary><div data-load-editor></div></details><button type="button" class="load-delete" data-delete-load="${i}" aria-label="Удалить нагрузку: ${esc(x.teacher)}, ${esc(x.class_name)}, ${esc(x.subject)}">Удалить строку</button><span class="load-edit-error" data-delete-error="${i}" role="alert"></span></td><td>${esc(x.class_name)}</td><td><form data-load-hours="${i}" class="load-hours-form"><input type="number" name="hours" value="${x.per_week}" min="1" max="36" required aria-label="Часов в неделю: ${esc(x.teacher)}, ${esc(x.class_name)}, ${esc(x.subject)}"><button class="btn secondary" type="submit">Сохранить</button><span class="load-edit-error" role="alert"></span></form></td>`;
+    return `<td><details data-load-entry="${i}"><summary title="Изменить предмет или группу">${esc(x.subject)}${x.group?` · ${esc(x.group)}`:''}</summary><div data-load-editor></div></details><button type="button" class="load-delete" data-delete-load="${i}" aria-label="Удалить нагрузку: ${esc(x.teacher)}, ${esc(x.class_name)}, ${esc(x.subject)}">Удалить строку</button><span class="load-edit-error" data-delete-error="${i}" role="alert"></span></td><td><button type="button" class="load-value-edit" data-edit-load-class="${i}" aria-label="Изменить класс: ${esc(x.class_name)}, ${esc(x.subject)}">${esc(x.class_name)}</button></td><td><form data-load-hours="${i}" class="load-hours-form"><input type="number" name="hours" value="${x.per_week}" min="1" max="36" required aria-label="Часов в неделю: ${esc(x.teacher)}, ${esc(x.class_name)}, ${esc(x.subject)}"><button class="btn secondary" type="submit">Сохранить</button><span class="load-edit-error" role="alert"></span></form></td>`;
   };
   const total=items=>items.reduce((sum,item)=>sum+item.load.per_week,0);
   let displayNumber=0;
@@ -61,7 +61,7 @@ function plannerLoadTable(project,subject="",department=""){
     const count=Math.max(teacher.lower.length,teacher.upper.length,teacher.other.length,1);
     const search=[name,...[...teacher.lower,...teacher.upper,...teacher.other].flatMap(({load:x})=>[x.class_name,x.subject,x.group,x.room])].join(' ').toLocaleLowerCase('ru-RU');
     let rows='';
-    for(let i=0;i<count;i++)rows+=`<tr>${i===0?`<td rowspan="${count}">${++displayNumber}</td><th scope="rowgroup" rowspan="${count}">${esc(name)}<details data-rename-load-teacher="${esc(name)}"><summary>Изменить ФИО</summary><form><label>ФИО<input name="name" maxlength="80" required value="${esc(name)}"></label><button class="btn secondary" type="submit">Сохранить</button><span role="alert" class="load-edit-error"></span></form></details><details data-teacher-department="${esc(name)}"><summary>Кафедры учителя</summary><div data-teacher-department-editor></div></details><button type="button" class="btn secondary load-add-shortcut" data-add-teacher="${esc(name)}">Добавить строку</button></th>`:''}${itemCells(teacher.lower[i])}${itemCells(teacher.upper[i])}${hasOther?itemCells(teacher.other[i]):''}${i===0?`<td rowspan="${count}" class="load-teacher-total">${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td>`:''}</tr>`;
+    for(let i=0;i<count;i++)rows+=`<tr>${i===0?`<td rowspan="${count}">${++displayNumber}</td><th scope="rowgroup" rowspan="${count}"><details data-rename-load-teacher="${esc(name)}"><summary title="Изменить ФИО">${esc(name)}</summary><form><label>ФИО<input name="name" maxlength="80" required value="${esc(name)}"></label><button class="btn secondary" type="submit">Сохранить</button><span role="alert" class="load-edit-error"></span></form></details><button type="button" class="btn secondary load-add-shortcut" data-add-teacher="${esc(name)}">Добавить строку</button></th>`:''}${itemCells(teacher.lower[i])}${itemCells(teacher.upper[i])}${hasOther?itemCells(teacher.other[i]):''}${i===0?`<td rowspan="${count}" class="load-teacher-total">${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td>`:''}</tr>`;
     rows+=`<tr class="load-stage-total"><td colspan="2">Итого</td><td colspan="3">${total(teacher.lower)}</td><td colspan="3">${total(teacher.upper)}</td>${hasOther?`<td colspan="3">${total(teacher.other)}</td>`:''}<td>${total(teacher.lower)+total(teacher.upper)+total(teacher.other)}</td></tr>`;
     return `<tbody data-load-search="${esc(search)}">${rows}</tbody>`;
   }).join('');
@@ -107,7 +107,7 @@ function plannerRender(){
     <details class="planner-load-list" id="plannerLoadsView"><summary>Просмотр и редактирование нагрузки · ${p.loads.length}</summary>
       <p class="hint">Здесь объединены загруженные и введённые вручную записи. Нагрузку из опубликованного расписания можно проверить и добавить ниже; существующие записи не перезаписываются. Для изменения класса, учителя, предмета или часов уже расставленные уроки этой нагрузки нужно сначала снять.</p>
       <button type="button" id="scheduleLoadRefresh" class="btn secondary planner-inline-import">Проверить нагрузку из текущего расписания</button><div id="scheduleLoadPreview" aria-live="polite"></div>
-      <p class="hint">Таблица показывает нагрузку черновика по учителям и ступеням, как в файле. Прокручивайте таблицу вниз и в стороны — её шапка останется на месте. Кнопка «Удалить строку» удаляет только выбранные предмет, класс и часы, даже если рядом показана другая запись. Часы можно изменить прямо в таблице; чтобы изменить предмет, класс или группу, откройте «Изменить данные». Добавьте предмет, класс и часы в новой строке таблицы; кнопка у учителя подставит его имя. ФИО можно изменить рядом с именем. Суммы рассчитываются автоматически. Поиск показывает нагрузку учителя целиком.</p>
+      <p class="hint">Таблица показывает нагрузку черновика по учителям и ступеням, как в файле. Прокручивайте таблицу вниз и в стороны — её шапка останется на месте. Кнопка «Удалить строку» удаляет только выбранные предмет, класс и часы, даже если рядом показана другая запись. Часы можно изменить прямо в таблице; нажмите на предмет, группу или класс, чтобы изменить данные. Добавьте предмет, класс и часы в новой строке таблицы; кнопка у учителя подставит его имя. Чтобы изменить ФИО, нажмите на него. Суммы рассчитываются автоматически. Поиск показывает нагрузку учителя целиком.</p>
 
       <details id="plannerLoadTableDisclosure"><summary>Показать таблицу нагрузки</summary><div id="plannerLoadList">${plannerLoadTable(p,plannerLoadSubject,plannerLoadDepartment)}</div></details>
     </details>
@@ -295,19 +295,6 @@ function refreshLoadFilters(){
   $("plannerLoadList").innerHTML=plannerLoadTable(plannerProject,plannerLoadSubject,plannerLoadDepartment);
   setupLoadTable();setupTeacherLoadAdd();setupLoadControls();
 }
-function setupTeacherDepartmentEditor(details){
-  const teacher=plannerProject.teachers.find(t=>t.name===details.dataset.teacherDepartment),host=details.querySelector('[data-teacher-department-editor]');
-  if(!teacher||!host||host.dataset.ready)return;
-  host.innerHTML=`<form class="department-teacher">${plannerDepartments.map(name=>`<label><input type="checkbox" name="department" value="${esc(name)}"${(teacher.departments||[]).includes(name)?' checked':''}> ${esc(name)}</label>`).join('')}${plannerProject.vacancy_department?`<p class="hint">Если не выбрать ни одной кафедры, учитель перейдёт в «${esc(plannerProject.vacancy_department)}».</p>`:''}<button class="btn secondary" type="submit">Сохранить</button><span role="alert" class="load-edit-error"></span></form>`;
-  host.dataset.ready='1';const form=host.querySelector('form');
-  form.onsubmit=async e=>{
-    e.preventDefault();const error=form.querySelector('[role="alert"]'),button=form.querySelector('button');error.textContent='';button.disabled=true;
-    const departments=[...form.querySelectorAll('input[name="department"]:checked')].map(input=>input.value);
-    try{const result=await api('/api/admin/planner/teacher-departments',{method:'POST',body:{revision:plannerProject.revision,teacher:teacher.name,departments}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();toast('Кафедры сохранены');}
-    catch(err){error.textContent=err.message;button.disabled=false;}
-  };
-}
-
 function setupLoadTable(){
   plannerRoot.querySelectorAll('[data-rename-load-teacher]').forEach(details=>{const form=details.querySelector('form');form.onsubmit=async e=>{e.preventDefault();const name=form.elements.name.value.trim(),message=form.querySelector('[role="alert"]'),button=form.querySelector('button');message.textContent='';if(!name)return;button.disabled=true;
     try{const result=await api('/api/admin/planner/rename/teachers',{method:'POST',body:{revision:plannerProject.revision,old_name:details.dataset.renameLoadTeacher,new_name:name}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();document.dispatchEvent(new Event('planner-catalog-changed'));toast('ФИО изменено');}
@@ -322,7 +309,7 @@ function setupLoadTable(){
       catch(error){message.textContent=error.message;button.disabled=false;}
     };
   });
-  plannerRoot.querySelectorAll('[data-teacher-department]').forEach(details=>{details.ontoggle=()=>{if(details.open)setupTeacherDepartmentEditor(details);};if(details.open)setupTeacherDepartmentEditor(details);});
+  plannerRoot.querySelectorAll('[data-edit-load-class]').forEach(button=>button.onclick=()=>{const details=button.closest('tr').querySelector(`[data-load-entry="${button.dataset.editLoadClass}"]`);if(!details)return;details.open=true;setupLoadEditor(details);details.querySelector('[name="class_name"]')?.focus();});
   plannerRoot.querySelectorAll('[data-delete-load]').forEach(button=>button.onclick=async()=>{
     const index=Number(button.dataset.deleteLoad),load=plannerProject.loads[index];if(!load)return;
     if(!confirm(`Удалить запись нагрузки: ${load.teacher}, ${load.class_name}, ${load.subject}${load.group?' · '+load.group:''}, ${load.per_week} ч/нед? Другая нагрузка и опубликованное расписание не изменятся.`))return;
