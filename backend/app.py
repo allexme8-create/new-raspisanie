@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Literal
 
 import requests
-from fastapi import Cookie, Depends, FastAPI, File, Header, HTTPException, Response, UploadFile
+from fastapi import Cookie, Depends, FastAPI, File, Form, Header, HTTPException, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -966,48 +966,90 @@ class LoadImportRequest(BaseModel):
     rows: list[LoadImportRow] = Field(min_length=1,max_length=5000)
 
 
+def _apply_load_rows(p: planner.Project, rows: list[LoadImportRow]):
+    sets={"class_name":{x.name for x in p.classes},"teacher":{x.name for x in p.teachers},"subject":{x.name for x in p.subjects}}
+    seen=set()
+    for row in rows:
+        if any(getattr(row,k) not in names for k,names in sets.items()):raise HTTPException(422,"Выберите существующие класс, учителя и предмет для каждой строки.")
+        key=(row.class_name,row.subject,row.teacher)
+        if key in seen:raise HTTPException(422,f"Повтор нагрузки: {row.class_name}, {row.subject}, {row.teacher}. Проверьте файл.")
+        seen.add(key)
+    existing={(x.class_name,x.subject,x.teacher):x for x in p.loads}
+    if len(existing)!=len(p.loads):raise HTTPException(409,"В существующей нагрузке есть одинаковые записи. Устраните дубликаты перед импортом.")
+    placed={x.load_id for x in p.placements};added=updated=0;affected=set()
+    for row in rows:
+        key=(row.class_name,row.subject,row.teacher);affected.add(key[:2])
+        if key in existing:
+            load=existing[key]
+            if load.per_week!=row.per_week and load.id in placed:raise HTTPException(409,f"Нагрузка {row.class_name} · {row.teacher} уже расставлена. Сначала снимите её уроки.")
+            if load.per_week!=row.per_week:load.per_week=row.per_week;updated+=1
+        else:
+            load=planner.Load(id=secrets.token_hex(16),class_name=row.class_name,subject=row.subject,teacher=row.teacher,room="",per_week=row.per_week)
+            p.loads.append(load);existing[key]=load;added+=1
+    for cls,subject in affected:
+        loads=[l for l in p.loads if l.class_name==cls and l.subject==subject]
+        if len(loads)<2:continue
+        used={l.group.casefold() for l in loads if l.group}
+        if len(used)!=sum(bool(l.group) for l in loads):raise HTTPException(409,f"В {cls}, {subject} повторяется группа. Исправьте существующую нагрузку.")
+        for load in loads:
+            if load.group:continue
+            if load.id in placed:raise HTTPException(409,f"Уроки {cls}, {subject} уже расставлены. Снимите их перед разделением на группы.")
+            n=1
+            while f"{n} группа".casefold() in used:n+=1
+            group=f"{n} группа";used.add(group.casefold());load.group=group
+            if not any(g.class_name==cls and g.name.casefold()==group.casefold() for g in p.groups):p.groups.append(planner.ClassGroup(name=group,class_name=cls,inferred=True))
+    try:p=planner.Project.model_validate(p.model_dump())
+    except ValueError as exc:raise HTTPException(422,"Превышены ограничения проекта.") from exc
+    errors=planner.references(p)
+    if errors:raise HTTPException(422," ".join(errors[:5]))
+
+    return p, added, updated
+
+
 @app.post("/api/admin/planner/load-import/apply")
 def apply_load_import(body: LoadImportRequest, _: None = Depends(require_admin)) -> dict:
     with _planner_lock:
         p=_planner_project().model_copy(deep=True)
         if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Загрузите файл заново.")
-        sets={"class_name":{x.name for x in p.classes},"teacher":{x.name for x in p.teachers},"subject":{x.name for x in p.subjects}}
-        seen=set()
-        for row in body.rows:
-            if any(getattr(row,k) not in names for k,names in sets.items()):raise HTTPException(422,"Выберите существующие класс, учителя и предмет для каждой строки.")
-            key=(row.class_name,row.subject,row.teacher)
-            if key in seen:raise HTTPException(422,f"Повтор нагрузки: {row.class_name}, {row.subject}, {row.teacher}. Проверьте файл.")
-            seen.add(key)
-        existing={(x.class_name,x.subject,x.teacher):x for x in p.loads}
-        if len(existing)!=len(p.loads):raise HTTPException(409,"В существующей нагрузке есть одинаковые записи. Устраните дубликаты перед импортом.")
-        placed={x.load_id for x in p.placements};added=updated=0;affected=set()
-        for row in body.rows:
-            key=(row.class_name,row.subject,row.teacher);affected.add(key[:2])
-            if key in existing:
-                load=existing[key]
-                if load.per_week!=row.per_week and load.id in placed:raise HTTPException(409,f"Нагрузка {row.class_name} · {row.teacher} уже расставлена. Сначала снимите её уроки.")
-                if load.per_week!=row.per_week:load.per_week=row.per_week;updated+=1
-            else:
-                load=planner.Load(id=secrets.token_hex(16),class_name=row.class_name,subject=row.subject,teacher=row.teacher,room="",per_week=row.per_week)
-                p.loads.append(load);existing[key]=load;added+=1
-        for cls,subject in affected:
-            loads=[l for l in p.loads if l.class_name==cls and l.subject==subject]
-            if len(loads)<2:continue
-            used={l.group.casefold() for l in loads if l.group}
-            if len(used)!=sum(bool(l.group) for l in loads):raise HTTPException(409,f"В {cls}, {subject} повторяется группа. Исправьте существующую нагрузку.")
-            for load in loads:
-                if load.group:continue
-                if load.id in placed:raise HTTPException(409,f"Уроки {cls}, {subject} уже расставлены. Снимите их перед разделением на группы.")
-                n=1
-                while f"{n} группа".casefold() in used:n+=1
-                group=f"{n} группа";used.add(group.casefold());load.group=group
-                if not any(g.class_name==cls and g.name.casefold()==group.casefold() for g in p.groups):p.groups.append(planner.ClassGroup(name=group,class_name=cls,inferred=True))
-        try:p=planner.Project.model_validate(p.model_dump())
-        except ValueError as exc:raise HTTPException(422,"Превышены ограничения проекта.") from exc
-        errors=planner.references(p)
-        if errors:raise HTTPException(422," ".join(errors[:5]))
+        p,added,updated=_apply_load_rows(p,body.rows)
         p.revision+=1;state["planner"]=p.model_dump();_save_state()
         return {"added":added,"updated":updated,"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
+
+
+@app.post("/api/admin/planner/load-import/direct")
+async def direct_load_import(file: UploadFile = File(...), revision: int = Form(ge=0), _: None = Depends(require_admin)) -> dict:
+    name=file.filename or ""
+    if name.rsplit('.',1)[-1].lower() not in {'csv','xls','xlsx','xlsm','xml','ods'}:raise HTTPException(422,"Поддерживаются CSV, XLS, XLSX, XLSM, ODS и Excel XML.")
+    buf=await file.read(10*1024*1024+1)
+    if len(buf)>10*1024*1024:raise HTTPException(413,"Файл больше 10 МБ.")
+    try:raw=load_import.parse(buf,name)
+    except (ParseError,ValueError) as exc:raise HTTPException(422,str(exc)) from exc
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=revision:raise HTTPException(409,"Черновик изменился. Обновите страницу и загрузите файл заново.")
+        created={'class_name':[], 'teacher':[], 'subject':[]};rows=[]
+        for row in raw:
+            resolved={}
+            for key,collection in [('class_name',p.classes),('teacher',p.teachers),('subject',p.subjects)]:
+                value=' '.join(row[key].split())
+                if key=='teacher':value=normalize_teacher_initials(value)
+                if not value or len(value)>80:raise HTTPException(422,f"Строка {row['line']}: недопустимое значение {key}.")
+                names=[x.name for x in collection]
+                exact=[x for x in names if load_import.norm(x)==load_import.norm(value)]
+                if len(exact)>1:raise HTTPException(422,f"Строка {row['line']}: неоднозначное совпадение «{value}». Исправьте файл или справочник.")
+                match=load_import.match(value,names)
+                if exact:resolved[key]=exact[0];continue
+                if match['suggestion']:raise HTTPException(422,f"Строка {row['line']}: «{value}» похоже на «{match['suggestion']}». Уточните название в файле или используйте проверку файла.")
+                try:
+                    if key=='class_name':item=planner.SchoolClass(name=value,shift=2 if value.casefold() in {n.casefold() for n in _second_shift_classes()} else 1)
+                    elif key=='teacher':item=planner.Teacher(name=value,departments=_vacancy_membership(p))
+                    else:item=planner.Named(name=value)
+                except ValueError as exc:raise HTTPException(422,f"Строка {row['line']}: некорректное название «{value}».") from exc
+                collection.append(item);created[key].append(item.name);resolved[key]=item.name
+            rows.append(LoadImportRow(**resolved,per_week=row['per_week']))
+        p,added,updated=_apply_load_rows(p,rows)
+        p.revision+=1;state["planner"]=p.model_dump();_save_state()
+        return {"added":added,"updated":updated,"created":created,"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
 
 
 class NewTeacherLoad(BaseModel):
