@@ -788,6 +788,28 @@ def set_teacher_departments(body: DepartmentAssignment, _: None = Depends(requir
         return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True)}
 
 
+class ClearDepartmentLoad(BaseModel):
+    revision: int = Field(ge=0)
+    department: Department
+
+
+@app.post("/api/admin/planner/department-load/clear")
+def clear_department_load(body: ClearDepartmentLoad, _: None = Depends(require_admin)) -> dict:
+    """Удалить только черновую нагрузку учителей кафедры, без частичного удаления."""
+    with _planner_lock:
+        p=_planner_project().model_copy(deep=True)
+        if p.revision!=body.revision:raise HTTPException(409,"Черновик изменился. Обновите конструктор и повторите проверку.")
+        teachers={t.name for t in p.teachers if body.department in t.departments}
+        selected=[load for load in p.loads if load.teacher in teachers]
+        ids={load.id for load in selected}
+        placed=[entry for entry in p.placements if entry.load_id in ids]
+        if placed:raise HTTPException(409,f"Очистка не выполнена: в черновике расставлено уроков по нагрузке кафедры: {len(placed)}. Сначала снимите их; другие записи не изменены.")
+        if selected:
+            p.loads=[load for load in p.loads if load.id not in ids]
+            p.revision+=1;state["planner"]=p.model_dump();_save_state()
+        return {"project":p.model_dump(),"issues":planner.issues(p,state.get("bell_schedule"),complete=True),"removed":len(selected)}
+
+
 @app.post("/api/admin/planner/department-file/preview")
 async def preview_department_file(file: UploadFile = File(...), _: None = Depends(require_admin)) -> dict:
     filename=file.filename or ''

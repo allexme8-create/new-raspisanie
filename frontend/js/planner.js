@@ -97,6 +97,7 @@ function plannerRender(){
       <p class="hint">Таблица показывает нагрузку черновика по учителям и ступеням, как в файле. Прокручивайте таблицу вниз и в стороны — её шапка останется на месте. Кнопка «Удалить строку» удаляет только выбранные предмет, класс и часы, даже если рядом показана другая запись. Часы можно изменить прямо в таблице; чтобы изменить предмет, класс или группу, откройте «Изменить данные». Новые строки можно добавить через кнопку у учителя или форму выше. Суммы рассчитываются автоматически. Поиск показывает нагрузку учителя целиком.</p>
       <details id="teacherLoadAdd"><summary>Добавить класс и часы учителю</summary><p class="hint">Выберите учителя, класс, предмет и часы в неделю. При необходимости укажите группу. Учителя без нагрузки тоже доступны.</p><form id="teacherLoadAddForm" class="planner-form"><label>Учитель<select name="teacher" required><option value="">Выберите учителя</option>${optionList(p.teachers)}</select></label><label>Класс<select name="class_name" required><option value="">Выберите класс</option>${optionList(p.classes)}</select></label><label>Предмет<select name="subject" required><option value="">Выберите предмет</option>${p.subjects.map(x=>`<option value="${esc(x.name)}"${x.name===plannerLoadSubject?' selected':''}>${esc(x.name)}</option>`).join('')}</select></label><label>Группа<select name="group"><option value="">Весь класс</option></select></label><label>Часов в неделю<input name="per_week" type="number" min="1" max="36" value="1" required></label><button class="btn secondary" type="submit">Добавить нагрузку</button><div class="load-edit-error" role="alert"></div></form></details>
       <label>Кафедра<select id="plannerLoadDepartment"><option value="">Все кафедры</option><option value="__none__"${plannerLoadDepartment==='__none__'?' selected':''}>Без кафедры</option>${plannerDepartments.map(name=>`<option value="${esc(name)}"${name===plannerLoadDepartment?' selected':''}>${esc(name)}</option>`).join('')}</select></label>
+      <button type="button" id="clearDepartmentLoad" class="btn danger planner-inline-import" disabled>Очистить нагрузку кафедры</button><div id="clearDepartmentLoadInfo" class="hint" aria-live="polite"></div>
       <details id="departmentManagement"><summary>Учителя и кафедры · просмотр и редактирование</summary><p class="hint">Учитель может состоять в нескольких кафедрах. Выберите кафедры и сохраните изменения для каждого учителя. Список справочника включает и учителей без нагрузки.</p><div id="departmentTeacherList"></div>
       <details><summary>Добавить учителей кафедры из файла</summary><p class="hint">Загрузите файл кафедры и проверьте сопоставления. Неточные совпадения не выбираются автоматически; можно выбрать учителя или явно создать нового. Нагрузка из файла не изменяется.</p><form id="departmentFileForm" class="planner-form"><label>Кафедра<select id="departmentFileName" required><option value="">Выберите кафедру</option>${plannerDepartments.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label><label>Файл<input id="departmentFile" type="file" accept=".csv,.xls,.xlsx,.xlsm,.xml,.ods" required></label><button class="btn secondary">Проверить файл</button></form><div id="departmentFilePreview" aria-live="polite"></div></details></details>
       <label>Предмет<select id="plannerLoadSubject"><option value="">Все предметы</option>${[...new Set([...p.loads.map(x=>x.subject),...(plannerLoadSubject?[plannerLoadSubject]:[])])].sort((a,b)=>a.localeCompare(b,'ru')).map(subject=>`<option value="${esc(subject)}"${subject===plannerLoadSubject?' selected':''}>${esc(subject)}</option>`).join('')}</select></label>
@@ -218,9 +219,18 @@ function plannerRender(){
     catch(error){message.textContent=error.message;button.disabled=false;}
   };
   }
-  setupLoadTable();renderDepartmentTeachers();
+  setupLoadTable();renderDepartmentTeachers();renderDepartmentClear();
   $("plannerLoadSubject").onchange=()=>{plannerLoadSubject=$("plannerLoadSubject").value;refreshLoadFilters();};
-  $("plannerLoadDepartment").onchange=()=>{plannerLoadDepartment=$("plannerLoadDepartment").value;refreshLoadFilters();renderDepartmentTeachers();};
+  $("plannerLoadDepartment").onchange=()=>{plannerLoadDepartment=$("plannerLoadDepartment").value;refreshLoadFilters();renderDepartmentTeachers();renderDepartmentClear();};
+  $("clearDepartmentLoad").onclick=async()=>{
+    const department=plannerLoadDepartment,summary=departmentLoadSummary(plannerProject,department),button=$("clearDepartmentLoad"),info=$("clearDepartmentLoadInfo");
+    if(!plannerDepartments.includes(department)||!summary.loads.length||summary.placed)return;
+    const shared=summary.shared.length?`\n\nУчителя нескольких кафедр: ${summary.shared.join(', ')}. Будет удалена вся их нагрузка, в том числе видимая в других кафедрах.`:'';
+    if(!confirm(`Очистить ВСЮ нагрузку кафедры «${department}» в черновике?\nБудет удалено записей: ${summary.loads.length}, учителей с нагрузкой: ${summary.teacherCount}. Учитываются все предметы и классы, независимо от фильтра и поиска.${shared}\n\nУчителя, состав кафедр и опубликованное расписание сохранятся. Действие нельзя отменить.`))return;
+    button.disabled=true;info.textContent='Очищаем нагрузку…';
+    try{const result=await api('/api/admin/planner/department-load/clear',{method:'POST',body:{revision:plannerProject.revision,department}});plannerProject=result.project;plannerIssues=result.issues;plannerRender();$("clearDepartmentLoadInfo").textContent=`Удалено записей: ${result.removed}. Опубликованное расписание не изменено.`;toast(`Удалено записей нагрузки: ${result.removed}`);}
+    catch(error){info.textContent=error.message;button.disabled=false;}
+  };
   $("departmentFileForm").onsubmit=async e=>{
     e.preventDefault();const file=$("departmentFile").files[0],department=$("departmentFileName").value,box=$("departmentFilePreview");if(!file||!department)return;
     const form=new FormData();form.append('file',file);box.textContent='Проверяем файл…';
@@ -236,6 +246,18 @@ function plannerRender(){
   $("plannerGenerate").onclick=async()=>{if(!confirm("Автоматически расставить оставшиеся уроки? Уже расставленные уроки сохранятся."))return; await plannerAction("generate");};
   $("plannerPublish").onclick=async()=>{if(!confirm("Заменить опубликованное расписание этим черновиком?"))return; await plannerAction("publish");};
 }
+function departmentLoadSummary(project,department){
+  const teachers=project.teachers.filter(t=>(t.departments||[]).includes(department)),names=new Set(teachers.map(t=>t.name));
+  const loads=project.loads.filter(load=>names.has(load.teacher)),ids=new Set(loads.map(load=>load.id)),active=new Set(loads.map(load=>load.teacher));
+  return {loads,teacherCount:active.size,placed:project.placements.filter(p=>ids.has(p.load_id)).length,shared:teachers.filter(t=>active.has(t.name)&&(t.departments||[]).length>1).map(t=>t.name)};
+}
+function renderDepartmentClear(){
+  const button=$("clearDepartmentLoad"),info=$("clearDepartmentLoadInfo"),department=plannerLoadDepartment;
+  if(!plannerDepartments.includes(department)){button.disabled=true;info.textContent='Выберите конкретную кафедру, чтобы проверить очистку.';return;}
+  const summary=departmentLoadSummary(plannerProject,department);button.disabled=!summary.loads.length||summary.placed>0;
+  info.textContent=`Вся нагрузка кафедры: ${summary.loads.length} записей у ${summary.teacherCount} учителей. Фильтр предмета и поиск на очистку не влияют.`+(summary.shared.length?` Учителя нескольких кафедр: ${summary.shared.join(', ')}. Будет удалена вся их нагрузка, в том числе видимая в других кафедрах.`:'')+(summary.placed?` Расставлено уроков в черновике: ${summary.placed}. Сначала снимите их; частичная очистка не выполняется.`:'')+' Состав кафедр и опубликованное расписание сохранятся.';
+}
+
 function refreshLoadFilters(){
   $("plannerLoadList").innerHTML=plannerLoadTable(plannerProject,plannerLoadSubject,plannerLoadDepartment);
   setupLoadTable();
