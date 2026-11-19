@@ -59,7 +59,7 @@ function plannerLoadTable(project,subject="",department=""){
       return ['lower','upper','other'].flatMap(stage=>teacher[stage].map(item=>{
         const load=item.load,index=item.index,search=[name,load.class_name,load.subject,load.group,load.room].join(' ').toLocaleLowerCase('ru-RU');
         const assign=`<form data-vacancy-assign="${index}" class="vacancy-assign-form"><label class="sr-only" for="vacancy-teacher-${index}">Учитель: ${esc(load.class_name)}, ${esc(load.subject)}</label><select id="vacancy-teacher-${index}" name="teacher" required><option value="">Выберите учителя</option></select><button type="submit" class="btn secondary">Назначить</button><span class="load-edit-error" role="alert"></span></form>`;
-        return `<tbody data-load-search="${esc(search)}"><tr><td>${++displayNumber}</td><td>${assign}${vacancy?'':`<small>Сейчас: ${esc(name)}</small>`}</td>${itemCells(stage==='lower'?item:null)}${itemCells(stage==='upper'?item:null)}${hasOther?itemCells(stage==='other'?item:null):''}<td class="load-teacher-total">${load.per_week}</td></tr></tbody>`;
+        return `<tbody data-load-search="${esc(search)}"><tr><td>${++displayNumber}</td><td>${assign}</td>${itemCells(stage==='lower'?item:null)}${itemCells(stage==='upper'?item:null)}${hasOther?itemCells(stage==='other'?item:null):''}<td class="load-teacher-total">${load.per_week}</td></tr></tbody>`;
       })).join('');
     }
     const count=Math.max(teacher.lower.length,teacher.upper.length,teacher.other.length,1);
