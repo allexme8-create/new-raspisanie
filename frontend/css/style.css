@@ -435,3 +435,5 @@ footer a{color:var(--muted)}
 .load-filter-panel{position:sticky;left:0;max-width:min(100%,85vw)}.load-table-controls>div.hint,.load-table-controls>p.hint{position:sticky;left:0;max-width:min(100%,85vw)}
 
 .vacancy-assign-form{display:grid;gap:4px;min-width:150px}.vacancy-assign-form select{max-width:220px}.vacancy-assign-form .btn{font-size:12px;padding:4px 6px}
+
+.load-create-row{background:#fafbfe}.load-create-row label{display:block;font-weight:400}.load-create-row select,.load-create-row input{max-width:190px;width:100%}.load-table th[scope=rowgroup] [data-rename-load-teacher] input{width:100%;max-width:190px}
