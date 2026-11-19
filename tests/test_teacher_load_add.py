@@ -21,6 +21,19 @@ class TeacherLoadAddTests(unittest.TestCase):
         self.assertEqual(p['loads'][0],before['loads'][0]);self.assertEqual(p['placements'],before['placements']);self.assertEqual(p['loads'][1]['per_week'],4);self.assertEqual(p['loads'][1]['teacher'],'Учитель Б.Б.');self.assertEqual(p['loads'][1]['group'],'2 группа')
         self.assertEqual(self.post().status_code,409)
         b={**self.body,'revision':1};self.assertEqual(self.post(b).status_code,409)
+    def test_create_teacher_and_subject_atomically_with_department(self):
+        before=copy.deepcopy(app.state['planner']);body={'revision':0,'teacher':'Новый АБ','subject':'  Новый   предмет  ','create_teacher':True,'create_subject':True,'department':'Филология','class_name':'5б','per_week':3}
+        r=self.post(body);self.assertEqual(r.status_code,200,r.text);p=r.json()['project']
+        new=next(t for t in p['teachers'] if t['name']=='Новый А.Б.');self.assertEqual(new['departments'],['Филология']);self.assertTrue(any(x['name']=='Новый предмет' for x in p['subjects']))
+        self.assertEqual(p['loads'][-1]['teacher'],'Новый А.Б.');self.assertEqual(p['loads'][-1]['subject'],'Новый предмет');self.assertEqual(p['loads'][-1]['per_week'],3);self.assertEqual(p['placements'],before['placements'])
+        self.assertEqual(self.post(body).status_code,409)
+    def test_new_names_conflicts_and_validation_leave_state_unchanged(self):
+        before=copy.deepcopy(app.state['planner']);body={'revision':0,'teacher':'Новый А.А.','subject':'Новый предмет','create_teacher':True,'create_subject':True,'department':'Филология','class_name':'5б','per_week':2}
+        for changes,status in [({'class_name':'нет'},422),({'subject':' математика '},409),({'teacher':'Учитель АА'},409),({'teacher':'  '},422),({'subject':'   '},422),({'department':'Ошибка'},422),({'group':'нет'},422)]:
+            r=self.post({**body,**changes});self.assertEqual(r.status_code,status,r.text);self.assertEqual(app.state['planner'],before)
+    def test_new_subject_existing_teacher_does_not_change_membership(self):
+        body={'revision':0,'teacher':'Учитель Б.Б.','subject':'Астрономия','create_subject':True,'department':'Филология','class_name':'5б','per_week':2}
+        r=self.post(body);self.assertEqual(r.status_code,200,r.text);p=r.json()['project'];self.assertEqual(p['teachers'][1]['departments'],[]);self.assertEqual(p['loads'][-1]['subject'],'Астрономия')
     def test_simple_add_defaults_to_unrestricted_day_and_no_fixed_room(self):
         body={k:v for k,v in self.body.items() if k not in ('max_per_day','room')}
         r=self.post(body);self.assertEqual(r.status_code,200,r.text)

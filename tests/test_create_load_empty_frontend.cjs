@@ -1,0 +1,16 @@
+const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+const els=new Map(),calls=[],error={textContent:''},submit={disabled:false};
+const fields={teacher:{value:''},new_teacher:{value:'',disabled:true,required:false},subject:{value:''},new_subject:{value:'',disabled:true,required:false},class_name:{value:'5а'},group:{value:'',innerHTML:''},per_week:{value:'3'}};
+const form={elements:fields,querySelector:s=>s==='[role="alert"]'?error:submit};
+function el(id){if(id==='teacherLoadAddForm')return form;if(!els.has(id))els.set(id,{value:'',innerHTML:'',textContent:'',hidden:false,open:false,classList:{contains:()=>false,add(){},remove(){},toggle(){}},querySelectorAll:()=>[],files:[]});return els.get(id)}
+const project={revision:4,classes:[{name:'5а',shift:1}],teachers:[],subjects:[],rooms:[],groups:[],loads:[],placements:[],preferences:[]};
+const updated={...project,revision:5,teachers:[{name:'Иванов И.И.',departments:['Филология'],unavailable:[]}],subjects:[{name:'Русский'}],loads:[{id:'new',class_name:'5а',teacher:'Иванов И.И.',subject:'Русский',per_week:3,group:'',room:''}]};
+const ctx={$:el,esc:s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),api:async(path,opts)=>{calls.push({path,opts});return {project:updated,teacher:'Иванов И.И.',issues:[]}},toast(){},confirm:()=>true,document:{dispatchEvent(){}},Event:class{},console};
+vm.createContext(ctx);vm.runInContext(fs.readFileSync('frontend/js/planner.js','utf8'),ctx);ctx.project=project;vm.runInContext('plannerProject=project;plannerIssues=[];plannerRender()',ctx);
+assert.match(el('plannerRoot').innerHTML,/Создать нагрузку/);assert.match(el('plannerRoot').innerHTML,/Добавить нового учителя/);assert.match(el('plannerRoot').innerHTML,/Добавить новый предмет/);assert.equal(el('createLoadWhenEmpty').hidden,false);
+el('plannerLoadDepartment').value='Филология';el('plannerLoadDepartment').onchange();assert.equal(el('createLoadWhenEmpty').hidden,false);el('createLoadWhenEmpty').onclick();assert.equal(el('teacherLoadAdd').open,true);
+fields.teacher.value='__create__';fields.teacher.onchange();fields.subject.value='__create__';fields.subject.onchange();assert.equal(fields.new_teacher.disabled,false);assert.equal(fields.new_teacher.required,true);assert.equal(el('newLoadTeacherWrap').hidden,false);assert.equal(fields.new_subject.disabled,false);
+fields.new_teacher.value='Иванов ИИ';fields.new_subject.value='Русский';
+(async()=>{await form.onsubmit({preventDefault(){}});assert.equal(calls[0].opts.body.create_teacher,true);assert.equal(calls[0].opts.body.create_subject,true);assert.equal(calls[0].opts.body.department,'Филология');assert.equal(calls[0].opts.body.per_week,3);assert.equal(el('createLoadWhenEmpty').hidden,true);
+ fields.teacher.value='__create__';fields.teacher.onchange();fields.teacher.value='Иванов И.И.';fields.teacher.onchange();assert.equal(fields.new_teacher.disabled,true);assert.equal(fields.new_teacher.required,false);
+ el('plannerLoadDepartment').value='Математика';el('plannerLoadDepartment').onchange();assert.equal(el('createLoadWhenEmpty').hidden,false);console.log('Empty workload creation and inline catalog UI OK')})().catch(e=>{console.error(e);process.exitCode=1});
