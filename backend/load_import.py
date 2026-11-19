@@ -64,7 +64,8 @@ def parse(buf, filename):
         triples=[]
         for j,v in enumerate(vals):
             if 'предмет' in v:
-                cls=next((k for k in range(j+1,min(len(vals),j+4)) if 'класс' in vals[k]),None)
+                combined='класс' in v
+                cls=j if combined else next((k for k in range(j+1,min(len(vals),j+4)) if 'класс' in vals[k] and 'предмет' not in vals[k]),None)
                 hrs=next((k for k in range((cls+1) if cls is not None else j+1,min(len(vals),j+6)) if 'час' in vals[k] or 'недел' in vals[k]),None)
                 if cls is not None and hrs is not None:triples.append((j,cls,hrs))
         if triples:
@@ -80,6 +81,13 @@ def parse(buf, filename):
             subject,classname,hours=val(subj),val(cls),val(hrs)
             if not subject and not classname and not hours:continue
             if not subject and not classname:continue
+            if subj==cls:
+                if re.fullmatch(r'\d+(?:[,.]\d+)?',subject) and not hours:continue  # строка итога по ступени
+                if '/' in subject:subject,classname=(part.strip() for part in subject.rsplit('/',1))
+                else:
+                    parts=re.fullmatch(r'(.+?)\s+([1-9]\d?\s*[А-Яа-яЁёA-Za-z]+)',subject)
+                    if not parts:errors.append(f'Строка {i}: укажите предмет и класс через «/».');continue
+                    subject,classname=parts.group(1).strip(),parts.group(2).strip()
             try:
                 n=float(hours.replace(',','.')); n=int(n) if n.is_integer() else 0
             except ValueError:n=0

@@ -1037,9 +1037,11 @@ async def direct_load_import(file: UploadFile = File(...), revision: int = Form(
                 names=[x.name for x in collection]
                 exact=[x for x in names if load_import.norm(x)==load_import.norm(value)]
                 if len(exact)>1:raise HTTPException(422,f"Строка {row['line']}: неоднозначное совпадение «{value}». Исправьте файл или справочник.")
+                if key=='subject' and not exact and load_import.norm(value)=='информационнаябезопасность':
+                    exact=[x for x in names if load_import.norm(x)=='информбезопасность']
                 match=load_import.match(value,names)
                 if exact:resolved[key]=exact[0];continue
-                if match['suggestion']:raise HTTPException(422,f"Строка {row['line']}: «{value}» похоже на «{match['suggestion']}». Уточните название в файле или используйте проверку файла.")
+                if key!='class_name' and match['suggestion']:raise HTTPException(422,f"Строка {row['line']}: «{value}» похоже на «{match['suggestion']}». Уточните название в файле или используйте проверку файла.")
                 try:
                     if key=='class_name':item=planner.SchoolClass(name=value,shift=2 if value.casefold() in {n.casefold() for n in _second_shift_classes()} else 1)
                     elif key=='teacher':item=planner.Teacher(name=value,departments=_vacancy_membership(p))
