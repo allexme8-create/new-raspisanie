@@ -1,4 +1,4 @@
-# Диагностика IIS для папки расписания (info_panel_1.html).
+﻿# Диагностика IIS для папки расписания (info_panel_1.html).
 # Запуск в PowerShell ОТ АДМИНИСТРАТОРА:
 #   powershell -ExecutionPolicy Bypass -File diagnose-iis.ps1
 #   powershell -ExecutionPolicy Bypass -File diagnose-iis.ps1 -SitePath C:\inetpub\wwwroot\raspisanie
@@ -127,17 +127,18 @@ if (Test-Path $appcmd) {
 }
 
 Write-Host "`n=== Подсказка по кодам ошибок ===" -ForegroundColor Cyan
-Write-Host @"
-403.14 Forbidden        -> файла info_panel_1.html нет в папке ЛИБО defaultDocument не подхватился.
-                           Проверка: открыть http://127.0.0.1/raspisanie/info_panel_1.html напрямую.
-404.0 Not Found         -> папка не там, где ждёт сайт, или опечатка в URL.
-                           Сравните PhysicalPath сайта (раздел 3) с п.4.
-404.3 Not Found         -> не установлен компонент "Статическое содержимое" (IIS-StaticContent).
-500.19 Internal Server  -> ошибка в web.config (недоступная секция/опечатка). Временно
-                           переименуйте web.config в web.config.bak и проверьте снова.
-500.21 / 500.22         -> проблема App Pool (.NET CLR), для статики не нужна; смените пул на "DefaultAppPool".
-401.3 Unauthorized      -> нет прав NTFS на папку: 
-                           icacls C:\inetpub\wwwroot\raspisanie /grant "IIS_IUSRS:(OI)(CI)R"
-503 Service Unavailable -> остановлен пул приложений или служба WAS.
-"@ -ForegroundColor DarkGray
+$hint = @(
+    '403.14 Forbidden        -> файла info_panel_1.html нет в папке ЛИБО defaultDocument не подхватился.'
+    '                           Проверка: открыть http://127.0.0.1/raspisanie/info_panel_1.html напрямую.'
+    '404.0 Not Found         -> папка не там, где ждёт сайт, или опечатка в URL.'
+    '                           Сравните PhysicalPath сайта (раздел 3) с п.4.'
+    '404.3 Not Found         -> не установлен компонент "Статическое содержимое" (IIS-StaticContent).'
+    '500.19 Internal Server  -> ошибка в web.config (недоступная секция/опечатка). Временно'
+    '                           переименуйте web.config в web.config.bak и проверьте снова.'
+    '500.21 / 500.22         -> проблема App Pool (.NET CLR), для статики не нужна; пул "DefaultAppPool".'
+    '401.3 Unauthorized      -> нет прав NTFS на папку:'
+    '                           icacls C:\inetpub\wwwroot\raspisanie /grant "IIS_IUSRS:(OI)(CI)R"'
+    '503 Service Unavailable -> остановлен пул приложений или служба WAS.'
+)
+$hint | ForEach-Object { Write-Host $_ -ForegroundColor DarkGray }
 Write-Host "`nГотово. Пришлите вывод разделов 3, 5 и 7 — по нему видно точную причину." -ForegroundColor Green
